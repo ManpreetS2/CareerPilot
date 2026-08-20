@@ -6,6 +6,7 @@ import type {
   HealthResponse,
   InterviewPrep,
   Job,
+  JobVerificationResponse,
   MatchScore,
   ParseResumeResponse,
   ScoutJobsResponse,
@@ -72,7 +73,23 @@ export const api = {
       method: "POST",
     }),
 
+  ingestJobUrl: (url: string) =>
+    request<Job>("/api/jobs/ingest-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }),
+
   getJob: (jobId: string) => request<Job>(`/api/jobs/${jobId}`),
+
+  verifyJobs: (statusFilter: string | null = "discovered") =>
+    request<JobVerificationResponse>(
+      `/api/jobs/verify?status_filter=${encodeURIComponent(statusFilter ?? "none")}`,
+      { method: "POST" },
+    ),
+
+  verifyJob: (jobId: string) =>
+    request<Job>(`/api/jobs/${jobId}/verify`, { method: "POST" }),
 
   scoreJob: (jobId: string) =>
     request<MatchScore>(`/api/jobs/${jobId}/score`, {

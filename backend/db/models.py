@@ -67,6 +67,8 @@ class JobRecord(Base):
     date_scraped: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ats: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(64), default="discovered")
+    verification_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     intelligence: Mapped["JobIntelligenceRecord | None"] = relationship(back_populates="job")
     match_scores: Mapped[list["MatchScoreRecord"]] = relationship(back_populates="job")

@@ -70,7 +70,9 @@ class Job(BaseModel):
     date_posted: date | None = None
     date_scraped: datetime | None = None
     ats: str | None = None
-    status: str = "discovered"
+    status: Literal["discovered", "verified", "flagged", "stale"] = "discovered"
+    verification_notes: str | None = None
+    verified_at: datetime | None = None
 
 
 class JobIntelligence(BaseModel):
@@ -127,6 +129,17 @@ class ParseResumeResponse(BaseModel):
 class ScoutJobsResponse(BaseModel):
     jobs: list[Job]
     note: str = "Day 1 mock response. Job discovery is not implemented yet."
+
+
+class IngestJobUrlRequest(BaseModel):
+    url: str
+
+
+class JobVerificationResponse(BaseModel):
+    jobs: list[Job]
+    verified: int = 0
+    flagged: int = 0
+    stale: int = 0
 
 
 class ApprovalRequest(BaseModel):

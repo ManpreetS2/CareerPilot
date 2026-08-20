@@ -27,5 +27,13 @@ class Settings(BaseSettings):
     backend_url: str = "http://localhost:8000"
     log_level: str = "INFO"
 
+    adzuna_app_id: str | None = None
+    adzuna_app_key: str | None = None
+    adzuna_country: str = "us"
+
+    scout_results_per_source: int = 25
+    http_timeout_seconds: float = 15.0
+    http_user_agent: str = "CareerPilotAI/0.1 (job search assistant; +https://github.com/ManpreetS2/CareerPilot)"
+
 
 settings = Settings()
