@@ -1,4 +1,7 @@
-"""Candidate-facing Day 1 mocks. No real resume parsing yet."""
+"""Legacy Day 1 mock helpers kept for fixtures/demos only.
+
+Real parse-resume flows through backend.services.candidate_profile_agent.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ from backend.schemas.schemas import (
 
 
 def mock_candidate_profile() -> CandidateProfile:
-    """Return a realistic mock profile used by /api/parse-resume."""
+    """Deterministic sample profile for non-production fixtures."""
     return CandidateProfile(
         id="cand-001",
         name="Alex Rivera",
@@ -71,9 +74,3 @@ def mock_preferences() -> TargetPreferences:
         sponsorship_required=False,
         constraints=["Summer 2027 internship preferred"],
     )
-
-
-def parse_resume_placeholder(filename: str | None = None) -> CandidateProfile:
-    """Day 1: ignore file contents and return mock data."""
-    _ = filename
-    return mock_candidate_profile()
