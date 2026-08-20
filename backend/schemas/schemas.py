@@ -129,6 +129,10 @@ class ScoutJobsResponse(BaseModel):
     note: str = "Day 1 mock response. Job discovery is not implemented yet."
 
 
+class IngestJobUrlRequest(BaseModel):
+    url: str
+
+
 class ApprovalRequest(BaseModel):
     decision: Literal["approved", "edit_requested", "rejected"]
     notes: str | None = None

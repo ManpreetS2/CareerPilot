@@ -1,82 +1,54 @@
-"""Job discovery Day 1 mocks. No scraping yet."""
+"""Job discovery — DB-backed listing. Scouting/normalization/persistence
+logic lives in job_scout_service.py; this module reads what's been stored."""
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date
 
 from fastapi import HTTPException, status
 
+from backend.db.database import SessionLocal
+from backend.db.models import JobRecord
 from backend.schemas.schemas import Job, JobIntelligence
 
-MOCK_JOBS: list[Job] = [
-    Job(
-        id="job-001",
-        title="Software Engineer Intern",
-        company="Aether Analytics",
-        location="San Francisco, CA (Hybrid)",
-        salary="$45/hr",
-        url="https://example.com/jobs/aether-swe-intern",
-        description=(
-            "Build Python services that power analytics dashboards. "
-            "Work with FastAPI, SQL, and a small React frontend."
-        ),
-        source="mock",
-        date_posted=date(2026, 8, 12),
-        date_scraped=datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc),
-        ats="Greenhouse",
-        status="verified",
-    ),
-    Job(
-        id="job-002",
-        title="Backend Intern",
-        company="Harbor Health",
-        location="Remote (US)",
-        salary="$40/hr",
-        url="https://example.com/jobs/harbor-backend-intern",
-        description=(
-            "Help maintain HIPAA-aware APIs. Python, PostgreSQL, and automated tests "
-            "are the core of the intern project."
-        ),
-        source="mock",
-        date_posted=date(2026, 8, 8),
-        date_scraped=datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc),
-        ats="Lever",
-        status="discovered",
-    ),
-    Job(
-        id="job-003",
-        title="Full-Stack Intern",
-        company="Nimbus Retail",
-        location="Austin, TX",
-        salary="$38/hr",
-        url="https://example.com/jobs/nimbus-fullstack-intern",
-        description=(
-            "Ship features across a FastAPI backend and a React storefront. "
-            "Mentorship-heavy intern program."
-        ),
-        source="mock",
-        date_posted=date(2026, 8, 1),
-        date_scraped=datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc),
-        ats="Ashby",
-        status="discovered",
-    ),
-]
+
+def record_to_job(record: JobRecord) -> Job:
+    return Job(
+        id=record.public_id,
+        title=record.title,
+        company=record.company,
+        location=record.location,
+        salary=record.salary,
+        url=record.url,
+        description=record.description,
+        source=record.source,
+        date_posted=date.fromisoformat(record.date_posted) if record.date_posted else None,
+        date_scraped=record.date_scraped,
+        ats=record.ats,
+        status=record.status,
+    )
 
 
 def list_jobs() -> list[Job]:
-    return list(MOCK_JOBS)
+    with SessionLocal() as db:
+        records = db.query(JobRecord).order_by(JobRecord.date_scraped.desc()).all()
+        return [record_to_job(record) for record in records]
 
 
 def get_job(job_id: str) -> Job:
-    for job in MOCK_JOBS:
-        if job.id == job_id:
-            return job
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' not found")
+    with SessionLocal() as db:
+        record = db.query(JobRecord).filter(JobRecord.public_id == job_id).first()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' not found")
+        return record_to_job(record)
 
 
-def scout_jobs() -> list[Job]:
-    """Day 1 placeholder for future job discovery."""
-    return list_jobs()
+def scout_jobs(query: str = "software engineer intern", location: str | None = None) -> list[Job]:
+    # Deferred import: job_scout_service imports record_to_job from this module,
+    # so the reverse import must happen at call time to avoid a circular import.
+    from backend.services.job_scout_service import run_scout
+
+    return run_scout(query=query, location=location)
 
 
 def mock_job_intelligence(job_id: str) -> JobIntelligence:

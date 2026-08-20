@@ -72,6 +72,13 @@ export const api = {
       method: "POST",
     }),
 
+  ingestJobUrl: (url: string) =>
+    request<Job>("/api/jobs/ingest-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }),
+
   getJob: (jobId: string) => request<Job>(`/api/jobs/${jobId}`),
 
   scoreJob: (jobId: string) =>
