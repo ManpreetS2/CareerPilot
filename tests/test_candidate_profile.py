@@ -405,6 +405,41 @@ def test_rewritten_metric_rejected() -> None:
     assert report.as_counts().get("removed_highlights", 0) >= 1
 
 
+def test_plain_count_cannot_support_invented_currency() -> None:
+    source = "Saved 500 engineering hours."
+    assert claim_supported("Saved $500 engineering hours.", source) is False
+
+
+def test_plain_number_cannot_support_invented_percentage() -> None:
+    source = "Improved throughput by 20 points."
+    assert claim_supported("Improved throughput by 20%.", source) is False
+
+
+def test_percentage_cannot_silently_become_plain_count() -> None:
+    source = "Improved throughput by 20%."
+    assert claim_supported("Improved throughput by 20 points.", source) is False
+
+
+def test_currency_cannot_silently_become_plain_count() -> None:
+    source = "Processed $100 requests."
+    assert claim_supported("Processed 100 requests.", source) is False
+
+
+def test_currency_comma_formatting_matches_safely() -> None:
+    source = "Reduced costs by $100,000 annually."
+    assert claim_supported("Reduced costs by $100000 annually.", source) is True
+
+
+def test_exact_supported_percentage_accepted() -> None:
+    source = "Improved throughput by 20% on checkout."
+    assert claim_supported("Improved throughput by 20% on checkout.", source) is True
+
+
+def test_rewritten_percentage_value_rejected() -> None:
+    source = "Improved throughput by 20% on checkout."
+    assert claim_supported("Improved throughput by 40% on checkout.", source) is False
+
+
 def test_nearby_fabricated_date_rejected() -> None:
     source = (
         "Alex Rivera\nSoftware Engineering Intern, Northstar Labs\n"
@@ -417,6 +452,27 @@ def test_nearby_fabricated_date_rejected() -> None:
     profile, report = validate_and_ground_profile(raw, source)
     assert profile.experience[0].start_date is None
     assert report.as_counts().get("removed_experience_dates") == 1
+
+
+def test_unit_mismatch_grounding_report_categories_only(caplog: pytest.LogCaptureFixture) -> None:
+    invented_metric = "Saved $500 engineering hours."
+    source = (
+        "Alex Rivera\nalex.rivera@example.com\n+1-555-0142\n"
+        "Software Engineering Intern, Northstar Labs\n"
+        "Saved 500 engineering hours.\n"
+        "Skills: Python\n"
+        "Campus Connect\nState University\nAWS Cloud Practitioner"
+    )
+    raw = _grounded_llm_payload()
+    raw["experience"][0]["highlights"] = [invented_metric]
+    with caplog.at_level(logging.INFO, logger="backend.services.candidate_profile_agent"):
+        profile, report = validate_and_ground_profile(raw, source)
+    assert all("$500" not in h for h in profile.experience[0].highlights)
+    assert report.as_counts().get("removed_highlights", 0) >= 1
+    blob = json.dumps(report.as_counts()) + "".join(report.rejected) + caplog.text
+    assert "$500" not in blob
+    assert invented_metric not in blob
+    assert all(key.startswith("removed_") for key in report.as_counts())
 
 
 def test_invented_metric_and_date_defense() -> None:

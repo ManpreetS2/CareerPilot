@@ -201,65 +201,115 @@ def _tokens(value: str) -> set[str]:
 _DATE_TOKEN_RE = re.compile(
     r"\b(?:\d{4}-\d{2}(?:-\d{2})?|\d{1,2}/\d{1,2}/\d{2,4})\b"
 )
-_NUMBER_TOKEN_RE = re.compile(r"\$?\d+(?:,\d{3})*(?:\.\d+)?%?")
+_CURRENCY_TOKEN_RE = re.compile(r"\$\s*\d+(?:,\d{3})*(?:\.\d+)?")
+_PERCENT_TOKEN_RE = re.compile(
+    r"\d+(?:,\d{3})*(?:\.\d+)?\s*(?:%|percent\b)",
+    flags=re.IGNORECASE,
+)
+_PLAIN_NUMBER_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
 
 
-def _extract_date_tokens(text: str) -> list[str]:
-    return _DATE_TOKEN_RE.findall(text)
+def _digits_only(num_fragment: str) -> str:
+    return re.sub(r"[^\d.]", "", num_fragment)
 
 
-def _extract_number_tokens(text: str) -> list[str]:
-    """Capture percentages, currency, decimals, and counts; skip date spans."""
-    masked = _DATE_TOKEN_RE.sub(" ", text)
-    return _NUMBER_TOKEN_RE.findall(masked)
+def _extract_typed_numeric_evidence(text: str) -> list[tuple[str, str]]:
+    """Extract (kind, canonical_value) before generic normalization strips units.
+
+    Kinds: date | currency | percent | plain. Unit invention/removal cannot alias.
+    """
+    lower = text.lower()
+    occupied = [False] * len(lower)
+    evidence: list[tuple[str, str]] = []
+
+    def _free(start: int, end: int) -> bool:
+        return all(not occupied[i] for i in range(start, end))
+
+    def _mark(start: int, end: int) -> None:
+        for i in range(start, end):
+            occupied[i] = True
+
+    for match in _DATE_TOKEN_RE.finditer(lower):
+        if _free(match.start(), match.end()):
+            evidence.append(("date", match.group(0)))
+            _mark(match.start(), match.end())
+
+    for match in _CURRENCY_TOKEN_RE.finditer(lower):
+        if _free(match.start(), match.end()):
+            evidence.append(("currency", _digits_only(match.group(0))))
+            _mark(match.start(), match.end())
+
+    for match in _PERCENT_TOKEN_RE.finditer(lower):
+        if _free(match.start(), match.end()):
+            evidence.append(("percent", _digits_only(match.group(0))))
+            _mark(match.start(), match.end())
+
+    for match in _PLAIN_NUMBER_RE.finditer(lower):
+        if _free(match.start(), match.end()):
+            evidence.append(("plain", match.group(0).replace(",", "")))
+            _mark(match.start(), match.end())
+
+    return evidence
 
 
-def _normalize_number_token(token: str) -> str:
-    return token.replace(",", "").replace("$", "").lower()
-
-
-def _mask_numeric_evidence(text: str) -> str:
-    masked = _DATE_TOKEN_RE.sub("#", text)
-    masked = _NUMBER_TOKEN_RE.sub("#", masked)
+def _mask_typed_numeric_evidence(text: str) -> str:
+    """Replace typed numeric/date spans with placeholders for context comparison."""
+    masked = text.lower()
+    masked = _DATE_TOKEN_RE.sub("#", masked)
+    masked = _CURRENCY_TOKEN_RE.sub("#", masked)
+    masked = _PERCENT_TOKEN_RE.sub("#", masked)
+    masked = _PLAIN_NUMBER_RE.sub("#", masked)
+    masked = re.sub(r"[^a-z0-9+.#/\s-]", " ", masked)
     return re.sub(r"\s+", " ", masked).strip()
 
 
-def _number_bearing_claim_supported(claim_n: str, source_n: str) -> bool:
-    """Require claim numbers/dates to match source evidence in similar context."""
-    claim_dates = _extract_date_tokens(claim_n)
-    claim_nums = [_normalize_number_token(n) for n in _extract_number_tokens(claim_n)]
-    if not claim_nums and not claim_dates:
+def _evidence_covered(required: list[tuple[str, str]], available: list[tuple[str, str]]) -> bool:
+    remaining = list(available)
+    for item in required:
+        try:
+            remaining.remove(item)
+        except ValueError:
+            return False
+    return True
+
+
+def _typed_numeric_claim_supported(claim: str, source_text: str) -> bool:
+    """Require same-kind numeric/date evidence in similar surrounding context."""
+    claim_evidence = _extract_typed_numeric_evidence(claim)
+    if not claim_evidence:
+        return False
+
+    source_evidence = _extract_typed_numeric_evidence(source_text)
+    if not _evidence_covered(claim_evidence, source_evidence):
         return False
 
     # Pure date fields (e.g. start_date) must match exactly — no nearby rewrite.
-    if claim_dates and not claim_nums and len(claim_n) <= 12:
-        return all(date in source_n for date in claim_dates)
+    if all(kind == "date" for kind, _ in claim_evidence) and len(claim.strip()) <= 12:
+        return True
 
-    if any(date not in source_n for date in claim_dates):
-        return False
-    for num in claim_nums:
-        if not re.search(rf"(?<![a-z0-9]){re.escape(num)}(?![a-z0-9])", source_n):
-            return False
+    claim_skeleton = _mask_typed_numeric_evidence(claim)
+    # Numeric/date-only claims (no lexical context) rely on typed evidence presence.
+    if not re.search(r"[a-z]", claim_skeleton):
+        return True
 
-    claim_skeleton = _mask_numeric_evidence(claim_n)
+    source_l = source_text.lower()
     window = max(len(claim_skeleton), 12)
     step = max(window // 3, 4)
-    for idx in range(0, max(len(source_n) - window + 1, 1), step):
-        chunk = source_n[idx : idx + window + 24]
-        if SequenceMatcher(None, claim_skeleton, _mask_numeric_evidence(chunk)).ratio() < 0.82:
+    for idx in range(0, max(len(source_l) - window + 1, 1), step):
+        chunk = source_l[idx : idx + window + 24]
+        if SequenceMatcher(None, claim_skeleton, _mask_typed_numeric_evidence(chunk)).ratio() < 0.82:
             continue
-        chunk_nums = [_normalize_number_token(n) for n in _extract_number_tokens(chunk)]
-        chunk_dates = _extract_date_tokens(chunk)
-        if claim_nums and not all(num in chunk_nums for num in claim_nums):
-            continue
-        if claim_dates and not all(date in chunk_dates or date in chunk for date in claim_dates):
-            continue
-        return True
+        if _evidence_covered(claim_evidence, _extract_typed_numeric_evidence(chunk)):
+            return True
     return False
 
 
 def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RATIO_THRESHOLD) -> bool:
     """Conservative evidence check: substring, token coverage, or fuzzy window match."""
+    # Typed numeric/date path runs on originals so $ / % / percent stay semantic.
+    if _extract_typed_numeric_evidence(claim):
+        return _typed_numeric_claim_supported(claim, source_text)
+
     claim_n = _normalize_for_match(claim)
     source_n = _normalize_for_match(source_text)
     if not claim_n:
@@ -269,14 +319,6 @@ def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RA
     if len(claim_n) <= SHORT_CLAIM_MAX_LEN or claim_n in {"c++", "c#", ".net", "go"}:
         pattern = rf"(?<![a-z0-9+.#]){re.escape(claim_n)}(?![a-z0-9+.#])"
         return re.search(pattern, source_n) is not None
-
-    claim_numbers = _extract_number_tokens(claim_n)
-    claim_dates = _extract_date_tokens(claim_n)
-    # Numeric/date claims never use permissive token/fuzzy fallbacks.
-    if claim_numbers or claim_dates:
-        if claim_n in source_n:
-            return True
-        return _number_bearing_claim_supported(claim_n, source_n)
 
     if claim_n in source_n:
         return True
