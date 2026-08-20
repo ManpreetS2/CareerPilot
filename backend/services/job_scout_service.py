@@ -32,6 +32,13 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _BLOCK_BOUNDARY_RE = re.compile(r"</(p|div|li|ul|ol|h[1-6])\s*>|<br\s*/?>", re.IGNORECASE)
 _ANY_TAG_RE = re.compile(r"<[^>]+>")
 
+# Placeholder used when a manually-ingested URL has no extractable meta
+# description. Exported so job_verification_service can recognize it as
+# "not actually a description" rather than judging it on length alone.
+MANUAL_INGEST_PLACEHOLDER_DESCRIPTION = (
+    "Manually added via job URL. Description not auto-extracted — verify and edit."
+)
+
 
 def _fix_mojibake(text: str) -> str:
     """Recover text double-encoded as UTF-8 (RemoteOK does this — an en-dash
@@ -161,7 +168,7 @@ def ingest_job_url(url: str) -> dict:
     description = (
         _WHITESPACE_RE.sub(" ", html.unescape(description_match.group(1)).strip())
         if description_match
-        else "Manually added via job URL. Description not auto-extracted — verify and edit."
+        else MANUAL_INGEST_PLACEHOLDER_DESCRIPTION
     )
 
     final_url = str(response.url)

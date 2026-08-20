@@ -46,6 +46,8 @@ export type TargetPreferences = {
   constraints: string[];
 };
 
+export type JobStatus = "discovered" | "verified" | "flagged" | "stale";
+
 export type Job = {
   id?: string | null;
   title: string;
@@ -58,7 +60,16 @@ export type Job = {
   date_posted?: string | null;
   date_scraped?: string | null;
   ats?: string | null;
-  status: string;
+  status: JobStatus;
+  verification_notes?: string | null;
+  verified_at?: string | null;
+};
+
+export type JobVerificationResponse = {
+  jobs: Job[];
+  verified: number;
+  flagged: number;
+  stale: number;
 };
 
 export type MatchScore = {

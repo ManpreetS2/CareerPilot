@@ -26,6 +26,8 @@ def record_to_job(record: JobRecord) -> Job:
         date_scraped=record.date_scraped,
         ats=record.ats,
         status=record.status,
+        verification_notes=record.verification_notes,
+        verified_at=record.verified_at,
     )
 
 

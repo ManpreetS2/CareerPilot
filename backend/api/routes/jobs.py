@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 
-from backend.schemas.schemas import IngestJobUrlRequest, Job, ScoutJobsResponse
+from backend.schemas.schemas import (
+    IngestJobUrlRequest,
+    Job,
+    JobVerificationResponse,
+    ScoutJobsResponse,
+)
 from backend.services.job_scout_service import JobScoutError, ingest_job_url, normalize_job, persist_jobs
 from backend.services.job_service import get_job, list_jobs, scout_jobs
+from backend.services.job_verification_service import verify_all, verify_and_store
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -49,3 +55,23 @@ def ingest_job_url_route(payload: IngestJobUrlRequest) -> Job:
 @router.get("/jobs/{job_id}", response_model=Job)
 def get_job_by_id(job_id: str) -> Job:
     return get_job(job_id)
+
+
+@router.post("/jobs/verify", response_model=JobVerificationResponse)
+def verify_jobs_route(status_filter: str | None = "discovered") -> JobVerificationResponse:
+    """Run "still open" + suspicious-posting checks. Defaults to only newly
+    discovered jobs; pass status_filter=none (or any falsy value via empty
+    string) to re-verify every job in the DB."""
+    target = None if not status_filter or status_filter.lower() == "none" else status_filter
+    jobs = verify_all(status_filter=target)
+    return JobVerificationResponse(
+        jobs=jobs,
+        verified=sum(1 for job in jobs if job.status == "verified"),
+        flagged=sum(1 for job in jobs if job.status == "flagged"),
+        stale=sum(1 for job in jobs if job.status == "stale"),
+    )
+
+
+@router.post("/jobs/{job_id}/verify", response_model=Job)
+def verify_job_route(job_id: str) -> Job:
+    return verify_and_store(job_id)

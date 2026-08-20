@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link2, RefreshCw, Search } from "lucide-react";
+import { Link2, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { JobCard } from "../components/JobCard";
@@ -13,6 +13,7 @@ export function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [scouting, setScouting] = useState(false);
   const [ingesting, setIngesting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [query, setQuery] = useState("");
   const [minMatch, setMinMatch] = useState("0");
@@ -68,6 +69,22 @@ export function JobsPage() {
       setError(err);
     } finally {
       setIngesting(false);
+    }
+  }
+
+  async function handleVerify() {
+    setError(null);
+    setVerifying(true);
+    try {
+      const result = await api.verifyJobs("discovered");
+      setJobs((prev) => {
+        const byId = new Map(result.jobs.map((job) => [job.id, job]));
+        return prev.map((job) => (job.id && byId.has(job.id) ? byId.get(job.id)! : job));
+      });
+    } catch (err) {
+      setError(err);
+    } finally {
+      setVerifying(false);
     }
   }
 
@@ -127,6 +144,10 @@ export function JobsPage() {
             <Link2 className={`h-4 w-4 ${ingesting ? "animate-pulse" : ""}`} aria-hidden />
             {ingesting ? "Adding…" : "Add Job URL"}
           </button>
+          <button type="button" className="btn-secondary" onClick={() => void handleVerify()} disabled={verifying}>
+            <ShieldCheck className={`h-4 w-4 ${verifying ? "animate-pulse" : ""}`} aria-hidden />
+            {verifying ? "Verifying…" : "Verify Jobs"}
+          </button>
         </div>
       </div>
 
@@ -178,6 +199,8 @@ export function JobsPage() {
             <option value="all">All statuses</option>
             <option value="discovered">Discovered</option>
             <option value="verified">Verified</option>
+            <option value="flagged">Flagged</option>
+            <option value="stale">Stale</option>
           </select>
         </label>
         <label className="lg:col-span-5">
