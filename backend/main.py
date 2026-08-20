@@ -1,0 +1,83 @@
+"""CareerPilot AI FastAPI entrypoint."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from backend.api.routes import applications, candidate, health, interview, jobs, scoring
+from backend.core.config import settings
+from backend.core.logging import setup_logging
+from backend.db.init_db import init_db
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    setup_logging(settings.log_level)
+    init_db()
+    logger.info("CareerPilot API started")
+    yield
+
+
+app = FastAPI(
+    title="CareerPilot AI",
+    description="AI-assisted job search copilot — Day 1 scaffold. Agent logic is mocked.",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8501",
+        "http://127.0.0.1:8501",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(health.router)
+app.include_router(candidate.router)
+app.include_router(jobs.router)
+app.include_router(scoring.router)
+app.include_router(applications.router)
+app.include_router(interview.router)
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "name": "CareerPilot AI",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled server error: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
