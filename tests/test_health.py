@@ -1,11 +1,14 @@
-"""API health and mock route tests."""
+"""API smoke tests that do not depend on live LLM calls."""
 
 from __future__ import annotations
+
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.schemas.schemas import CandidateProfile
+from tests.pdf_fixtures import SAMPLE_RESUME_TEXT, build_simple_text_pdf
 
 client = TestClient(app)
 
@@ -25,10 +28,32 @@ def test_root_returns_service_info() -> None:
 
 
 def test_parse_resume_matches_candidate_profile() -> None:
-    files = {"file": ("resume.pdf", b"%PDF-mock-resume", "application/pdf")}
-    response = client.post("/api/parse-resume", files=files)
-    assert response.status_code == 200
-    payload = response.json()
-    candidate = CandidateProfile.model_validate(payload["candidate"])
-    assert candidate.name
+    pdf_bytes = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
+    payload = {
+        "name": "Alex Rivera",
+        "email": "alex.rivera@example.com",
+        "phone": "+1-555-0142",
+        "skills": ["Python", "FastAPI"],
+        "projects": [],
+        "experience": [],
+        "education": [],
+        "certifications": [],
+        "strengths": [],
+        "evidence_links": [],
+    }
+
+    with patch(
+        "backend.services.candidate_profile_agent.extract_candidate_profile_with_llm",
+        return_value=payload,
+    ):
+        response = client.post(
+            "/api/parse-resume",
+            files={"file": ("resume.pdf", pdf_bytes, "application/pdf")},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    candidate = CandidateProfile.model_validate(body["candidate"])
+    assert candidate.name == "Alex Rivera"
     assert isinstance(candidate.skills, list)
+    assert body.get("preferences") is None
