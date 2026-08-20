@@ -145,6 +145,28 @@ def scout_remoteok(query: str | None = None) -> list[dict]:
     return listings[: settings.scout_results_per_source]
 
 
+# Free-tier ATS platforms where the subdomain is a fixed platform word
+# ("boards", "jobs") and the real company is the URL's first path segment
+# instead — the opposite of the Workday-style pattern (company.wd5....) that
+# the plain subdomain guess below handles correctly.
+_ATS_PATH_COMPANY_HOSTS = ("greenhouse.io", "lever.co")
+
+
+def _guess_company(url: str) -> str:
+    """Best-effort company name guessed from a job posting URL."""
+    parsed = urlparse(url)
+    host = parsed.netloc.removeprefix("www.")
+    if not host:
+        return "Unknown"
+
+    if any(host == ats or host.endswith(f".{ats}") for ats in _ATS_PATH_COMPANY_HOSTS):
+        segment = next((part for part in parsed.path.split("/") if part), "")
+        if segment:
+            return segment.replace("-", " ").title()
+
+    return host.split(".")[0].replace("-", " ").title()
+
+
 def ingest_job_url(url: str) -> dict:
     """Fetch a single job posting URL and return a best-effort raw record.
 
@@ -172,8 +194,7 @@ def ingest_job_url(url: str) -> dict:
     )
 
     final_url = str(response.url)
-    host = urlparse(final_url).netloc.removeprefix("www.")
-    company = host.split(".")[0].replace("-", " ").title() if host else "Unknown"
+    company = _guess_company(final_url)
 
     return {
         "title": title[:255] or url,
@@ -263,11 +284,15 @@ def _normalize_url(url: str | None) -> str:
     return urlunparse(("", netloc, path, "", "", ""))
 
 
+def _fingerprint(title: str, company: str, location: str | None) -> str:
+    return f"{title.strip().lower()}|{company.strip().lower()}|{(location or '').strip().lower()}"
+
+
 def _dedupe_key(job: Job) -> str:
     normalized_url = _normalize_url(job.url)
     if normalized_url:
         return normalized_url
-    return f"{job.title.strip().lower()}|{job.company.strip().lower()}|{(job.location or '').strip().lower()}"
+    return _fingerprint(job.title, job.company, job.location)
 
 
 def deduplicate_jobs(jobs: list[Job]) -> list[Job]:
@@ -287,21 +312,26 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
     stored: list[Job] = []
     with SessionLocal() as db:
         existing_records = db.query(JobRecord).all()
+        # Blank-URL records are deliberately excluded here (matching
+        # deduplicate_jobs's own fallback-to-fingerprint behavior) — without
+        # this guard, every blank-URL record would collide on the same ""
+        # key and silently overwrite each other.
         by_url = {_normalize_url(record.url): record for record in existing_records if record.url}
         by_fingerprint = {
-            f"{record.title.strip().lower()}|{record.company.strip().lower()}|{(record.location or '').strip().lower()}": record
+            _fingerprint(record.title, record.company, record.location): record
             for record in existing_records
         }
 
         for job in jobs:
             key = _dedupe_key(job)
-            existing = by_url.get(_normalize_url(job.url)) or by_fingerprint.get(key)
+            normalized_url = _normalize_url(job.url)
+            existing = (by_url.get(normalized_url) if normalized_url else None) or by_fingerprint.get(key)
 
             if existing:
                 existing.title = job.title
                 existing.company = job.company
-                existing.location = job.location
-                existing.salary = job.salary
+                existing.location = job.location or existing.location
+                existing.salary = job.salary or existing.salary
                 existing.description = job.description or existing.description
                 if job.date_posted:
                     existing.date_posted = job.date_posted.isoformat()
@@ -324,7 +354,8 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                     status=job.status,
                 )
                 db.add(record)
-                by_url[_normalize_url(record.url)] = record
+                if normalized_url:
+                    by_url[normalized_url] = record
                 by_fingerprint[key] = record
 
             db.flush()
@@ -335,6 +366,19 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
     return stored
 
 
+def _normalize_listings(raw_listings: list[dict], source: str) -> list[Job]:
+    """Normalize each raw listing, skipping (and logging) any single
+    malformed one instead of letting it take down the whole batch — a
+    provider feed having one weird record is routine, not fatal."""
+    jobs: list[Job] = []
+    for raw in raw_listings:
+        try:
+            jobs.append(normalize_job(raw, source))
+        except Exception as exc:  # noqa: BLE001 — deliberately broad, see docstring
+            logger.warning("Skipping malformed %s listing: %s", source, exc)
+    return jobs
+
+
 def run_scout(query: str, location: str | None = None) -> list[Job]:
     """Query every configured source, normalize, dedupe, and persist. Missing
     or failing sources are skipped (logged), not fatal — a scout run should
@@ -342,12 +386,12 @@ def run_scout(query: str, location: str | None = None) -> list[Job]:
     raw_jobs: list[Job] = []
 
     try:
-        raw_jobs.extend(normalize_job(raw, "remoteok") for raw in scout_remoteok(query))
+        raw_jobs.extend(_normalize_listings(scout_remoteok(query), "remoteok"))
     except JobScoutError as exc:
         logger.warning("RemoteOK scout skipped: %s", exc)
 
     try:
-        raw_jobs.extend(normalize_job(raw, "adzuna") for raw in scout_adzuna(query, location))
+        raw_jobs.extend(_normalize_listings(scout_adzuna(query, location), "adzuna"))
     except JobScoutError as exc:
         logger.warning("Adzuna scout skipped: %s", exc)
 

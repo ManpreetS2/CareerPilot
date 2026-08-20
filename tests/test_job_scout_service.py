@@ -11,6 +11,8 @@ from backend.services.job_scout_service import (
     _clean_line,
     _dedupe_key,
     _format_salary,
+    _guess_company,
+    _normalize_listings,
     _normalize_url,
     deduplicate_jobs,
     normalize_job,
@@ -123,3 +125,43 @@ def test_deduplicate_jobs_falls_back_to_fingerprint_without_url() -> None:
     job_b = normalize_job({"title": "A", "company": "Acme", "url": "", "description": ""}, "manual")
     assert _dedupe_key(job_a) == _dedupe_key(job_b)
     assert len(deduplicate_jobs([job_a, job_b])) == 1
+
+
+def test_guess_company_from_greenhouse_path_not_subdomain() -> None:
+    assert _guess_company("https://boards.greenhouse.io/acmecorp/jobs/12345") == "Acmecorp"
+    assert _guess_company("https://job-boards.greenhouse.io/acme-corp/jobs/1") == "Acme Corp"
+
+
+def test_guess_company_from_lever_path_not_subdomain() -> None:
+    assert _guess_company("https://jobs.lever.co/acmecorp/abc-123") == "Acmecorp"
+
+
+def test_guess_company_from_subdomain_for_other_hosts() -> None:
+    assert _guess_company("https://acme.wd5.myworkdayjobs.com/careers/job/1") == "Acme"
+
+
+def test_guess_company_unknown_when_no_host() -> None:
+    assert _guess_company("") == "Unknown"
+
+
+def test_normalize_listings_skips_malformed_record_not_whole_batch() -> None:
+    good = {
+        "title": "Good Job",
+        "company": {"display_name": "Acme"},
+        "redirect_url": "https://example.com/1",
+        "description": "",
+    }
+    bad = {
+        "title": "Bad Job",
+        "company": {"display_name": "Acme"},
+        "redirect_url": "https://example.com/2",
+        "salary_min": "not-a-number",
+    }
+    another_good = {
+        "title": "Another Good Job",
+        "company": {"display_name": "Acme"},
+        "redirect_url": "https://example.com/3",
+        "description": "",
+    }
+    jobs = _normalize_listings([good, bad, another_good], "adzuna")
+    assert [job.title for job in jobs] == ["Good Job", "Another Good Job"]

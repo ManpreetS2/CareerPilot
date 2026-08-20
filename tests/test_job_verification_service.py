@@ -92,6 +92,15 @@ def test_decide_verification_confirmed_closed_is_stale() -> None:
     assert notes == "404"
 
 
+def test_decide_verification_confirmed_closed_and_old_keeps_both_facts() -> None:
+    status, notes = _decide_verification(
+        suspicious=[], is_open=False, open_check_reason="404", stale_by_age=True
+    )
+    assert status == "stale"
+    assert "404" in notes
+    assert "days ago" in notes
+
+
 def test_decide_verification_uncertain_and_old_is_stale() -> None:
     status, _ = _decide_verification(
         suspicious=[], is_open=None, open_check_reason="timeout", stale_by_age=True

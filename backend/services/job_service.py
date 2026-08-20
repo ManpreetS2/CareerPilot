@@ -3,6 +3,7 @@ logic lives in job_scout_service.py; this module reads what's been stored."""
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from fastapi import HTTPException, status
@@ -11,8 +12,26 @@ from backend.db.database import SessionLocal
 from backend.db.models import JobRecord
 from backend.schemas.schemas import Job, JobIntelligence
 
+logger = logging.getLogger(__name__)
+
+# Must match Job.status's Literal in schemas.py. JobRecord.status is an
+# unconstrained DB column (no CHECK constraint), so a row can in principle
+# hold a value outside this set (manual edit, future writer, partial
+# migration) — coalescing here means one bad row degrades to "flagged"
+# instead of a Pydantic ValidationError taking down the whole jobs list.
+_VALID_JOB_STATUSES = {"discovered", "verified", "flagged", "stale"}
+
 
 def record_to_job(record: JobRecord) -> Job:
+    job_status = record.status
+    if job_status not in _VALID_JOB_STATUSES:
+        logger.warning(
+            "Job %s has out-of-domain status %r — coalescing to 'flagged'",
+            record.public_id,
+            job_status,
+        )
+        job_status = "flagged"
+
     return Job(
         id=record.public_id,
         title=record.title,
@@ -25,7 +44,7 @@ def record_to_job(record: JobRecord) -> Job:
         date_posted=date.fromisoformat(record.date_posted) if record.date_posted else None,
         date_scraped=record.date_scraped,
         ats=record.ats,
-        status=record.status,
+        status=job_status,
         verification_notes=record.verification_notes,
         verified_at=record.verified_at,
     )

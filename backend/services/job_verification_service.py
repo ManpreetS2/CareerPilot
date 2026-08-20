@@ -158,6 +158,8 @@ def _decide_verification(
         return "flagged", "Flagged for review: " + " ".join(suspicious)
 
     if is_open is False:
+        if stale_by_age:
+            return "stale", f"{open_check_reason} Also posted over {max_age_days} days ago."
         return "stale", open_check_reason
 
     if is_open is None:
@@ -212,21 +214,38 @@ def verify_and_store(job_id: str) -> Job:
 
 def verify_all(status_filter: str | None = "discovered") -> list[Job]:
     """Verify every job matching status_filter (default: only newly
-    discovered ones). Pass None to re-verify every job in the DB."""
+    discovered ones). Pass None to re-verify every job in the DB.
+
+    Reads the candidate jobs, closes that session, then runs every (slow,
+    network-bound) verify_job check before opening a second, short-lived
+    session to write the results in one batch. Deliberately not one session
+    held open across N sequential HTTP checks — on SQLite that turns a bulk
+    verify into a multi-minute write-transaction, raising the odds a
+    concurrent scout/ingest request hits "database is locked" while it runs.
+    """
     with SessionLocal() as db:
         query = db.query(JobRecord)
         if status_filter:
             query = query.filter(JobRecord.status == status_filter)
-        records = query.all()
+        jobs_to_verify = [(record.public_id, record_to_job(record)) for record in query.all()]
 
+    verified_at = None
+    results_by_id: dict[str, tuple[str, str]] = {}
+    for public_id, job in jobs_to_verify:
+        results_by_id[public_id] = verify_job(job)
+
+    if not results_by_id:
+        return []
+
+    verified_at = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        records = db.query(JobRecord).filter(JobRecord.public_id.in_(results_by_id.keys())).all()
         results: list[Job] = []
         for record in records:
-            job = record_to_job(record)
-            new_status, notes = verify_job(job)
+            new_status, notes = results_by_id[record.public_id]
             record.status = new_status
             record.verification_notes = notes
-            record.verified_at = datetime.now(timezone.utc)
+            record.verified_at = verified_at
             results.append(record_to_job(record))
-
         db.commit()
         return results
