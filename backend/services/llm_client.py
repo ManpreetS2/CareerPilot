@@ -20,6 +20,14 @@ class LLMConfigurationError(RuntimeError):
     """Raised when a provider is requested without the required API key."""
 
 
+class LLMProviderError(RuntimeError):
+    """Provider request failed after any allowed internal retry was exhausted."""
+
+
+class LLMEmptyResponseError(RuntimeError):
+    """Provider returned an empty payload (eligible for structured-output retry)."""
+
+
 class LLMClient:
     """Normalize generate() across Gemini, Anthropic, and OpenAI."""
 
@@ -90,8 +98,10 @@ class LLMClient:
                 )
                 text = getattr(response, "text", None)
                 if not text:
-                    raise RuntimeError("Gemini returned an empty response.")
+                    raise LLMEmptyResponseError("Gemini returned an empty response.")
                 return text.strip()
+            except LLMEmptyResponseError:
+                raise
             except genai_errors.APIError as exc:
                 last_error = exc
                 status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
@@ -104,14 +114,10 @@ class LLMClient:
                 # Retry once on transient provider pressure / rate limits.
                 if status in {429, 500, 503} and attempt == 0:
                     continue
-                raise RuntimeError(
-                    "Gemini provider request failed."
-                ) from exc
+                raise LLMProviderError("Gemini provider request failed.") from exc
             except Exception as exc:  # noqa: BLE001 — normalize provider failures
-                if isinstance(exc, RuntimeError):
-                    raise
-                raise RuntimeError("Gemini provider request failed.") from exc
-        raise RuntimeError("Gemini provider request failed.") from last_error
+                raise LLMProviderError("Gemini provider request failed.") from exc
+        raise LLMProviderError("Gemini provider request failed.") from last_error
 
     def _generate_anthropic(self, prompt: str, system_prompt: str | None) -> str:
         import anthropic
@@ -120,12 +126,15 @@ class LLMClient:
         kwargs: dict[str, object] = {}
         if system_prompt:
             kwargs["system"] = system_prompt
-        message = client.messages.create(
-            model=self.model,
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-            **kwargs,
-        )
+        try:
+            message = client.messages.create(
+                model=self.model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+                **kwargs,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise LLMProviderError("Anthropic provider request failed.") from exc
         parts: list[str] = []
         for block in message.content:
             text = getattr(block, "text", None)
@@ -133,7 +142,7 @@ class LLMClient:
                 parts.append(text)
         result = "".join(parts).strip()
         if not result:
-            raise RuntimeError("Anthropic returned an empty response.")
+            raise LLMEmptyResponseError("Anthropic returned an empty response.")
         return result
 
     def _generate_openai(self, prompt: str, system_prompt: str | None) -> str:
@@ -144,10 +153,13 @@ class LLMClient:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        response = client.chat.completions.create(model=self.model, messages=messages)
+        try:
+            response = client.chat.completions.create(model=self.model, messages=messages)
+        except Exception as exc:  # noqa: BLE001
+            raise LLMProviderError("OpenAI provider request failed.") from exc
         text = response.choices[0].message.content
         if not text:
-            raise RuntimeError("OpenAI returned an empty response.")
+            raise LLMEmptyResponseError("OpenAI returned an empty response.")
         return text.strip()
 
 

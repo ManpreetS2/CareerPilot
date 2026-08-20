@@ -14,7 +14,7 @@ import logging
 import re
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,13 @@ from backend.schemas.schemas import (
     Experience,
     Project,
 )
-from backend.services.llm_client import LLMClient, LLMConfigurationError, get_llm_client
+from backend.services.llm_client import (
+    LLMClient,
+    LLMConfigurationError,
+    LLMEmptyResponseError,
+    LLMProviderError,
+    get_llm_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,10 +122,61 @@ class ExtractionResult:
 
 @dataclass
 class GroundingReport:
-    rejected: list[str] = field(default_factory=list)
+    """Category-only removal accounting. Never store resume-derived values."""
 
-    def add(self, message: str) -> None:
-        self.rejected.append(message)
+    removed_emails: int = 0
+    removed_phones: int = 0
+    removed_skills: int = 0
+    removed_projects: int = 0
+    removed_project_technologies: int = 0
+    removed_project_descriptions: int = 0
+    removed_project_urls: int = 0
+    removed_experience: int = 0
+    removed_experience_dates: int = 0
+    removed_highlights: int = 0
+    removed_education: int = 0
+    removed_education_fields: int = 0
+    removed_certifications: int = 0
+    removed_strengths: int = 0
+    removed_evidence_links: int = 0
+
+    def bump(self, category: str) -> None:
+        current = getattr(self, category, None)
+        if not isinstance(current, int):
+            raise KeyError(f"Unknown grounding category: {category}")
+        setattr(self, category, current + 1)
+
+    @property
+    def total_rejected(self) -> int:
+        return sum(self.as_counts().values())
+
+    @property
+    def rejected(self) -> list[str]:
+        """Backward-compatible category labels only (no resume values)."""
+        labels: list[str] = []
+        for key, count in self.as_counts().items():
+            labels.extend([key] * count)
+        return labels
+
+    def as_counts(self) -> dict[str, int]:
+        raw = {
+            "removed_emails": self.removed_emails,
+            "removed_phones": self.removed_phones,
+            "removed_skills": self.removed_skills,
+            "removed_projects": self.removed_projects,
+            "removed_project_technologies": self.removed_project_technologies,
+            "removed_project_descriptions": self.removed_project_descriptions,
+            "removed_project_urls": self.removed_project_urls,
+            "removed_experience": self.removed_experience,
+            "removed_experience_dates": self.removed_experience_dates,
+            "removed_highlights": self.removed_highlights,
+            "removed_education": self.removed_education,
+            "removed_education_fields": self.removed_education_fields,
+            "removed_certifications": self.removed_certifications,
+            "removed_strengths": self.removed_strengths,
+            "removed_evidence_links": self.removed_evidence_links,
+        }
+        return {key: value for key, value in raw.items() if value > 0}
 
 
 def normalize_whitespace(text: str) -> str:
@@ -141,6 +198,66 @@ def _tokens(value: str) -> set[str]:
     return {token for token in re.split(r"[\s/|,;]+", _normalize_for_match(value)) if len(token) > 1}
 
 
+_DATE_TOKEN_RE = re.compile(
+    r"\b(?:\d{4}-\d{2}(?:-\d{2})?|\d{1,2}/\d{1,2}/\d{2,4})\b"
+)
+_NUMBER_TOKEN_RE = re.compile(r"\$?\d+(?:,\d{3})*(?:\.\d+)?%?")
+
+
+def _extract_date_tokens(text: str) -> list[str]:
+    return _DATE_TOKEN_RE.findall(text)
+
+
+def _extract_number_tokens(text: str) -> list[str]:
+    """Capture percentages, currency, decimals, and counts; skip date spans."""
+    masked = _DATE_TOKEN_RE.sub(" ", text)
+    return _NUMBER_TOKEN_RE.findall(masked)
+
+
+def _normalize_number_token(token: str) -> str:
+    return token.replace(",", "").replace("$", "").lower()
+
+
+def _mask_numeric_evidence(text: str) -> str:
+    masked = _DATE_TOKEN_RE.sub("#", text)
+    masked = _NUMBER_TOKEN_RE.sub("#", masked)
+    return re.sub(r"\s+", " ", masked).strip()
+
+
+def _number_bearing_claim_supported(claim_n: str, source_n: str) -> bool:
+    """Require claim numbers/dates to match source evidence in similar context."""
+    claim_dates = _extract_date_tokens(claim_n)
+    claim_nums = [_normalize_number_token(n) for n in _extract_number_tokens(claim_n)]
+    if not claim_nums and not claim_dates:
+        return False
+
+    # Pure date fields (e.g. start_date) must match exactly — no nearby rewrite.
+    if claim_dates and not claim_nums and len(claim_n) <= 12:
+        return all(date in source_n for date in claim_dates)
+
+    if any(date not in source_n for date in claim_dates):
+        return False
+    for num in claim_nums:
+        if not re.search(rf"(?<![a-z0-9]){re.escape(num)}(?![a-z0-9])", source_n):
+            return False
+
+    claim_skeleton = _mask_numeric_evidence(claim_n)
+    window = max(len(claim_skeleton), 12)
+    step = max(window // 3, 4)
+    for idx in range(0, max(len(source_n) - window + 1, 1), step):
+        chunk = source_n[idx : idx + window + 24]
+        if SequenceMatcher(None, claim_skeleton, _mask_numeric_evidence(chunk)).ratio() < 0.82:
+            continue
+        chunk_nums = [_normalize_number_token(n) for n in _extract_number_tokens(chunk)]
+        chunk_dates = _extract_date_tokens(chunk)
+        if claim_nums and not all(num in chunk_nums for num in claim_nums):
+            continue
+        if claim_dates and not all(date in chunk_dates or date in chunk for date in claim_dates):
+            continue
+        return True
+    return False
+
+
 def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RATIO_THRESHOLD) -> bool:
     """Conservative evidence check: substring, token coverage, or fuzzy window match."""
     claim_n = _normalize_for_match(claim)
@@ -149,9 +266,17 @@ def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RA
         return False
 
     # Short skills (C, R, Go, …) require word-boundary style evidence.
-    if len(claim_n) <= SHORT_CLAIM_MAX_LEN:
+    if len(claim_n) <= SHORT_CLAIM_MAX_LEN or claim_n in {"c++", "c#", ".net", "go"}:
         pattern = rf"(?<![a-z0-9+.#]){re.escape(claim_n)}(?![a-z0-9+.#])"
         return re.search(pattern, source_n) is not None
+
+    claim_numbers = _extract_number_tokens(claim_n)
+    claim_dates = _extract_date_tokens(claim_n)
+    # Numeric/date claims never use permissive token/fuzzy fallbacks.
+    if claim_numbers or claim_dates:
+        if claim_n in source_n:
+            return True
+        return _number_bearing_claim_supported(claim_n, source_n)
 
     if claim_n in source_n:
         return True
@@ -339,13 +464,29 @@ RESUME TEXT:
     return system_prompt, user_prompt
 
 
+def _validate_extracted_profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Pydantic-validate structured model output without exposing ValidationError details."""
+    try:
+        CandidateProfile.model_validate(payload)
+    except ValidationError as exc:
+        raise ProfileExtractionError(
+            "The AI extraction service could not process this resume. Please try again."
+        ) from exc
+    return payload
+
+
 def extract_candidate_profile_with_llm(
     resume_text: str,
     *,
     llm: LLMClient | None = None,
     generate_fn: Callable[[str, str | None], str] | None = None,
 ) -> dict[str, Any]:
-    """Ask Gemini (or injected generator) for strict CandidateProfile JSON."""
+    """Ask Gemini (or injected generator) for strict CandidateProfile JSON.
+
+    Structured-output attempts (exactly two): empty / malformed / non-object /
+    schema-invalid JSON may retry once. Provider failures exhausted inside
+    LLMClient do not enter this retry loop.
+    """
     if not resume_text or not resume_text.strip():
         raise InvalidResumeError("Resume text is empty.")
 
@@ -360,33 +501,45 @@ def extract_candidate_profile_with_llm(
     last_error: Exception | None = None
     for attempt in range(2):
         try:
-            raw = _generate(user_prompt if attempt == 0 else _retry_prompt(user_prompt), system_prompt)
-            if not raw or not raw.strip():
-                raise ProfileExtractionError("Model returned an empty response.")
-            return _parse_profile_json(raw)
-        except InvalidResumeError:
-            raise
-        except LLMConfigurationError:
-            raise
-        except ProfileExtractionError as exc:
-            last_error = exc
-            logger.warning(
-                "candidate LLM extraction attempt %s failed: %s",
-                attempt + 1,
-                type(exc).__name__,
+            raw = _generate(
+                user_prompt if attempt == 0 else _retry_prompt(user_prompt),
+                system_prompt,
             )
-            continue
-        except Exception as exc:  # noqa: BLE001 — provider/network failures become controlled errors
+            if not raw or not str(raw).strip():
+                raise ProfileExtractionError(
+                    "The AI extraction service could not process this resume. Please try again."
+                )
+            payload = _parse_profile_json(raw)
+            return _validate_extracted_profile_payload(payload)
+        except (InvalidResumeError, LLMConfigurationError):
+            raise
+        except LLMProviderError as exc:
+            # Provider retries (if any) already happened inside LLMClient.
+            raise ProfileExtractionError(
+                "The AI extraction service could not process this resume. Please try again."
+            ) from exc
+        except LLMEmptyResponseError as exc:
             last_error = ProfileExtractionError(
                 "The AI extraction service could not process this resume. Please try again."
             )
             last_error.__cause__ = exc
             logger.warning(
-                "candidate LLM extraction attempt %s failed: %s",
+                "candidate structured extraction attempt %s failed: empty_output",
+                attempt + 1,
+            )
+            continue
+        except ProfileExtractionError as exc:
+            last_error = exc
+            logger.warning(
+                "candidate structured extraction attempt %s failed: %s",
                 attempt + 1,
                 type(exc).__name__,
             )
             continue
+        except Exception as exc:  # noqa: BLE001 — unexpected provider/network errors
+            raise ProfileExtractionError(
+                "The AI extraction service could not process this resume. Please try again."
+            ) from exc
     raise ProfileExtractionError(
         "The AI extraction service could not process this resume. Please try again."
     ) from last_error
@@ -430,14 +583,14 @@ def validate_and_ground_profile(
         )
 
     if profile.email and not claim_supported(profile.email, resume_text, min_ratio=0.9):
-        report.add("Dropped unsupported email")
+        report.bump("removed_emails")
         profile.email = None
 
     if profile.phone:
         phone_digits = re.sub(r"\D", "", profile.phone)
         source_digits = re.sub(r"\D", "", resume_text)
         if len(phone_digits) < 7 or phone_digits not in source_digits:
-            report.add("Dropped unsupported phone")
+            report.bump("removed_phones")
             profile.phone = None
 
     grounded_skills: list[str] = []
@@ -445,28 +598,28 @@ def validate_and_ground_profile(
         if claim_supported(skill, resume_text):
             grounded_skills.append(skill)
         else:
-            report.add(f"Dropped unsupported skill: {skill}")
+            report.bump("removed_skills")
     profile.skills = grounded_skills
 
     grounded_projects: list[Project] = []
     for project in profile.projects:
         if not claim_supported(project.name, resume_text):
-            report.add(f"Dropped unsupported project: {project.name}")
+            report.bump("removed_projects")
             continue
         techs = []
         for tech in project.technologies:
             if claim_supported(tech, resume_text):
                 techs.append(tech)
             else:
-                report.add(f"Dropped unsupported project technology: {tech}")
+                report.bump("removed_project_technologies")
         description = project.description
         if description and not claim_supported(description, resume_text, min_ratio=0.55):
             # Keep name/techs; drop invented description rather than hallucinate detail.
-            report.add(f"Dropped unsupported project description: {project.name}")
+            report.bump("removed_project_descriptions")
             description = None
         url = project.url
         if url and not claim_supported(url, resume_text, min_ratio=0.9):
-            report.add(f"Dropped unsupported project URL: {project.name}")
+            report.bump("removed_project_urls")
             url = None
         grounded_projects.append(
             Project(name=project.name, description=description, technologies=techs, url=url)
@@ -476,24 +629,24 @@ def validate_and_ground_profile(
     grounded_experience: list[Experience] = []
     for item in profile.experience:
         if not claim_supported(item.company, resume_text) or not claim_supported(item.title, resume_text):
-            report.add(f"Dropped unsupported experience: {item.title} @ {item.company}")
+            report.bump("removed_experience")
             continue
         start = item.start_date
         end = item.end_date
         if start and not claim_supported(start, resume_text, min_ratio=0.8):
-            report.add("Dropped unsupported experience start_date")
+            report.bump("removed_experience_dates")
             start = None
         if end and end.lower() not in {"present", "current", "now"} and not claim_supported(
             end, resume_text, min_ratio=0.8
         ):
-            report.add("Dropped unsupported experience end_date")
+            report.bump("removed_experience_dates")
             end = None
         highlights: list[str] = []
         for highlight in item.highlights:
             if claim_supported(highlight, resume_text, min_ratio=0.55):
                 highlights.append(highlight)
             else:
-                report.add("Dropped unsupported experience highlight")
+                report.bump("removed_highlights")
         grounded_experience.append(
             Experience(
                 title=item.title,
@@ -508,19 +661,19 @@ def validate_and_ground_profile(
     grounded_education: list[Education] = []
     for edu in profile.education:
         if not claim_supported(edu.institution, resume_text):
-            report.add(f"Dropped unsupported education: {edu.institution}")
+            report.bump("removed_education")
             continue
         degree = edu.degree
         field = edu.field
         year = edu.graduation_year
         if degree and not claim_supported(degree, resume_text, min_ratio=0.75):
-            report.add("Dropped unsupported degree")
+            report.bump("removed_education_fields")
             degree = None
         if field and not claim_supported(field, resume_text, min_ratio=0.75):
-            report.add("Dropped unsupported field of study")
+            report.bump("removed_education_fields")
             field = None
         if year and not claim_supported(year, resume_text, min_ratio=0.9):
-            report.add("Dropped unsupported graduation year")
+            report.bump("removed_education_fields")
             year = None
         grounded_education.append(
             Education(institution=edu.institution, degree=degree, field=field, graduation_year=year)
@@ -532,7 +685,7 @@ def validate_and_ground_profile(
         if claim_supported(cert, resume_text):
             grounded_certs.append(cert)
         else:
-            report.add(f"Dropped unsupported certification: {cert}")
+            report.bump("removed_certifications")
     profile.certifications = grounded_certs
 
     grounded_strengths: list[str] = []
@@ -540,7 +693,7 @@ def validate_and_ground_profile(
         if claim_supported(strength, resume_text, min_ratio=0.7):
             grounded_strengths.append(strength)
         else:
-            report.add(f"Dropped unsupported strength: {strength}")
+            report.bump("removed_strengths")
     profile.strengths = grounded_strengths
 
     grounded_links: list[str] = []
@@ -548,10 +701,11 @@ def validate_and_ground_profile(
         if _url_in_resume(link, resume_text):
             grounded_links.append(link)
         else:
-            report.add(f"Dropped unsupported evidence link: {link}")
+            report.bump("removed_evidence_links")
     profile.evidence_links = grounded_links
 
-    logger.info("grounding rejected_claims=%s", len(report.rejected))
+    counts = report.as_counts()
+    logger.info("grounding rejected_total=%s counts=%s", report.total_rejected, counts)
     return profile, report
 
 

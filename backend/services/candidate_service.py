@@ -69,7 +69,7 @@ def mock_preferences() -> TargetPreferences:
         target_roles=["Software Engineer Intern", "Backend Engineer Intern"],
         preferred_locations=["San Francisco, CA", "Remote"],
         remote_preference="hybrid_or_remote",
-        salary_min=35,
+        salary_min=None,
         work_authorization="US Citizen",
         sponsorship_required=False,
         constraints=["Summer 2027 internship preferred"],
