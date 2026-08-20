@@ -9,15 +9,15 @@ preserving hallucinations. Do not log resume contents.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import re
-import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.parse import urlparse
 
 from pydantic import ValidationError
@@ -45,8 +45,15 @@ NEAR_EMPTY_CHAR_THRESHOLD = 40
 FUZZY_RATIO_THRESHOLD = 0.72
 TOKEN_COVERAGE_THRESHOLD = 0.6
 SHORT_CLAIM_MAX_LEN = 3
+PARENT_BLOCK_MAX_LINES = 8
+PARENT_BLOCK_PAD_LINES = 4
 ANNUAL_SALARY_MIN = 10_000
 ANNUAL_SALARY_MAX = 1_000_000
+ALLOWED_PDF_CONTENT_TYPES = {
+    "application/pdf",
+    "application/x-pdf",
+    "application/octet-stream",
+}
 
 PROFILE_JSON_SCHEMA_HINT = """
 {
@@ -340,6 +347,67 @@ def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RA
     return best >= min_ratio
 
 
+def _complete_name_supported(name: str, resume_text: str) -> bool:
+    """Require the full normalized name as one contiguous phrase in a local window."""
+    name_n = _normalize_for_match(name)
+    if not name_n:
+        return False
+    if name_n in _normalize_for_match(resume_text):
+        return True
+    lines = resume_text.splitlines()
+    for idx in range(len(lines)):
+        for span in (1, 2):
+            window = " ".join(lines[idx : idx + span])
+            if name_n in _normalize_for_match(window):
+                return True
+    return False
+
+
+def _anchor_supported(claim: str, source_text: str) -> bool:
+    """Strict support for parent anchors so nearby similar names cannot alias."""
+    claim_n = _normalize_for_match(claim)
+    source_n = _normalize_for_match(source_text)
+    if not claim_n:
+        return False
+    if claim_n in source_n:
+        return True
+    if len(claim_n) <= SHORT_CLAIM_MAX_LEN or claim_n in {"c++", "c#", ".net", "go"}:
+        pattern = rf"(?<![a-z0-9+.#]){re.escape(claim_n)}(?![a-z0-9+.#])"
+        return re.search(pattern, source_n) is not None
+    return False
+
+
+def find_parent_block(
+    resume_text: str,
+    *anchors: str,
+    max_span: int = PARENT_BLOCK_MAX_LINES,
+    pad: int = PARENT_BLOCK_PAD_LINES,
+) -> str | None:
+    """Return the smallest line-span block jointly supporting all anchors."""
+    cleaned = [anchor for anchor in anchors if anchor and str(anchor).strip()]
+    if not cleaned:
+        return None
+
+    lines = resume_text.splitlines()
+    if not lines:
+        return resume_text if all(_anchor_supported(anchor, resume_text) for anchor in cleaned) else None
+
+    best: tuple[int, int] | None = None
+    n = len(lines)
+    for start in range(n):
+        for end in range(start, min(n, start + max_span)):
+            block = "\n".join(lines[start : end + 1])
+            if all(_anchor_supported(anchor, block) for anchor in cleaned):
+                if best is None or (end - start) < (best[1] - best[0]):
+                    best = (start, end)
+    if best is None:
+        return None
+    start, end = best
+    padded_start = max(0, start - pad)
+    padded_end = min(n, end + 1 + pad)
+    return "\n".join(lines[padded_start:padded_end])
+
+
 def is_tesseract_available() -> bool:
     try:
         import pytesseract
@@ -350,12 +418,12 @@ def is_tesseract_available() -> bool:
         return False
 
 
-def extract_with_pdfplumber(pdf_path: Path) -> str:
+def extract_with_pdfplumber(pdf_source: Path | BinaryIO) -> str:
     import pdfplumber
 
     chunks: list[str] = []
     try:
-        with pdfplumber.open(pdf_path) as pdf:
+        with pdfplumber.open(pdf_source) as pdf:
             if not pdf.pages:
                 raise InvalidResumeError("PDF has no pages.")
             for page in pdf.pages:
@@ -371,7 +439,7 @@ def extract_with_pdfplumber(pdf_path: Path) -> str:
     return normalize_whitespace("\n\n".join(chunks))
 
 
-def extract_with_ocr(pdf_path: Path) -> str:
+def extract_with_ocr(pdf_source: Path | BinaryIO) -> str:
     if not is_tesseract_available():
         raise OCRUnavailableError(
             "This appears to be a scanned PDF and requires Tesseract OCR, "
@@ -383,7 +451,7 @@ def extract_with_ocr(pdf_path: Path) -> str:
 
     chunks: list[str] = []
     try:
-        with pdfplumber.open(pdf_path) as pdf:
+        with pdfplumber.open(pdf_source) as pdf:
             if not pdf.pages:
                 raise InvalidResumeError("PDF has no pages.")
             for page in pdf.pages:
@@ -413,17 +481,27 @@ def extract_with_ocr(pdf_path: Path) -> str:
     return text
 
 
-def extract_resume_text(pdf_path: Path) -> ExtractionResult:
+def extract_resume_text(pdf_source: Path | bytes | BinaryIO) -> ExtractionResult:
     """Extract resume text with pdfplumber first; OCR only when near-empty."""
-    if not pdf_path.exists():
-        raise InvalidResumeError("Resume file was not found.")
+    if isinstance(pdf_source, Path):
+        if not pdf_source.exists():
+            raise InvalidResumeError("Resume file was not found.")
+        primary: Path | BinaryIO = pdf_source
+        ocr_source: Path | BinaryIO = pdf_source
+    elif isinstance(pdf_source, (bytes, bytearray)):
+        primary = io.BytesIO(bytes(pdf_source))
+        ocr_source = io.BytesIO(bytes(pdf_source))
+    else:
+        data = pdf_source.read()
+        primary = io.BytesIO(data)
+        ocr_source = io.BytesIO(data)
 
-    text = extract_with_pdfplumber(pdf_path)
+    text = extract_with_pdfplumber(primary)
     if len(text) >= NEAR_EMPTY_CHAR_THRESHOLD:
         return ExtractionResult(text=text, method="pdfplumber")
 
     logger.info("pdfplumber extraction near-empty; attempting OCR fallback")
-    ocr_text = extract_with_ocr(pdf_path)
+    ocr_text = extract_with_ocr(ocr_source)
     return ExtractionResult(text=ocr_text, method="ocr")
 
 
@@ -438,10 +516,11 @@ def validate_pdf_upload(
     lower = filename.lower()
     if not lower.endswith(".pdf"):
         raise InvalidResumeError("Please choose a valid PDF file.")
-    if content_type:
-        normalized = content_type.split(";")[0].strip().lower()
-        if normalized not in {"application/pdf", "application/x-pdf", "application/octet-stream"}:
-            raise InvalidResumeError("Please choose a valid PDF file.")
+    if content_type is None or not str(content_type).strip():
+        raise InvalidResumeError("Please choose a valid PDF file.")
+    normalized = content_type.split(";")[0].strip().lower()
+    if normalized not in ALLOWED_PDF_CONTENT_TYPES:
+        raise InvalidResumeError("Please choose a valid PDF file.")
     if not content:
         raise InvalidResumeError("Please choose a valid PDF file.")
     if len(content) > MAX_UPLOAD_BYTES:
@@ -613,13 +692,7 @@ def validate_and_ground_profile(
             "We could not confirm a candidate name from this resume. Please try another PDF export."
         )
 
-    name_ok = claim_supported(profile.name, resume_text, min_ratio=0.55)
-    if not name_ok:
-        parts = [part for part in re.split(r"[\s,]+", profile.name) if len(part) > 1]
-        name_ok = bool(parts) and all(
-            claim_supported(part, resume_text, min_ratio=0.8) for part in parts
-        )
-    if not name_ok:
+    if not _complete_name_supported(profile.name, resume_text):
         raise ProfileGroundingError(
             "We could not confirm a candidate name from this resume. Please try another PDF export."
         )
@@ -645,22 +718,22 @@ def validate_and_ground_profile(
 
     grounded_projects: list[Project] = []
     for project in profile.projects:
-        if not claim_supported(project.name, resume_text):
+        parent = find_parent_block(resume_text, project.name, max_span=3, pad=3)
+        if parent is None:
             report.bump("removed_projects")
             continue
         techs = []
         for tech in project.technologies:
-            if claim_supported(tech, resume_text):
+            if claim_supported(tech, parent):
                 techs.append(tech)
             else:
                 report.bump("removed_project_technologies")
         description = project.description
-        if description and not claim_supported(description, resume_text, min_ratio=0.55):
-            # Keep name/techs; drop invented description rather than hallucinate detail.
+        if description and not claim_supported(description, parent, min_ratio=0.55):
             report.bump("removed_project_descriptions")
             description = None
         url = project.url
-        if url and not claim_supported(url, resume_text, min_ratio=0.9):
+        if url and not claim_supported(url, parent, min_ratio=0.9):
             report.bump("removed_project_urls")
             url = None
         grounded_projects.append(
@@ -670,22 +743,23 @@ def validate_and_ground_profile(
 
     grounded_experience: list[Experience] = []
     for item in profile.experience:
-        if not claim_supported(item.company, resume_text) or not claim_supported(item.title, resume_text):
+        parent = find_parent_block(resume_text, item.title, item.company, max_span=4, pad=2)
+        if parent is None:
             report.bump("removed_experience")
             continue
         start = item.start_date
         end = item.end_date
-        if start and not claim_supported(start, resume_text, min_ratio=0.8):
+        if start and not claim_supported(start, parent, min_ratio=0.8):
             report.bump("removed_experience_dates")
             start = None
         if end and end.lower() not in {"present", "current", "now"} and not claim_supported(
-            end, resume_text, min_ratio=0.8
+            end, parent, min_ratio=0.8
         ):
             report.bump("removed_experience_dates")
             end = None
         highlights: list[str] = []
         for highlight in item.highlights:
-            if claim_supported(highlight, resume_text, min_ratio=0.55):
+            if claim_supported(highlight, parent, min_ratio=0.55):
                 highlights.append(highlight)
             else:
                 report.bump("removed_highlights")
@@ -702,19 +776,20 @@ def validate_and_ground_profile(
 
     grounded_education: list[Education] = []
     for edu in profile.education:
-        if not claim_supported(edu.institution, resume_text):
+        parent = find_parent_block(resume_text, edu.institution, max_span=2, pad=0)
+        if parent is None:
             report.bump("removed_education")
             continue
         degree = edu.degree
         field = edu.field
         year = edu.graduation_year
-        if degree and not claim_supported(degree, resume_text, min_ratio=0.75):
+        if degree and not claim_supported(degree, parent, min_ratio=0.75):
             report.bump("removed_education_fields")
             degree = None
-        if field and not claim_supported(field, resume_text, min_ratio=0.75):
+        if field and not claim_supported(field, parent, min_ratio=0.75):
             report.bump("removed_education_fields")
             field = None
-        if year and not claim_supported(year, resume_text, min_ratio=0.9):
+        if year and not claim_supported(year, parent, min_ratio=0.9):
             report.bump("removed_education_fields")
             year = None
         grounded_education.append(
@@ -811,16 +886,12 @@ def build_candidate_profile_from_upload(
     llm: LLMClient | None = None,
     generate_fn: Callable[[str, str | None], str] | None = None,
 ) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
-    """Validate upload bytes, process via temp file, always clean up."""
+    """Validate upload bytes and process entirely in memory (no temp PDF files)."""
     validate_pdf_upload(filename, content, content_type=content_type)
-    tmp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
-            handle.write(content)
-            tmp_path = Path(handle.name)
-        return build_candidate_profile_from_pdf(
-            tmp_path, db=db, llm=llm, generate_fn=generate_fn
-        )
-    finally:
-        if tmp_path is not None:
-            tmp_path.unlink(missing_ok=True)
+    extraction = extract_resume_text(content)
+    raw = extract_candidate_profile_with_llm(
+        extraction.text, llm=llm, generate_fn=generate_fn
+    )
+    profile, report = validate_and_ground_profile(raw, extraction.text)
+    stored = persist_candidate_profile(profile, db)
+    return stored, extraction, report

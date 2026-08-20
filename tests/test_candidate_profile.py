@@ -8,12 +8,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 
-from backend.db.database import Base, engine
-from backend.db.models import Candidate
-from backend.main import app
+from backend.db.models import Candidate, TargetPreference
 from backend.schemas.schemas import CandidateProfile, TargetPreferences
 from backend.services.candidate_profile_agent import (
     MAX_UPLOAD_BYTES,
@@ -39,8 +36,6 @@ from tests.pdf_fixtures import (
     build_simple_text_pdf,
     write_simple_text_pdf,
 )
-
-client = TestClient(app)
 
 
 def _grounded_llm_payload() -> dict:
@@ -200,7 +195,7 @@ def test_ocr_unavailable_error_is_clear(tmp_path: Path) -> None:
 
 def test_invalid_non_pdf_upload_rejected() -> None:
     with pytest.raises(Exception, match="valid PDF"):
-        validate_pdf_upload("resume.txt", b"not a pdf")
+        validate_pdf_upload("resume.txt", b"not a pdf", content_type="application/pdf")
 
 
 def test_invalid_content_type_rejected() -> None:
@@ -212,10 +207,26 @@ def test_invalid_content_type_rejected() -> None:
         )
 
 
+def test_missing_content_type_rejected() -> None:
+    with pytest.raises(Exception, match="valid PDF"):
+        validate_pdf_upload("resume.pdf", b"%PDF-1.4", content_type=None)
+
+
+def test_empty_content_type_rejected() -> None:
+    with pytest.raises(Exception, match="valid PDF"):
+        validate_pdf_upload("resume.pdf", b"%PDF-1.4", content_type="")
+
+
+def test_allowed_pdf_content_types_accepted() -> None:
+    content = b"%PDF-1.4 minimal"
+    for mime in ("application/pdf", "application/x-pdf", "application/octet-stream"):
+        validate_pdf_upload("resume.pdf", content, content_type=mime)
+
+
 def test_oversized_upload_rejected() -> None:
     content = b"%PDF" + b"a" * (MAX_UPLOAD_BYTES + 10)
     with pytest.raises(Exception, match="10 MiB"):
-        validate_pdf_upload("resume.pdf", content)
+        validate_pdf_upload("resume.pdf", content, content_type="application/pdf")
 
 
 def test_valid_structured_candidate_profile_parses() -> None:
@@ -526,95 +537,224 @@ def test_grounded_real_fields_survive_validation() -> None:
     assert report.rejected == []
 
 
-def test_candidate_persistence_works() -> None:
-    TestingSession = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSession()
-    try:
-        profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
-        stored = persist_candidate_profile(profile, db)
-        assert stored.id and stored.id.startswith("cand-")
-        row = db.query(Candidate).order_by(Candidate.id.desc()).first()
-        assert row is not None
-        assert row.name == "Alex Rivera"
-        assert "Python" in row.skills
-    finally:
-        db.close()
+PARENT_CONTEXT_RESUME = """
+Alex Rivera
+alex.rivera@example.com
++1-555-0142
+
+Skills: Python, Rust, FastAPI
+
+Experience
+Backend Engineer
+Company A
+2025-01 – 2025-06
+- Built APIs for Company A.
+
+Data Analyst
+Company B
+2024-01 – 2024-06
+- Analyzed datasets for Company B.
+
+Projects
+Campus Connect
+Student-org discovery platform with search and event RSVP.
+Technologies: Python, FastAPI
+https://github.com/example/campus-connect
+
+Orbit Tracker
+Orbital analytics dashboard.
+Technologies: React
+
+Education
+State University — B.S. Computer Science, 2027
+City College — A.A. General Studies, 2024
+""".strip()
 
 
-def test_failed_extraction_creates_no_candidate_row() -> None:
-    TestingSession = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSession()
-    before = db.query(Candidate).count()
-    try:
-        with pytest.raises(ProfileExtractionError):
-            build_candidate_profile_from_upload(
-                "alex.pdf",
-                build_simple_text_pdf(SAMPLE_RESUME_TEXT),
-                db=db,
-                generate_fn=lambda _p, _s: "not-json",
-            )
-        assert db.query(Candidate).count() == before
-    finally:
-        db.close()
+def test_cross_company_title_composite_rejected() -> None:
+    raw = _grounded_llm_payload()
+    raw["experience"] = [
+        {
+            "title": "Backend Engineer",
+            "company": "Company B",
+            "start_date": "2025-01",
+            "end_date": "2025-06",
+            "highlights": ["Built APIs for Company A."],
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, PARENT_CONTEXT_RESUME)
+    assert profile.experience == []
+    assert report.as_counts().get("removed_experience") == 1
 
 
-def test_failed_grounding_creates_no_candidate_row() -> None:
-    TestingSession = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSession()
-    before = db.query(Candidate).count()
-    bad = _grounded_llm_payload()
-    bad["name"] = "Someone Not On Resume"
-    try:
-        with pytest.raises(ProfileGroundingError):
-            build_candidate_profile_from_upload(
-                "alex.pdf",
-                build_simple_text_pdf(SAMPLE_RESUME_TEXT),
-                db=db,
-                generate_fn=lambda _p, _s: json.dumps(bad),
-            )
-        assert db.query(Candidate).count() == before
-    finally:
-        db.close()
+def test_cross_job_date_nulled_inside_parent() -> None:
+    raw = _grounded_llm_payload()
+    raw["experience"] = [
+        {
+            "title": "Backend Engineer",
+            "company": "Company A",
+            "start_date": "2024-01",
+            "end_date": "2025-06",
+            "highlights": ["Built APIs for Company A."],
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, PARENT_CONTEXT_RESUME)
+    assert len(profile.experience) == 1
+    assert profile.experience[0].start_date is None
+    assert profile.experience[0].end_date == "2025-06"
+    assert report.as_counts().get("removed_experience_dates") == 1
 
 
-def test_persistence_rollback_on_failure() -> None:
-    TestingSession = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSession()
-    before = db.query(Candidate).count()
+def test_cross_job_highlight_removed() -> None:
+    raw = _grounded_llm_payload()
+    raw["experience"] = [
+        {
+            "title": "Backend Engineer",
+            "company": "Company A",
+            "start_date": "2025-01",
+            "end_date": "2025-06",
+            "highlights": ["Analyzed datasets for Company B."],
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, PARENT_CONTEXT_RESUME)
+    assert profile.experience[0].highlights == []
+    assert report.as_counts().get("removed_highlights") == 1
+
+
+def test_project_technology_from_other_section_removed() -> None:
+    raw = _grounded_llm_payload()
+    raw["projects"] = [
+        {
+            "name": "Campus Connect",
+            "description": "Student-org discovery platform with search and event RSVP.",
+            "technologies": ["Python", "Rust", "React"],
+            "url": "https://github.com/example/campus-connect",
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, PARENT_CONTEXT_RESUME)
+    assert profile.projects[0].technologies == ["Python"]
+    assert report.as_counts().get("removed_project_technologies") == 2
+
+
+def test_graduation_year_from_other_institution_removed() -> None:
+    raw = _grounded_llm_payload()
+    raw["education"] = [
+        {
+            "institution": "State University",
+            "degree": "B.S.",
+            "field": "Computer Science",
+            "graduation_year": "2024",
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, PARENT_CONTEXT_RESUME)
+    assert profile.education[0].graduation_year is None
+    assert report.as_counts().get("removed_education_fields") == 1
+
+
+def test_disjoint_name_parts_not_accepted() -> None:
+    resume = "Alex\nSkills: Python\nContact: rivera.family@example.com\nNorthstar Labs"
+    raw = _grounded_llm_payload()
+    raw["name"] = "Alex Rivera"
+    with pytest.raises(ProfileGroundingError, match="candidate name"):
+        validate_and_ground_profile(raw, resume)
+
+
+def test_adjacent_line_title_company_date_retained() -> None:
+    resume = """
+Alex Rivera
+alex.rivera@example.com
++1-555-0142
+Software Engineering Intern
+Northstar Labs
+2025-05 – 2025-08
+- Shipped an internal API used by 4 product teams.
+Skills: Python
+Campus Connect
+State University — B.S. Computer Science, 2027
+AWS Cloud Practitioner
+""".strip()
+    raw = _grounded_llm_payload()
+    raw["projects"] = []
+    raw["evidence_links"] = []
+    profile, report = validate_and_ground_profile(raw, resume)
+    assert profile.experience[0].company == "Northstar Labs"
+    assert profile.experience[0].start_date == "2025-05"
+    assert profile.experience[0].highlights
+    assert report.as_counts().get("removed_experience") is None
+
+
+def test_candidate_persistence_works(isolated_session: Session) -> None:
+    db = isolated_session
     profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
-    try:
-        with patch.object(db, "commit", side_effect=RuntimeError("db down")):
-            with pytest.raises(RuntimeError, match="db down"):
-                persist_candidate_profile(profile, db)
-        assert db.query(Candidate).count() == before
-    finally:
-        db.close()
+    stored = persist_candidate_profile(profile, db)
+    assert stored.id and stored.id.startswith("cand-")
+    row = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    assert row is not None
+    assert row.name == "Alex Rivera"
+    assert "Python" in row.skills
 
 
-def test_grounded_profile_persists_with_stored_id() -> None:
-    TestingSession = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    Base.metadata.create_all(bind=engine)
-    db = TestingSession()
-    try:
-        stored, _extraction, report = build_candidate_profile_from_upload(
+def test_failed_extraction_creates_no_candidate_row(isolated_session: Session) -> None:
+    db = isolated_session
+    before = db.query(Candidate).count()
+    with pytest.raises(ProfileExtractionError):
+        build_candidate_profile_from_upload(
             "alex.pdf",
             build_simple_text_pdf(SAMPLE_RESUME_TEXT),
             db=db,
-            generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
+            content_type="application/pdf",
+            generate_fn=lambda _p, _s: "not-json",
         )
-        assert stored.id and stored.id.startswith("cand-")
-        assert report.total_rejected == 0
-        row = db.query(Candidate).filter(Candidate.name == "Alex Rivera").order_by(Candidate.id.desc()).first()
-        assert row is not None
-    finally:
-        db.close()
+    assert db.query(Candidate).count() == before
 
 
-def test_parse_resume_endpoint_returns_real_candidate_profile(tmp_path: Path) -> None:
+def test_failed_grounding_creates_no_candidate_row(isolated_session: Session) -> None:
+    db = isolated_session
+    before = db.query(Candidate).count()
+    bad = _grounded_llm_payload()
+    bad["name"] = "Someone Not On Resume"
+    with pytest.raises(ProfileGroundingError):
+        build_candidate_profile_from_upload(
+            "alex.pdf",
+            build_simple_text_pdf(SAMPLE_RESUME_TEXT),
+            db=db,
+            content_type="application/pdf",
+            generate_fn=lambda _p, _s: json.dumps(bad),
+        )
+    assert db.query(Candidate).count() == before
+
+
+def test_persistence_rollback_on_failure(isolated_session: Session) -> None:
+    db = isolated_session
+    before = db.query(Candidate).count()
+    profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
+    with patch.object(db, "commit", side_effect=RuntimeError("db down")):
+        with pytest.raises(RuntimeError, match="db down"):
+            persist_candidate_profile(profile, db)
+    assert db.query(Candidate).count() == before
+
+
+def test_grounded_profile_persists_with_stored_id(isolated_session: Session) -> None:
+    db = isolated_session
+    stored, _extraction, report = build_candidate_profile_from_upload(
+        "alex.pdf",
+        build_simple_text_pdf(SAMPLE_RESUME_TEXT),
+        db=db,
+        content_type="application/pdf",
+        generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
+    )
+    assert stored.id and stored.id.startswith("cand-")
+    assert report.total_rejected == 0
+    row = db.query(Candidate).filter(Candidate.name == "Alex Rivera").order_by(Candidate.id.desc()).first()
+    assert row is not None
+
+
+def test_isolated_db_does_not_leak_between_tests(isolated_session: Session) -> None:
+    assert isolated_session.query(Candidate).count() == 0
+
+
+def test_parse_resume_endpoint_returns_real_candidate_profile(isolated_client) -> None:
+    client, SessionLocal = isolated_client
     pdf_bytes = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
 
     with patch(
@@ -633,9 +773,12 @@ def test_parse_resume_endpoint_returns_real_candidate_profile(tmp_path: Path) ->
     assert candidate.id and candidate.id.startswith("cand-")
     assert payload.get("preferences") is None
     assert "Grounded" in payload.get("note", "")
+    with SessionLocal() as db:
+        assert db.query(Candidate).count() == 1
 
 
-def test_parse_resume_rejects_non_pdf() -> None:
+def test_parse_resume_rejects_non_pdf(isolated_client) -> None:
+    client, _ = isolated_client
     response = client.post(
         "/api/parse-resume",
         files={"file": ("resume.txt", b"hello", "text/plain")},
@@ -643,25 +786,47 @@ def test_parse_resume_rejects_non_pdf() -> None:
     assert response.status_code == 400
 
 
-def test_build_from_upload_end_to_end(tmp_path: Path) -> None:
-    TestingSession = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    db = TestingSession()
-    try:
-        content = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
-        stored, extraction, report = build_candidate_profile_from_upload(
+def test_build_from_upload_end_to_end(isolated_session: Session) -> None:
+    content = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
+    stored, extraction, report = build_candidate_profile_from_upload(
+        "alex.pdf",
+        content,
+        db=isolated_session,
+        content_type="application/pdf",
+        generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
+    )
+    assert extraction.method == "pdfplumber"
+    assert stored.name == "Alex Rivera"
+    assert report.rejected == []
+
+
+def test_upload_path_never_creates_named_temp_file(isolated_session: Session) -> None:
+    content = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("NamedTemporaryFile must not be used for uploads")
+
+    with patch("tempfile.NamedTemporaryFile", side_effect=_boom):
+        stored, extraction, _report = build_candidate_profile_from_upload(
             "alex.pdf",
             content,
-            db=db,
+            db=isolated_session,
+            content_type="application/pdf",
             generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
         )
-        assert extraction.method == "pdfplumber"
-        assert stored.name == "Alex Rivera"
-        assert report.rejected == []
-    finally:
-        db.close()
+    assert extraction.method == "pdfplumber"
+    assert stored.id
 
 
-def test_provider_server_error_maps_to_actionable_502() -> None:
+def test_in_memory_bytes_extraction() -> None:
+    content = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
+    result = extract_resume_text(content)
+    assert result.method == "pdfplumber"
+    assert "Alex Rivera" in result.text
+
+
+def test_provider_server_error_maps_to_actionable_502(isolated_client) -> None:
+    client, _ = isolated_client
     pdf_bytes = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
 
     with patch(
@@ -678,7 +843,8 @@ def test_provider_server_error_maps_to_actionable_502() -> None:
     assert "AI extraction service" in response.json()["detail"]
 
 
-def test_oversized_upload_returns_413() -> None:
+def test_oversized_upload_returns_413(isolated_client) -> None:
+    client, _ = isolated_client
     content = b"%PDF" + b"a" * (MAX_UPLOAD_BYTES + 1)
     response = client.post(
         "/api/parse-resume",
@@ -688,7 +854,8 @@ def test_oversized_upload_returns_413() -> None:
     assert "10 MiB" in response.json()["detail"]
 
 
-def test_preferences_accept_annual_salary() -> None:
+def test_preferences_accept_annual_salary(isolated_client) -> None:
+    client, SessionLocal = isolated_client
     response = client.post(
         "/api/preferences",
         json={
@@ -703,9 +870,12 @@ def test_preferences_accept_annual_salary() -> None:
     )
     assert response.status_code == 201
     assert response.json()["salary_min"] == 100000
+    with SessionLocal() as db:
+        assert db.query(TargetPreference).count() == 1
 
 
-def test_preferences_reject_hourly_sized_salary() -> None:
+def test_preferences_reject_hourly_sized_salary(isolated_client) -> None:
+    client, _ = isolated_client
     response = client.post(
         "/api/preferences",
         json={
@@ -727,8 +897,11 @@ def test_mock_preferences_survives_annual_salary_validator() -> None:
     assert prefs.salary_min is None or prefs.salary_min >= 10_000
 
 
-def test_parse_resume_never_returns_mock_alex_without_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parse_resume_never_returns_mock_alex_without_llm(
+    isolated_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Ensure the Day 1 canned mock path is unreachable from the production route."""
+    client, _ = isolated_client
     pdf_bytes = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
 
     def unexpected_mock(*_args, **_kwargs):
@@ -768,7 +941,8 @@ def test_parse_resume_closes_upload_when_read_fails() -> None:
     upload.close.assert_awaited_once()
 
 
-def test_parse_resume_note_uses_total_rejected() -> None:
+def test_parse_resume_note_uses_total_rejected(isolated_client) -> None:
+    client, _ = isolated_client
     pdf_bytes = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
     raw = _grounded_llm_payload()
     raw["skills"] = ["Python", "InventedSkillXYZ"]
