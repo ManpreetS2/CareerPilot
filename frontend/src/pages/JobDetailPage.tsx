@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, ShieldCheck } from "lucide-react";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
 import { MatchBadge } from "../components/MatchBadge";
@@ -15,6 +15,7 @@ export function JobDetailPage() {
   const [match, setMatch] = useState<MatchScore | null>(null);
   const [scoreAvailable, setScoreAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
@@ -49,6 +50,20 @@ export function JobDetailPage() {
       cancelled = true;
     };
   }, [jobId]);
+
+  async function handleVerify() {
+    if (!jobId) return;
+    setVerifying(true);
+    setError(null);
+    try {
+      const updated = await api.verifyJob(jobId);
+      setJob(updated);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setVerifying(false);
+    }
+  }
 
   if (loading) return <LoadingState label="Loading job…" />;
   if (error) return <ErrorBanner error={error} />;
@@ -102,13 +117,33 @@ export function JobDetailPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="card p-6">
-          <h2 className="font-display text-2xl font-semibold">Verification</h2>
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="font-display text-2xl font-semibold">Verification</h2>
+            <button
+              type="button"
+              className="btn-ghost px-2 py-1.5 text-accent-700 dark:text-accent-300"
+              onClick={() => void handleVerify()}
+              disabled={verifying}
+            >
+              <ShieldCheck className={`h-4 w-4 ${verifying ? "animate-pulse" : ""}`} aria-hidden />
+              {verifying ? "Verifying…" : job.verified_at ? "Re-verify" : "Verify"}
+            </button>
+          </div>
           <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">
             Current status: <span className="font-semibold capitalize">{job.status}</span>
           </p>
-          <p className="mt-2 text-sm text-ink-500">
-            Job verification and intelligence extraction land after Job Scout / Day 3 processing.
-          </p>
+          {job.verification_notes ? (
+            <p className="mt-2 text-sm text-ink-500">{job.verification_notes}</p>
+          ) : (
+            <p className="mt-2 text-sm text-ink-500">
+              Not verified yet — run "still open" and suspicious-posting checks with Verify.
+            </p>
+          )}
+          {job.verified_at ? (
+            <p className="mt-2 text-xs text-ink-500">
+              Last checked {new Date(job.verified_at).toLocaleString()}
+            </p>
+          ) : null}
         </section>
 
         <section className="card p-6">

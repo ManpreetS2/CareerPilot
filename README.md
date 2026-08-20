@@ -2,7 +2,7 @@
 
 AI-assisted job search and application copilot.
 
-CareerPilot helps a candidate move from a resume to ranked, verified jobs and human-approved application materials. This repository is a **9-day Agile MVP**.
+CareerPilot helps a candidate move from a resume to ranked, verified jobs and human-approved application materials.
 
 ## MVP workflow
 

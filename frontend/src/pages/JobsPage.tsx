@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link2, RefreshCw, Search } from "lucide-react";
+import { Link2, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { JobCard } from "../components/JobCard";
@@ -12,6 +12,8 @@ export function JobsPage() {
   const [scores, setScores] = useState<Record<string, MatchScore>>({});
   const [loading, setLoading] = useState(true);
   const [scouting, setScouting] = useState(false);
+  const [ingesting, setIngesting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [query, setQuery] = useState("");
   const [minMatch, setMinMatch] = useState("0");
@@ -50,6 +52,41 @@ export function JobsPage() {
   useEffect(() => {
     void loadJobs();
   }, []);
+
+  async function handleIngestUrl() {
+    const url = manualUrl.trim();
+    if (!url) {
+      setError(new Error("Paste a job URL first."));
+      return;
+    }
+    setError(null);
+    setIngesting(true);
+    try {
+      const job = await api.ingestJobUrl(url);
+      setJobs((prev) => [job, ...prev.filter((existing) => existing.id !== job.id)]);
+      setManualUrl("");
+    } catch (err) {
+      setError(err);
+    } finally {
+      setIngesting(false);
+    }
+  }
+
+  async function handleVerify() {
+    setError(null);
+    setVerifying(true);
+    try {
+      const result = await api.verifyJobs("discovered");
+      setJobs((prev) => {
+        const byId = new Map(result.jobs.map((job) => [job.id, job]));
+        return prev.map((job) => (job.id && byId.has(job.id) ? byId.get(job.id)! : job));
+      });
+    } catch (err) {
+      setError(err);
+    } finally {
+      setVerifying(false);
+    }
+  }
 
   const locations = useMemo(() => {
     const values = new Set(
@@ -95,8 +132,7 @@ export function JobsPage() {
         <div>
           <h1 className="font-display text-4xl font-semibold">Jobs</h1>
           <p className="mt-2 max-w-2xl text-ink-600 dark:text-ink-300">
-            Discover and triage roles. Job Scout integration points are ready; listings may still be
-            mock data until Developer B wires live sources.
+            Discover and triage roles from RemoteOK, Adzuna, and manually added URLs.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -104,20 +140,13 @@ export function JobsPage() {
             <RefreshCw className={`h-4 w-4 ${scouting ? "animate-spin" : ""}`} aria-hidden />
             Find Jobs
           </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              // TODO(Day 2 / Dev B): POST manual job URL ingestion endpoint.
-              window.alert(
-                manualUrl.trim()
-                  ? "Manual job URL ingestion is not implemented yet. Endpoint contract arrives with Job Scout."
-                  : "Paste a job URL first, then try again once Job Scout supports manual ingestion.",
-              );
-            }}
-          >
-            <Link2 className="h-4 w-4" aria-hidden />
-            Add Job URL
+          <button type="button" className="btn-secondary" onClick={() => void handleIngestUrl()} disabled={ingesting}>
+            <Link2 className={`h-4 w-4 ${ingesting ? "animate-pulse" : ""}`} aria-hidden />
+            {ingesting ? "Adding…" : "Add Job URL"}
+          </button>
+          <button type="button" className="btn-secondary" onClick={() => void handleVerify()} disabled={verifying}>
+            <ShieldCheck className={`h-4 w-4 ${verifying ? "animate-pulse" : ""}`} aria-hidden />
+            {verifying ? "Verifying…" : "Verify Jobs"}
           </button>
         </div>
       </div>
@@ -170,6 +199,8 @@ export function JobsPage() {
             <option value="all">All statuses</option>
             <option value="discovered">Discovered</option>
             <option value="verified">Verified</option>
+            <option value="flagged">Flagged</option>
+            <option value="stale">Stale</option>
           </select>
         </label>
         <label className="lg:col-span-5">
