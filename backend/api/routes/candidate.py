@@ -69,10 +69,12 @@ async def parse_resume(
 ) -> ParseResumeResponse:
     """Parse an uploaded PDF into a grounded CandidateProfile and persist it."""
     # Read at most MAX+1 bytes so oversized uploads fail without buffering unbounded content.
-    content = await file.read(MAX_UPLOAD_BYTES + 1)
     filename = file.filename
     content_type = file.content_type
-    await file.close()
+    try:
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+    finally:
+        await file.close()
 
     def _process() -> ParseResumeResponse:
         candidate, extraction, report = build_candidate_profile_from_upload(
@@ -83,7 +85,7 @@ async def parse_resume(
         )
         note = (
             f"Grounded candidate profile extracted via {extraction.method}. "
-            f"Rejected unsupported claims: {len(report.rejected)}."
+            f"Rejected unsupported claims: {report.total_rejected}."
         )
         return ParseResumeResponse(candidate=candidate, preferences=None, note=note)
 

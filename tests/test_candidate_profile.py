@@ -692,3 +692,41 @@ def test_parse_resume_never_returns_mock_alex_without_llm(monkeypatch: pytest.Mo
         )
     assert response.status_code == 200
     assert response.json()["preferences"] is None
+
+
+def test_parse_resume_closes_upload_when_read_fails() -> None:
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from backend.api.routes import candidate as candidate_routes
+
+    upload = AsyncMock()
+    upload.filename = "resume.pdf"
+    upload.content_type = "application/pdf"
+    upload.read = AsyncMock(side_effect=RuntimeError("read failed"))
+    upload.close = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="read failed"):
+        asyncio.run(candidate_routes.parse_resume(file=upload, db=MagicMock()))
+
+    upload.close.assert_awaited_once()
+
+
+def test_parse_resume_note_uses_total_rejected() -> None:
+    pdf_bytes = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
+    raw = _grounded_llm_payload()
+    raw["skills"] = ["Python", "InventedSkillXYZ"]
+
+    with patch(
+        "backend.services.candidate_profile_agent.extract_candidate_profile_with_llm",
+        return_value=raw,
+    ):
+        response = client.post(
+            "/api/parse-resume",
+            files={"file": ("resume.pdf", pdf_bytes, "application/pdf")},
+        )
+
+    assert response.status_code == 200
+    note = response.json()["note"]
+    assert "Rejected unsupported claims: 1." in note
+    assert "InventedSkillXYZ" not in note

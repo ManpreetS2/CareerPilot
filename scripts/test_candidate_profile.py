@@ -3,9 +3,10 @@
 
 Usage:
   source .venv/bin/activate
-  python scripts/test_candidate_profile.py /path/to/resume.pdf
+  python scripts/test_candidate_profile.py local_resumes/resume.pdf
 
-Does not print resume text or API keys. Requires GEMINI_API_KEY in .env.
+Prints only safe IDs and category counts. Does not print resume text,
+personal details, filesystem paths, or API keys. Requires GEMINI_API_KEY in .env.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ def main() -> int:
 
     pdf_path: Path = args.pdf_path
     if not pdf_path.exists():
-        print(f"File not found: {pdf_path}")
+        print("File not found.")
         return 1
 
     init_db()
@@ -38,27 +39,23 @@ def main() -> int:
     try:
         profile, extraction, report = build_candidate_profile_from_pdf(pdf_path, db=db)
     except Exception as exc:  # noqa: BLE001 — CLI surface
-        print(f"FAILED: {type(exc).__name__}: {exc}")
+        print(f"FAILED: {type(exc).__name__}")
         return 2
     finally:
         db.close()
 
-    print(f"filename: {pdf_path.name}")
     print(f"extraction_method: {extraction.method}")
-    print(f"candidate_name: {profile.name}")
     print(f"candidate_id: {profile.id}")
     print(f"skills: {len(profile.skills)}")
     print(f"projects: {len(profile.projects)}")
     print(f"experiences: {len(profile.experience)}")
     print(f"education: {len(profile.education)}")
     print(f"certifications: {len(profile.certifications)}")
-    print(f"grounding_warnings: {len(report.rejected)}")
-    if report.rejected:
-        print("rejected_claims:")
-        for item in report.rejected[:20]:
-            print(f"  - {item}")
-        if len(report.rejected) > 20:
-            print(f"  … {len(report.rejected) - 20} more")
+    print(f"grounding_rejections: {report.total_rejected}")
+
+    for category, count in sorted(report.as_counts().items()):
+        if count:
+            print(f"{category}: {count}")
     return 0
 
 

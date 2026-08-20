@@ -18,15 +18,15 @@ const currency = new Intl.NumberFormat("en-US", {
 });
 
 function sponsorshipFromWorkAuth(workAuth: string): boolean | null {
-  if (!workAuth) return null;
   if (workAuth === "Requires sponsorship") return true;
+
   if (
     workAuth === "US Citizen" ||
-    workAuth === "US Permanent Resident" ||
-    workAuth === "Other"
+    workAuth === "US Permanent Resident"
   ) {
     return false;
   }
+
   return null;
 }
 
