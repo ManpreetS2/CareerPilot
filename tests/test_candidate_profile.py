@@ -120,13 +120,22 @@ def test_ocr_unavailable_error_is_clear(tmp_path: Path) -> None:
 
 
 def test_invalid_non_pdf_upload_rejected() -> None:
-    with pytest.raises(Exception, match="PDF"):
+    with pytest.raises(Exception, match="valid PDF"):
         validate_pdf_upload("resume.txt", b"not a pdf")
+
+
+def test_invalid_content_type_rejected() -> None:
+    with pytest.raises(Exception, match="valid PDF"):
+        validate_pdf_upload(
+            "resume.pdf",
+            b"%PDF-1.4",
+            content_type="text/plain",
+        )
 
 
 def test_oversized_upload_rejected() -> None:
     content = b"%PDF" + b"a" * (MAX_UPLOAD_BYTES + 10)
-    with pytest.raises(Exception, match="upload limit"):
+    with pytest.raises(Exception, match="10 MiB"):
         validate_pdf_upload("resume.pdf", content)
 
 
@@ -278,3 +287,89 @@ def test_build_from_upload_end_to_end(tmp_path: Path) -> None:
         assert report.rejected == []
     finally:
         db.close()
+
+
+def test_provider_server_error_maps_to_actionable_502() -> None:
+    pdf_bytes = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
+
+    def boom(_prompt: str, _system: str | None) -> str:
+        raise RuntimeError("Gemini provider request failed.")
+
+    with patch(
+        "backend.services.candidate_profile_agent.extract_candidate_profile_with_llm",
+        side_effect=ProfileExtractionError(
+            "The AI extraction service could not process this resume. Please try again."
+        ),
+    ):
+        response = client.post(
+            "/api/parse-resume",
+            files={"file": ("resume.pdf", pdf_bytes, "application/pdf")},
+        )
+    assert response.status_code == 502
+    assert "AI extraction service" in response.json()["detail"]
+
+
+def test_oversized_upload_returns_413() -> None:
+    content = b"%PDF" + b"a" * (MAX_UPLOAD_BYTES + 1)
+    response = client.post(
+        "/api/parse-resume",
+        files={"file": ("resume.pdf", content, "application/pdf")},
+    )
+    assert response.status_code == 413
+    assert "10 MiB" in response.json()["detail"]
+
+
+def test_preferences_accept_annual_salary() -> None:
+    response = client.post(
+        "/api/preferences",
+        json={
+            "target_roles": ["Software Engineer"],
+            "preferred_locations": [],
+            "salary_min": 100000,
+            "work_authorization": None,
+            "sponsorship_required": None,
+            "remote_preference": None,
+            "constraints": [],
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["salary_min"] == 100000
+
+
+def test_preferences_reject_hourly_sized_salary() -> None:
+    response = client.post(
+        "/api/preferences",
+        json={
+            "target_roles": ["Software Engineer"],
+            "preferred_locations": [],
+            "salary_min": 35,
+            "work_authorization": None,
+            "sponsorship_required": None,
+            "remote_preference": None,
+            "constraints": [],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_parse_resume_never_returns_mock_alex_without_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure the Day 1 canned mock path is unreachable from the production route."""
+    pdf_bytes = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
+
+    def unexpected_mock(*_args, **_kwargs):
+        raise AssertionError("mock_candidate_profile must not be used")
+
+    monkeypatch.setattr(
+        "backend.services.candidate_service.mock_candidate_profile",
+        unexpected_mock,
+    )
+    with patch(
+        "backend.services.candidate_profile_agent.extract_candidate_profile_with_llm",
+        return_value=_grounded_llm_payload(),
+    ):
+        response = client.post(
+            "/api/parse-resume",
+            files={"file": ("resume.pdf", pdf_bytes, "application/pdf")},
+        )
+    assert response.status_code == 200
+    assert response.json()["preferences"] is None

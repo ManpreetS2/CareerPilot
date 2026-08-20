@@ -12,9 +12,13 @@ from backend.db.database import get_db
 from backend.db.models import TargetPreference
 from backend.schemas.schemas import ParseResumeResponse, TargetPreferences
 from backend.services.candidate_profile_agent import (
+    ANNUAL_SALARY_MAX,
+    ANNUAL_SALARY_MIN,
+    MAX_UPLOAD_BYTES,
     CandidateProfileError,
     InvalidResumeError,
     OCRUnavailableError,
+    OversizedResumeError,
     ProfileExtractionError,
     ProfileGroundingError,
     ResumeExtractionError,
@@ -28,16 +32,24 @@ router = APIRouter(prefix="/api", tags=["candidate"])
 
 
 def _http_for_candidate_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, OversizedResumeError):
+        return HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc))
     if isinstance(exc, InvalidResumeError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if isinstance(exc, OCRUnavailableError):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     if isinstance(exc, ProfileGroundingError):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
-    if isinstance(exc, (ProfileExtractionError, LLMConfigurationError)):
+    if isinstance(exc, LLMConfigurationError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The resume parser is not configured correctly. Check the local Gemini configuration.",
+        )
+    if isinstance(exc, ProfileExtractionError):
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Candidate profile extraction provider failed. Check LLM configuration and retry.",
+            detail=str(exc)
+            or "The AI extraction service could not process this resume. Please try again.",
         )
     if isinstance(exc, ResumeExtractionError):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
@@ -56,13 +68,18 @@ async def parse_resume(
     db: Session = Depends(get_db),
 ) -> ParseResumeResponse:
     """Parse an uploaded PDF into a grounded CandidateProfile and persist it."""
-    content = await file.read()
+    # Read at most MAX+1 bytes so oversized uploads fail without buffering unbounded content.
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    filename = file.filename
+    content_type = file.content_type
+    await file.close()
 
     def _process() -> ParseResumeResponse:
         candidate, extraction, report = build_candidate_profile_from_upload(
-            file.filename,
+            filename,
             content,
             db=db,
+            content_type=content_type,
         )
         note = (
             f"Grounded candidate profile extracted via {extraction.method}. "
@@ -73,14 +90,6 @@ async def parse_resume(
     try:
         return await run_in_threadpool(_process)
     except Exception as exc:  # noqa: BLE001 — map domain errors; unexpected become 500
-        if isinstance(
-            exc,
-            (
-                CandidateProfileError,
-                LLMConfigurationError,
-            ),
-        ):
-            raise _http_for_candidate_error(exc) from exc
         raise _http_for_candidate_error(exc) from exc
 
 
@@ -95,6 +104,14 @@ def save_preferences(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="At least one target role is required",
         )
+    if preferences.salary_min is not None and not (
+        ANNUAL_SALARY_MIN <= preferences.salary_min <= ANNUAL_SALARY_MAX
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Minimum base salary must be an annual USD amount between 10000 and 1000000.",
+        )
+
     record = TargetPreference(
         target_roles=preferences.target_roles,
         preferred_locations=preferences.preferred_locations,
@@ -104,6 +121,10 @@ def save_preferences(
         sponsorship_required=preferences.sponsorship_required,
         constraints=preferences.constraints,
     )
-    db.add(record)
-    db.commit()
+    try:
+        db.add(record)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return preferences

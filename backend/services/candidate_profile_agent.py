@@ -34,10 +34,13 @@ from backend.services.llm_client import LLMClient, LLMConfigurationError, get_ll
 
 logger = logging.getLogger(__name__)
 
-MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB
 NEAR_EMPTY_CHAR_THRESHOLD = 40
 FUZZY_RATIO_THRESHOLD = 0.72
 TOKEN_COVERAGE_THRESHOLD = 0.6
+SHORT_CLAIM_MAX_LEN = 3
+ANNUAL_SALARY_MIN = 10_000
+ANNUAL_SALARY_MAX = 1_000_000
 
 PROFILE_JSON_SCHEMA_HINT = """
 {
@@ -83,6 +86,10 @@ class CandidateProfileError(Exception):
 
 class InvalidResumeError(CandidateProfileError):
     """Upload failed validation (type, size, corruption, empty content)."""
+
+
+class OversizedResumeError(InvalidResumeError):
+    """Upload exceeded the maximum allowed size."""
 
 
 class ResumeExtractionError(CandidateProfileError):
@@ -140,17 +147,21 @@ def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RA
     source_n = _normalize_for_match(source_text)
     if not claim_n:
         return False
+
+    # Short skills (C, R, Go, …) require word-boundary style evidence.
+    if len(claim_n) <= SHORT_CLAIM_MAX_LEN:
+        pattern = rf"(?<![a-z0-9+.#]){re.escape(claim_n)}(?![a-z0-9+.#])"
+        return re.search(pattern, source_n) is not None
+
     if claim_n in source_n:
         return True
 
     claim_tokens = _tokens(claim)
     if claim_tokens and len(claim_tokens & _tokens(source_text)) / len(claim_tokens) >= TOKEN_COVERAGE_THRESHOLD:
-        # Require at least one distinctive token longer than 3 chars when possible.
         distinctive = {t for t in claim_tokens if len(t) >= 4}
         if not distinctive or distinctive & _tokens(source_text):
             return True
 
-    # Fuzzy: compare claim against sliding windows of similar length.
     window = max(len(claim_n), 8)
     step = max(window // 2, 4)
     best = 0.0
@@ -187,18 +198,21 @@ def extract_with_pdfplumber(pdf_path: Path) -> str:
     except InvalidResumeError:
         raise
     except Exception as exc:
-        raise ResumeExtractionError("Unable to read PDF text.") from exc
+        raise ResumeExtractionError(
+            "This PDF could not be read. Try exporting it as a new PDF."
+        ) from exc
     return normalize_whitespace("\n\n".join(chunks))
 
 
 def extract_with_ocr(pdf_path: Path) -> str:
     if not is_tesseract_available():
         raise OCRUnavailableError(
-            "This PDF appears scanned or image-based. Install the Tesseract OCR "
-            "binary to process scanned resumes (e.g. brew install tesseract)."
+            "This appears to be a scanned PDF and requires Tesseract OCR, "
+            "which is unavailable on this machine."
         )
     import pdfplumber
     import pytesseract
+    from pytesseract import TesseractNotFoundError
 
     chunks: list[str] = []
     try:
@@ -214,13 +228,20 @@ def extract_with_ocr(pdf_path: Path) -> str:
         raise
     except InvalidResumeError:
         raise
+    except TesseractNotFoundError as exc:
+        raise OCRUnavailableError(
+            "This appears to be a scanned PDF and requires Tesseract OCR, "
+            "which is unavailable on this machine."
+        ) from exc
     except Exception as exc:
-        raise ResumeExtractionError("OCR failed while reading the PDF.") from exc
+        raise ResumeExtractionError(
+            "No readable resume text was found in this PDF."
+        ) from exc
 
     text = normalize_whitespace("\n\n".join(chunks))
     if len(text) < NEAR_EMPTY_CHAR_THRESHOLD:
         raise ResumeExtractionError(
-            "OCR completed but produced almost no readable text. The PDF may be unreadable."
+            "No readable resume text was found in this PDF."
         )
     return text
 
@@ -239,20 +260,27 @@ def extract_resume_text(pdf_path: Path) -> ExtractionResult:
     return ExtractionResult(text=ocr_text, method="ocr")
 
 
-def validate_pdf_upload(filename: str | None, content: bytes) -> None:
+def validate_pdf_upload(
+    filename: str | None,
+    content: bytes,
+    *,
+    content_type: str | None = None,
+) -> None:
     if not filename or not filename.strip():
-        raise InvalidResumeError("Filename is required.")
+        raise InvalidResumeError("Please choose a valid PDF file.")
     lower = filename.lower()
     if not lower.endswith(".pdf"):
-        raise InvalidResumeError("Only PDF resumes are supported.")
+        raise InvalidResumeError("Please choose a valid PDF file.")
+    if content_type:
+        normalized = content_type.split(";")[0].strip().lower()
+        if normalized not in {"application/pdf", "application/x-pdf", "application/octet-stream"}:
+            raise InvalidResumeError("Please choose a valid PDF file.")
     if not content:
-        raise InvalidResumeError("Uploaded file is empty.")
+        raise InvalidResumeError("Please choose a valid PDF file.")
     if len(content) > MAX_UPLOAD_BYTES:
-        raise InvalidResumeError(
-            f"Resume exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB upload limit."
-        )
+        raise OversizedResumeError("Resume PDFs must be 10 MiB or smaller.")
     if not content.startswith(b"%PDF"):
-        raise InvalidResumeError("File does not look like a valid PDF.")
+        raise InvalidResumeError("This PDF could not be read. Try exporting it as a new PDF.")
 
 
 def _strip_code_fences(raw: str) -> str:
@@ -336,12 +364,31 @@ def extract_candidate_profile_with_llm(
             if not raw or not raw.strip():
                 raise ProfileExtractionError("Model returned an empty response.")
             return _parse_profile_json(raw)
-        except (ProfileExtractionError, LLMConfigurationError, RuntimeError, ValueError) as exc:
+        except InvalidResumeError:
+            raise
+        except LLMConfigurationError:
+            raise
+        except ProfileExtractionError as exc:
             last_error = exc
-            logger.warning("candidate LLM extraction attempt %s failed: %s", attempt + 1, type(exc).__name__)
+            logger.warning(
+                "candidate LLM extraction attempt %s failed: %s",
+                attempt + 1,
+                type(exc).__name__,
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 — provider/network failures become controlled errors
+            last_error = ProfileExtractionError(
+                "The AI extraction service could not process this resume. Please try again."
+            )
+            last_error.__cause__ = exc
+            logger.warning(
+                "candidate LLM extraction attempt %s failed: %s",
+                attempt + 1,
+                type(exc).__name__,
+            )
             continue
     raise ProfileExtractionError(
-        "Unable to extract a structured candidate profile from the resume."
+        "The AI extraction service could not process this resume. Please try again."
     ) from last_error
 
 
@@ -366,14 +413,21 @@ def validate_and_ground_profile(
     except ValidationError as exc:
         raise ProfileGroundingError("Extracted profile failed schema validation.") from exc
 
-    if not profile.name or not claim_supported(profile.name, resume_text, min_ratio=0.6):
-        # Name must appear; allow slight formatting differences.
-        if not profile.name or not any(
-            part and claim_supported(part, resume_text, min_ratio=0.8)
-            for part in profile.name.replace(",", " ").split()
-            if len(part) > 1
-        ):
-            raise ProfileGroundingError("Candidate name could not be grounded in the resume.")
+    if not profile.name or not str(profile.name).strip():
+        raise ProfileGroundingError(
+            "We could not confirm a candidate name from this resume. Please try another PDF export."
+        )
+
+    name_ok = claim_supported(profile.name, resume_text, min_ratio=0.55)
+    if not name_ok:
+        parts = [part for part in re.split(r"[\s,]+", profile.name) if len(part) > 1]
+        name_ok = bool(parts) and all(
+            claim_supported(part, resume_text, min_ratio=0.8) for part in parts
+        )
+    if not name_ok:
+        raise ProfileGroundingError(
+            "We could not confirm a candidate name from this resume. Please try another PDF export."
+        )
 
     if profile.email and not claim_supported(profile.email, resume_text, min_ratio=0.9):
         report.add("Dropped unsupported email")
@@ -523,9 +577,13 @@ def persist_candidate_profile(profile: CandidateProfile, db: Session) -> Candida
         strengths=list(profile.strengths),
         evidence_links=list(profile.evidence_links),
     )
-    db.add(record)
-    db.commit()
-    db.refresh(record)
+    try:
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+    except Exception:
+        db.rollback()
+        raise
     stored = profile.model_copy(deep=True)
     stored.id = f"cand-{record.id:03d}"
     return stored
@@ -553,11 +611,12 @@ def build_candidate_profile_from_upload(
     content: bytes,
     *,
     db: Session,
+    content_type: str | None = None,
     llm: LLMClient | None = None,
     generate_fn: Callable[[str, str | None], str] | None = None,
 ) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
     """Validate upload bytes, process via temp file, always clean up."""
-    validate_pdf_upload(filename, content)
+    validate_pdf_upload(filename, content, content_type=content_type)
     tmp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:

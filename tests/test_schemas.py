@@ -40,9 +40,9 @@ def test_job_and_preferences_validate() -> None:
         description="Build APIs",
         source="mock",
     )
-    prefs = TargetPreferences(target_roles=["Software Engineer Intern"], salary_min=30)
+    prefs = TargetPreferences(target_roles=["Software Engineer Intern"], salary_min=100000)
     assert job.status == "discovered"
-    assert prefs.salary_min == 30
+    assert prefs.salary_min == 100000
 
 
 def test_match_score_rejects_out_of_range() -> None:

@@ -40,6 +40,7 @@ export type TargetPreferences = {
   target_roles: string[];
   preferred_locations: string[];
   remote_preference?: string | null;
+  /** Minimum acceptable base salary in annual USD (not hourly). */
   salary_min?: number | null;
   work_authorization?: string | null;
   sponsorship_required?: boolean | null;

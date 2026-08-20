@@ -73,20 +73,45 @@ class LLMClient:
     def _generate_gemini(self, prompt: str, system_prompt: str | None) -> str:
         from google import genai
         from google.genai import types
+        from google.genai import errors as genai_errors
 
         client = genai.Client(api_key=self._api_key())
         config = None
         if system_prompt:
             config = types.GenerateContentConfig(system_instruction=system_prompt)
-        response = client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=config,
-        )
-        text = getattr(response, "text", None)
-        if not text:
-            raise RuntimeError("Gemini returned an empty response.")
-        return text.strip()
+
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config,
+                )
+                text = getattr(response, "text", None)
+                if not text:
+                    raise RuntimeError("Gemini returned an empty response.")
+                return text.strip()
+            except genai_errors.APIError as exc:
+                last_error = exc
+                status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                logger.warning(
+                    "Gemini APIError attempt=%s status=%s type=%s",
+                    attempt + 1,
+                    status,
+                    type(exc).__name__,
+                )
+                # Retry once on transient provider pressure / rate limits.
+                if status in {429, 500, 503} and attempt == 0:
+                    continue
+                raise RuntimeError(
+                    "Gemini provider request failed."
+                ) from exc
+            except Exception as exc:  # noqa: BLE001 — normalize provider failures
+                if isinstance(exc, RuntimeError):
+                    raise
+                raise RuntimeError("Gemini provider request failed.") from exc
+        raise RuntimeError("Gemini provider request failed.") from last_error
 
     def _generate_anthropic(self, prompt: str, system_prompt: str | None) -> str:
         import anthropic

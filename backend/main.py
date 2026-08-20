@@ -72,7 +72,18 @@ async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONR
 async def validation_exception_handler(
     _request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    # Ensure every error entry is JSON-serializable (Pydantic ctx may include Exception).
+    safe_errors = []
+    for err in exc.errors():
+        item = dict(err)
+        ctx = item.get("ctx")
+        if isinstance(ctx, dict):
+            item["ctx"] = {
+                key: (str(value) if isinstance(value, BaseException) else value)
+                for key, value in ctx.items()
+            }
+        safe_errors.append(item)
+    return JSONResponse(status_code=422, content={"detail": safe_errors})
 
 
 @app.exception_handler(Exception)

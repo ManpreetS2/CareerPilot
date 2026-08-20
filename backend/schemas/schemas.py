@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Project(BaseModel):
@@ -49,13 +49,32 @@ class CandidateProfile(BaseModel):
 
 
 class TargetPreferences(BaseModel):
+    """User-stated job search preferences.
+
+    salary_min is annual USD base salary (not hourly).
+    """
+
     target_roles: list[str] = Field(default_factory=list)
     preferred_locations: list[str] = Field(default_factory=list)
     remote_preference: str | None = None
-    salary_min: int | None = None
+    salary_min: int | None = Field(
+        default=None,
+        description="Minimum acceptable base salary in annual USD (not hourly).",
+    )
     work_authorization: str | None = None
     sponsorship_required: bool | None = None
     constraints: list[str] = Field(default_factory=list)
+
+    @field_validator("salary_min")
+    @classmethod
+    def validate_annual_salary(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if value < 10_000 or value > 1_000_000:
+            raise ValueError(
+                "salary_min must be an annual USD amount between 10000 and 1000000"
+            )
+        return value
 
 
 class Job(BaseModel):
