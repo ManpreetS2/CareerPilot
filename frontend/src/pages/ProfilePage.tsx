@@ -65,8 +65,8 @@ export function ProfilePage() {
       <div>
         <h1 className="font-display text-4xl font-semibold">Profile</h1>
         <p className="mt-2 max-w-2xl text-ink-600 dark:text-ink-300">
-          Upload a resume and set preferences. The UI is ready for real CandidateProfile payloads;
-          today the API may still return mock data until Developer A wires the profile agent.
+          Upload your resume to build a structured candidate profile. Facts are extracted from the
+          PDF and grounded against the source text before they appear here.
         </p>
       </div>
 
@@ -90,7 +90,7 @@ export function ProfilePage() {
           <span className="mt-3 font-semibold">Drag & drop a resume PDF</span>
           <span className="mt-1 text-sm text-ink-500">or click to choose a file</span>
           <span className="mt-3 text-xs text-ink-500">
-            {file ? file.name : "PDF only · parsing agent arrives on Day 2"}
+            {file ? file.name : "PDF only · max 8MB"}
           </span>
           <input
             type="file"
@@ -162,14 +162,14 @@ export function ProfilePage() {
         </button>
       </form>
 
-      {loading ? <LoadingState label="Calling /api/parse-resume…" /> : null}
+      {loading ? <LoadingState label="Extracting and grounding your resume…" /> : null}
 
       {candidate ? (
         <CandidateSummary candidate={candidate} preferences={preferences} />
       ) : (
         !loading && (
           <p className="text-sm text-ink-500">
-            No profile yet. Upload a PDF to load candidate data from the backend.
+            No profile yet. Upload a PDF to extract a grounded candidate profile.
           </p>
         )
       )}

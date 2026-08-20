@@ -121,7 +121,7 @@ class InterviewPrep(BaseModel):
 class ParseResumeResponse(BaseModel):
     candidate: CandidateProfile
     preferences: TargetPreferences | None = None
-    note: str = "Day 1 mock response. Resume parsing is not implemented yet."
+    note: str = "Grounded candidate profile extracted from the uploaded resume."
 
 
 class ScoutJobsResponse(BaseModel):
