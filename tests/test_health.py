@@ -18,11 +18,35 @@ def test_health_returns_success(isolated_client) -> None:
     assert body["database"] == "connected"
 
 
+def test_isolated_client_never_calls_production_init_db(isolated_client) -> None:
+    client, _ = isolated_client
+    # Fixture patches production init_db to raise; reaching here means lifespan stayed no-op.
+    response = client.get("/health")
+    assert response.status_code == 200
+
+
+def test_isolated_client_restores_dependency_overrides(isolated_client) -> None:
+    from backend.db.database import get_db
+    from backend.main import app
+
+    client, _ = isolated_client
+    assert get_db in app.dependency_overrides
+    assert client.get("/health").status_code == 200
+
+
 def test_root_returns_service_info(isolated_client) -> None:
     client, _ = isolated_client
     response = client.get("/")
     assert response.status_code == 200
     assert response.json()["name"] == "CareerPilot AI"
+
+
+def test_production_lifespan_restored_outside_isolated_client() -> None:
+    from backend.main import app
+
+    from tests.conftest import ORIGINAL_APP_LIFESPAN
+
+    assert app.router.lifespan_context is ORIGINAL_APP_LIFESPAN
 
 
 def test_parse_resume_matches_candidate_profile(isolated_client) -> None:

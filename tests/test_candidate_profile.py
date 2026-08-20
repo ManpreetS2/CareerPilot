@@ -683,6 +683,188 @@ AWS Cloud Practitioner
     assert report.as_counts().get("removed_experience") is None
 
 
+def test_previous_job_date_rejected_from_later_job() -> None:
+    raw = _grounded_llm_payload()
+    raw["experience"] = [
+        {
+            "title": "Data Analyst",
+            "company": "Company B",
+            "start_date": "2025-01",
+            "end_date": "2024-06",
+            "highlights": ["Analyzed datasets for Company B."],
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, PARENT_CONTEXT_RESUME)
+    assert profile.experience[0].start_date is None
+    assert profile.experience[0].end_date == "2024-06"
+    assert report.as_counts().get("removed_experience_dates") == 1
+
+
+def test_previous_job_highlight_rejected_from_later_job() -> None:
+    raw = _grounded_llm_payload()
+    raw["experience"] = [
+        {
+            "title": "Data Analyst",
+            "company": "Company B",
+            "start_date": "2024-01",
+            "end_date": "2024-06",
+            "highlights": ["Built APIs for Company A.", "Analyzed datasets for Company B."],
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, PARENT_CONTEXT_RESUME)
+    assert profile.experience[0].highlights == ["Analyzed datasets for Company B."]
+    assert report.as_counts().get("removed_highlights") == 1
+
+
+def test_previous_project_technology_rejected_from_later_project() -> None:
+    raw = _grounded_llm_payload()
+    raw["projects"] = [
+        {
+            "name": "Orbit Tracker",
+            "description": "Orbital analytics dashboard.",
+            "technologies": ["Python", "React"],
+            "url": None,
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, PARENT_CONTEXT_RESUME)
+    assert profile.projects[0].technologies == ["React"]
+    assert report.as_counts().get("removed_project_technologies") == 1
+
+
+def test_previous_project_url_rejected_from_later_project() -> None:
+    raw = _grounded_llm_payload()
+    raw["projects"] = [
+        {
+            "name": "Orbit Tracker",
+            "description": "Orbital analytics dashboard.",
+            "technologies": ["React"],
+            "url": "https://github.com/example/campus-connect",
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, PARENT_CONTEXT_RESUME)
+    assert profile.projects[0].url is None
+    assert report.as_counts().get("removed_project_urls") == 1
+
+
+def test_repeated_title_company_pairs_keep_distinct_dates() -> None:
+    resume = """
+Alex Rivera
+Software Engineer
+Acme
+2024-01 – 2024-06
+- First tour work.
+
+Software Engineer
+Acme
+2025-01 – 2025-06
+- Second tour work.
+""".strip()
+    raw = _grounded_llm_payload()
+    raw["skills"] = []
+    raw["projects"] = []
+    raw["education"] = []
+    raw["certifications"] = []
+    raw["evidence_links"] = []
+    raw["experience"] = [
+        {
+            "title": "Software Engineer",
+            "company": "Acme",
+            "start_date": "2024-01",
+            "end_date": "2024-06",
+            "highlights": ["First tour work."],
+        },
+        {
+            "title": "Software Engineer",
+            "company": "Acme",
+            "start_date": "2025-01",
+            "end_date": "2025-06",
+            "highlights": ["Second tour work."],
+        },
+    ]
+    profile, report = validate_and_ground_profile(raw, resume)
+    assert len(profile.experience) == 2
+    assert profile.experience[0].start_date == "2024-01"
+    assert profile.experience[1].start_date == "2025-01"
+    assert profile.experience[0].highlights == ["First tour work."]
+    assert profile.experience[1].highlights == ["Second tour work."]
+    assert report.as_counts().get("removed_experience_dates") is None
+
+
+def test_company_a_does_not_match_company_alpha() -> None:
+    from backend.services.candidate_profile_agent import _anchor_supported
+
+    assert _anchor_supported("Company A", "Worked at Company A in 2024") is True
+    assert _anchor_supported("Company A", "Worked at Company Alpha in 2024") is False
+    assert _anchor_supported("Acme", "Acme, Inc.") is True
+    assert _anchor_supported("Acme", "Acmeology Lab") is False
+
+
+def test_multiline_education_keeps_own_fields() -> None:
+    resume = """
+Alex Rivera
+Education
+State University
+B.S.
+Computer Science
+2027
+City College
+A.A.
+General Studies
+2024
+""".strip()
+    raw = _grounded_llm_payload()
+    raw["skills"] = []
+    raw["projects"] = []
+    raw["experience"] = []
+    raw["certifications"] = []
+    raw["evidence_links"] = []
+    raw["education"] = [
+        {
+            "institution": "State University",
+            "degree": "B.S.",
+            "field": "Computer Science",
+            "graduation_year": "2027",
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, resume)
+    assert profile.education[0].degree == "B.S."
+    assert profile.education[0].field == "Computer Science"
+    assert profile.education[0].graduation_year == "2027"
+    assert report.as_counts().get("removed_education_fields") is None
+
+
+def test_multiline_education_rejects_next_institution_year() -> None:
+    resume = """
+Alex Rivera
+Education
+State University
+B.S.
+Computer Science
+2027
+City College
+A.A.
+General Studies
+2024
+""".strip()
+    raw = _grounded_llm_payload()
+    raw["skills"] = []
+    raw["projects"] = []
+    raw["experience"] = []
+    raw["certifications"] = []
+    raw["evidence_links"] = []
+    raw["education"] = [
+        {
+            "institution": "State University",
+            "degree": "B.S.",
+            "field": "Computer Science",
+            "graduation_year": "2024",
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, resume)
+    assert profile.education[0].graduation_year is None
+    assert report.as_counts().get("removed_education_fields") == 1
+
+
 def test_candidate_persistence_works(isolated_session: Session) -> None:
     db = isolated_session
     profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)

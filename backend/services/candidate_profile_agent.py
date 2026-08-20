@@ -363,49 +363,203 @@ def _complete_name_supported(name: str, resume_text: str) -> bool:
     return False
 
 
+_LEGAL_SUFFIX_RE = r"(?:\s*,?\s*(?:inc|llc|ltd|corp|co|company)\.?)?"
+
+
 def _anchor_supported(claim: str, source_text: str) -> bool:
-    """Strict support for parent anchors so nearby similar names cannot alias."""
+    """Phrase-boundary support for parent anchors (no Company A ≈ Company Alpha)."""
     claim_n = _normalize_for_match(claim)
     source_n = _normalize_for_match(source_text)
     if not claim_n:
         return False
-    if claim_n in source_n:
-        return True
+    tokens = [token for token in claim_n.split() if token]
+    if not tokens:
+        return False
     if len(claim_n) <= SHORT_CLAIM_MAX_LEN or claim_n in {"c++", "c#", ".net", "go"}:
         pattern = rf"(?<![a-z0-9+.#]){re.escape(claim_n)}(?![a-z0-9+.#])"
         return re.search(pattern, source_n) is not None
-    return False
+    body = r"[\s]+".join(re.escape(token) for token in tokens)
+    pattern = rf"(?<![a-z0-9]){body}{_LEGAL_SUFFIX_RE}(?![a-z0-9])"
+    return re.search(pattern, source_n) is not None
+
+
+def _find_minimal_cores(
+    lines: list[str],
+    anchors: list[str],
+    *,
+    max_span: int,
+) -> list[tuple[int, int]]:
+    """Return minimal (start, end) inclusive cores in document order."""
+    cleaned = [anchor for anchor in anchors if anchor and str(anchor).strip()]
+    if not cleaned:
+        return []
+
+    cores: list[tuple[int, int]] = []
+    if len(cleaned) == 1:
+        anchor = cleaned[0]
+        for idx, line in enumerate(lines):
+            if _anchor_supported(anchor, line):
+                cores.append((idx, idx))
+    else:
+        primary = cleaned[0]
+        secondary = cleaned[1]
+        primary_idxs = [idx for idx, line in enumerate(lines) if _anchor_supported(primary, line)]
+        secondary_idxs = [idx for idx, line in enumerate(lines) if _anchor_supported(secondary, line)]
+        used_secondary: set[int] = set()
+        for primary_idx in primary_idxs:
+            best: tuple[int, int] | None = None
+            for secondary_idx in secondary_idxs:
+                if secondary_idx in used_secondary:
+                    continue
+                if abs(primary_idx - secondary_idx) >= max_span:
+                    continue
+                start = min(primary_idx, secondary_idx)
+                end = max(primary_idx, secondary_idx)
+                if best is None or (end - start) < (best[1] - best[0]):
+                    best = (start, end)
+                    best_secondary = secondary_idx
+            if best is not None:
+                cores.append(best)
+                used_secondary.add(best_secondary)
+
+    unique: list[tuple[int, int]] = []
+    last_end = -1
+    for start, end in cores:
+        if start > last_end:
+            unique.append((start, end))
+            last_end = end
+    return unique
+
+
+def _line_is_bullet(line: str) -> bool:
+    stripped = line.strip()
+    return bool(stripped) and stripped[0] in {"-", "•", "*"}
+
+
+def _line_looks_like_institution(line: str) -> bool:
+    return re.search(r"\b(university|college|institute|school|academy)\b", line, flags=re.I) is not None
+
+
+def _expand_context_end(
+    lines: list[str],
+    core_start: int,
+    core_end: int,
+    hard_end: int,
+    *,
+    kind: str,
+) -> int:
+    """Extend forward through continuation lines, stopping before the next peer entry."""
+    end = core_end
+    idx = core_end + 1
+    while idx < hard_end:
+        raw = lines[idx]
+        stripped = raw.strip()
+        if not stripped:
+            peek = idx + 1
+            while peek < hard_end and not lines[peek].strip():
+                peek += 1
+            if peek >= hard_end:
+                break
+            nxt = lines[peek].strip()
+            if kind == "education" and _line_looks_like_institution(nxt):
+                break
+            if kind in {"experience", "project"} and not _line_is_bullet(nxt) and not _DATE_TOKEN_RE.search(nxt):
+                # Next non-continuation heading starts a peer entry.
+                if not nxt.lower().startswith("technologies:"):
+                    break
+            idx += 1
+            continue
+
+        if kind == "education" and idx > core_end and _line_looks_like_institution(stripped):
+            break
+        if kind == "experience" and idx > core_end and not _line_is_bullet(stripped) and not _DATE_TOKEN_RE.search(
+            stripped
+        ):
+            # A bare heading line after the core is the next role/company block.
+            # Allow same-core company/title already covered by core_end.
+            break
+        if kind == "project" and idx > core_end and not _line_is_bullet(stripped):
+            lower = stripped.lower()
+            if not (
+                lower.startswith("technologies:")
+                or "http://" in lower
+                or "https://" in lower
+                or lower.startswith("www.")
+            ):
+                # Likely the next project name / section heading.
+                # Keep multi-line descriptions until a blank-separated peer.
+                # Descriptions are usually sentences; peer names are short headings.
+                if len(stripped.split()) <= 6 and not stripped.endswith("."):
+                    break
+
+        end = idx
+        idx += 1
+    return end
+
+
+def allocate_parent_contexts(
+    resume_text: str,
+    anchor_groups: list[list[str]],
+    *,
+    max_span: int,
+    lookback: int = 0,
+    kind: str = "experience",
+) -> list[str | None]:
+    """Assign non-overlapping parent contexts for each anchor group.
+
+    Cores are located first; contexts expand through continuation lines and stop
+    before neighboring parent entries. Repeated identical anchors consume distinct
+    occurrences in document order.
+    """
+    lines = resume_text.splitlines()
+    if not lines:
+        return [None for _ in anchor_groups]
+
+    candidates = [
+        _find_minimal_cores(lines, group, max_span=max_span) for group in anchor_groups
+    ]
+
+    assigned: list[tuple[int, int] | None] = [None] * len(anchor_groups)
+    occupied: list[tuple[int, int]] = []
+    for idx, cores in enumerate(candidates):
+        for core in cores:
+            overlaps = any(not (core[1] < used[0] or core[0] > used[1]) for used in occupied)
+            if overlaps:
+                continue
+            assigned[idx] = core
+            occupied.append(core)
+            break
+
+    indexed = [(i, core) for i, core in enumerate(assigned) if core is not None]
+    indexed.sort(key=lambda item: item[1][0])
+
+    contexts: list[str | None] = [None] * len(anchor_groups)
+    for rank, (item_idx, (core_start, core_end)) in enumerate(indexed):
+        prev_end = indexed[rank - 1][1][1] if rank > 0 else -1
+        next_start = indexed[rank + 1][1][0] if rank + 1 < len(indexed) else len(lines)
+        start = max(prev_end + 1, core_start - lookback)
+        start = min(start, core_start)
+        end = _expand_context_end(
+            lines,
+            core_start,
+            core_end,
+            next_start,
+            kind=kind,
+        )
+        contexts[item_idx] = "\n".join(lines[start : end + 1])
+    return contexts
 
 
 def find_parent_block(
     resume_text: str,
     *anchors: str,
     max_span: int = PARENT_BLOCK_MAX_LINES,
-    pad: int = PARENT_BLOCK_PAD_LINES,
+    pad: int = 0,
 ) -> str | None:
-    """Return the smallest line-span block jointly supporting all anchors."""
-    cleaned = [anchor for anchor in anchors if anchor and str(anchor).strip()]
-    if not cleaned:
-        return None
-
-    lines = resume_text.splitlines()
-    if not lines:
-        return resume_text if all(_anchor_supported(anchor, resume_text) for anchor in cleaned) else None
-
-    best: tuple[int, int] | None = None
-    n = len(lines)
-    for start in range(n):
-        for end in range(start, min(n, start + max_span)):
-            block = "\n".join(lines[start : end + 1])
-            if all(_anchor_supported(anchor, block) for anchor in cleaned):
-                if best is None or (end - start) < (best[1] - best[0]):
-                    best = (start, end)
-    if best is None:
-        return None
-    start, end = best
-    padded_start = max(0, start - pad)
-    padded_end = min(n, end + 1 + pad)
-    return "\n".join(lines[padded_start:padded_end])
+    """Backward-compatible single-item parent lookup using non-overlapping allocation."""
+    del pad  # Padding is replaced by neighbor-bounded contexts.
+    contexts = allocate_parent_contexts(resume_text, [list(anchors)], max_span=max_span, lookback=0)
+    return contexts[0]
 
 
 def is_tesseract_available() -> bool:
@@ -717,8 +871,14 @@ def validate_and_ground_profile(
     profile.skills = grounded_skills
 
     grounded_projects: list[Project] = []
-    for project in profile.projects:
-        parent = find_parent_block(resume_text, project.name, max_span=3, pad=3)
+    project_contexts = allocate_parent_contexts(
+        resume_text,
+        [[project.name] for project in profile.projects],
+        max_span=3,
+        lookback=0,
+        kind="project",
+    )
+    for project, parent in zip(profile.projects, project_contexts, strict=True):
         if parent is None:
             report.bump("removed_projects")
             continue
@@ -742,8 +902,14 @@ def validate_and_ground_profile(
     profile.projects = grounded_projects
 
     grounded_experience: list[Experience] = []
-    for item in profile.experience:
-        parent = find_parent_block(resume_text, item.title, item.company, max_span=4, pad=2)
+    experience_contexts = allocate_parent_contexts(
+        resume_text,
+        [[item.title, item.company] for item in profile.experience],
+        max_span=4,
+        lookback=0,
+        kind="experience",
+    )
+    for item, parent in zip(profile.experience, experience_contexts, strict=True):
         if parent is None:
             report.bump("removed_experience")
             continue
@@ -759,7 +925,7 @@ def validate_and_ground_profile(
             end = None
         highlights: list[str] = []
         for highlight in item.highlights:
-            if claim_supported(highlight, parent, min_ratio=0.55):
+            if claim_supported(highlight, parent, min_ratio=FUZZY_RATIO_THRESHOLD):
                 highlights.append(highlight)
             else:
                 report.bump("removed_highlights")
@@ -775,8 +941,14 @@ def validate_and_ground_profile(
     profile.experience = grounded_experience
 
     grounded_education: list[Education] = []
-    for edu in profile.education:
-        parent = find_parent_block(resume_text, edu.institution, max_span=2, pad=0)
+    education_contexts = allocate_parent_contexts(
+        resume_text,
+        [[edu.institution] for edu in profile.education],
+        max_span=2,
+        lookback=0,
+        kind="education",
+    )
+    for edu, parent in zip(profile.education, education_contexts, strict=True):
         if parent is None:
             report.bump("removed_education")
             continue
