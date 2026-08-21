@@ -1,0 +1,57 @@
+{
+  "name": "Jordan Avery Quill",
+  "email": "jordan.quill@example.com",
+  "phone": "+1-555-0101",
+  "allowed_skills": [
+    "Python",
+    "FastAPI",
+    "SQL",
+    "Docker",
+    "React"
+  ],
+  "projects": [
+    {
+      "name": "Harbor Atlas",
+      "technologies": [
+        "Python",
+        "FastAPI",
+        "React"
+      ],
+      "url": "https://github.com/example/harbor-atlas"
+    }
+  ],
+  "experience": [
+    {
+      "title": "Software Engineer Intern",
+      "company": "Northwind Systems",
+      "start_date": "2024-06",
+      "end_date": "2024-08",
+      "highlights": [
+        "Reduced p95 latency by 20% on search endpoints.",
+        "Saved 500 engineering hours."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "institution": "Lakeside Polytechnic",
+      "degree": "B.S.",
+      "field": "Computer Science",
+      "graduation_year": "2027"
+    }
+  ],
+  "certifications": [
+    "AWS Cloud Practitioner"
+  ],
+  "numeric_unit_claims": [
+    "20%",
+    "500"
+  ],
+  "never_survive": [
+    "$500",
+    "40%",
+    "Quantum Teleportation",
+    "Acme Warp Drive",
+    "$20"
+  ]
+}

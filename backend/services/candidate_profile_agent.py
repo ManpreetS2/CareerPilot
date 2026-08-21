@@ -330,6 +330,10 @@ def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RA
     if claim_n in source_n:
         return True
 
+    # URLs/paths must not fuzzy-match a neighboring repo that shares a host prefix.
+    if "://" in claim or "/" in claim_n:
+        return False
+
     claim_tokens = _tokens(claim)
     if claim_tokens and len(claim_tokens & _tokens(source_text)) / len(claim_tokens) >= TOKEN_COVERAGE_THRESHOLD:
         distinctive = {t for t in claim_tokens if len(t) >= 4}
@@ -383,6 +387,23 @@ def _anchor_supported(claim: str, source_text: str) -> bool:
     return re.search(pattern, source_n) is not None
 
 
+def _line_is_bullet(line: str) -> bool:
+    stripped = line.strip()
+    return bool(stripped) and stripped[0] in {"-", "•", "*"}
+
+
+def _line_has_inline_bullet(line: str) -> bool:
+    """pdfplumber two-column merges can place ' - ' mid-line."""
+    return " - " in line or " – " in line
+
+
+def _is_core_anchor_line(claim: str, line: str) -> bool:
+    """Title/company/name cores ignore highlight bullets that mention the same company."""
+    if _line_is_bullet(line):
+        return False
+    return _anchor_supported(claim, line)
+
+
 def _find_minimal_cores(
     lines: list[str],
     anchors: list[str],
@@ -398,16 +419,19 @@ def _find_minimal_cores(
     if len(cleaned) == 1:
         anchor = cleaned[0]
         for idx, line in enumerate(lines):
-            if _anchor_supported(anchor, line):
+            if _is_core_anchor_line(anchor, line):
                 cores.append((idx, idx))
     else:
         primary = cleaned[0]
         secondary = cleaned[1]
-        primary_idxs = [idx for idx, line in enumerate(lines) if _anchor_supported(primary, line)]
-        secondary_idxs = [idx for idx, line in enumerate(lines) if _anchor_supported(secondary, line)]
+        primary_idxs = [idx for idx, line in enumerate(lines) if _is_core_anchor_line(primary, line)]
+        secondary_idxs = [
+            idx for idx, line in enumerate(lines) if _is_core_anchor_line(secondary, line)
+        ]
         used_secondary: set[int] = set()
         for primary_idx in primary_idxs:
             best: tuple[int, int] | None = None
+            best_secondary = -1
             for secondary_idx in secondary_idxs:
                 if secondary_idx in used_secondary:
                     continue
@@ -429,11 +453,6 @@ def _find_minimal_cores(
             unique.append((start, end))
             last_end = end
     return unique
-
-
-def _line_is_bullet(line: str) -> bool:
-    stripped = line.strip()
-    return bool(stripped) and stripped[0] in {"-", "•", "*"}
 
 
 def _line_looks_like_institution(line: str) -> bool:
@@ -472,9 +491,9 @@ def _expand_context_end(
 
         if kind == "education" and idx > core_end and _line_looks_like_institution(stripped):
             break
-        if kind == "experience" and idx > core_end and not _line_is_bullet(stripped) and not _DATE_TOKEN_RE.search(
+        if kind == "experience" and idx > core_end and not _line_is_bullet(stripped) and not _line_has_inline_bullet(
             stripped
-        ):
+        ) and not _DATE_TOKEN_RE.search(stripped):
             # A bare heading line after the core is the next role/company block.
             # Allow same-core company/title already covered by core_end.
             break

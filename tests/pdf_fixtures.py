@@ -117,6 +117,60 @@ def write_simple_text_pdf(path: Path, text: str) -> Path:
     return path
 
 
+def _escape_pdf_text(text: str) -> str:
+    return (
+        text.replace("\\", "\\\\")
+        .replace("(", "\\(")
+        .replace(")", "\\)")
+        .replace("\r", " ")
+    )
+
+
+def _column_stream(x: int, y: int, leading: int, text: str, font_size: int = 10) -> bytes:
+    lines = text.split("\n")
+    escaped = [_escape_pdf_text(line) for line in lines]
+    parts = [f"BT /F1 {font_size} Tf {x} {y} Td {leading} TL"]
+    if escaped:
+        parts.append(f"({escaped[0]}) Tj")
+        for line in escaped[1:]:
+            parts.append(f"T* ({line}) Tj")
+    parts.append("ET")
+    return " ".join(parts).encode("latin-1", errors="replace")
+
+
+def build_two_column_text_pdf(left_text: str, right_text: str) -> bytes:
+    """Two-column PDF: sidebar at x=48, main column at x=280."""
+    stream_bytes = _column_stream(48, 750, 12, left_text) + b" " + _column_stream(
+        280, 750, 12, right_text
+    )
+    objects = [
+        b"1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n",
+        b"2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n",
+        b"3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n",
+        b"4 0 obj<< /Length "
+        + str(len(stream_bytes)).encode()
+        + b" >>stream\n"
+        + stream_bytes
+        + b"\nendstream\nendobj\n",
+        b"5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(out))
+        out.extend(obj)
+    xref_pos = len(out)
+    out.extend(f"xref\n0 {len(offsets)}\n".encode())
+    out.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        out.extend(f"{offset:010d} 00000 n \n".encode())
+    out.extend(
+        f"trailer<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
+    )
+    return bytes(out)
+
+
 def build_image_only_pdf() -> bytes:
     """Create a one-page PDF with no text operators (forces near-empty extraction)."""
     # Empty content stream — pdfplumber returns little/no text.
