@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Check, PencilLine, X } from "lucide-react";
+import { Check, Clipboard, ClipboardCheck, ExternalLink, PencilLine, Wand2, X } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
@@ -8,7 +8,7 @@ import { MatchBadge } from "../components/MatchBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { api } from "../lib/api";
 import { getSelectedJobId, saveSelectedJobId } from "../lib/session";
-import type { ApplicationPackage, ApprovalDecision, Job, MatchScore } from "../lib/types";
+import type { ApplicationPackage, ApprovalDecision, FormFillResult, Job, MatchScore } from "../lib/types";
 
 export function ApplicationPage() {
   const params = useParams();
@@ -24,6 +24,10 @@ export function ApplicationPage() {
   const [eligibilityConfirmed, setEligibilityConfirmed] = useState(false);
   const [eligibilityNotes, setEligibilityNotes] = useState("");
   const [decisionNotes, setDecisionNotes] = useState("");
+  const [filling, setFilling] = useState(false);
+  const [fillResult, setFillResult] = useState<FormFillResult | null>(null);
+  const [fillError, setFillError] = useState<unknown>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   useEffect(() => {
     if (!jobId) {
@@ -96,6 +100,31 @@ export function ApplicationPage() {
       setError(err);
     } finally {
       setActing(false);
+    }
+  }
+
+  async function fillApplication() {
+    if (!jobId) return;
+    setFilling(true);
+    setFillError(null);
+    try {
+      const result = await api.fillApplication(jobId);
+      setFillResult(result);
+    } catch (err) {
+      setFillError(err);
+    } finally {
+      setFilling(false);
+    }
+  }
+
+  async function copyValue(field: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField((current) => (current === field ? null : current)), 1500);
+    } catch {
+      // Clipboard access can be denied by the browser — the value is still
+      // shown on screen, so the user can select and copy it manually.
     }
   }
 
@@ -282,6 +311,108 @@ export function ApplicationPage() {
             Reject
           </button>
         </div>
+      </section>
+
+      <section className="card p-6">
+        <h2 className="font-display text-2xl font-semibold">Assisted apply</h2>
+        {materials.approval_status !== "approved" ? (
+          <p className="mt-2 text-sm text-ink-500">
+            Unlocks once this application is approved above. Supports Greenhouse and Lever
+            postings.
+          </p>
+        ) : (
+          <>
+            <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
+              Runs on the server against the real application form (Greenhouse or Lever) to work
+              out what can be confidently filled and what can't — it never submits, and it has no
+              connection to your own browser. Copy each value below into the form you open
+              yourself.
+            </p>
+            <ErrorBanner error={fillError} />
+            <button
+              type="button"
+              className="btn-primary mt-4"
+              disabled={filling}
+              onClick={() => void fillApplication()}
+            >
+              <Wand2 className={`h-4 w-4 ${filling ? "animate-pulse" : ""}`} aria-hidden />
+              {filling ? "Filling…" : "Fill Application Form"}
+            </button>
+
+            {fillResult ? (
+              <div className="mt-4 space-y-3">
+                {fillResult.ats_platform === "unsupported" ? (
+                  <p className="text-sm text-ink-500">{fillResult.error_message}</p>
+                ) : fillResult.status === "failed" ? (
+                  <p className="text-sm text-danger-600 dark:text-rose-300">{fillResult.error_message}</p>
+                ) : (
+                  <>
+                    <p className="text-sm text-ink-600 dark:text-ink-300">
+                      Detected <strong className="capitalize">{fillResult.ats_platform}</strong> —{" "}
+                      {fillResult.filled_fields.length} value(s) matched,{" "}
+                      {fillResult.flagged_fields.length} need your input.
+                    </p>
+                    {fillResult.filled_fields.length > 0 ? (
+                      <div>
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-500">
+                          Copy these into the form
+                        </h3>
+                        <ul className="mt-1 space-y-1.5">
+                          {fillResult.filled_fields.map((f) => (
+                            <li
+                              key={f.field}
+                              className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+                            >
+                              <span className="min-w-0">
+                                <span className="text-ink-500 capitalize">{f.field.replaceAll("_", " ")}:</span>{" "}
+                                <span className="font-medium text-ink-700 dark:text-ink-200">{f.value}</span>
+                              </span>
+                              <button
+                                type="button"
+                                className="btn-ghost shrink-0 px-2 py-1 text-xs"
+                                onClick={() => void copyValue(f.field, f.value)}
+                              >
+                                {copiedField === f.field ? (
+                                  <>
+                                    <ClipboardCheck className="h-3.5 w-3.5" aria-hidden />
+                                    Copied
+                                  </>
+                                ) : (
+                                  <>
+                                    <Clipboard className="h-3.5 w-3.5" aria-hidden />
+                                    Copy
+                                  </>
+                                )}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {fillResult.flagged_fields.length > 0 ? (
+                      <div>
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-500">
+                          Needs your input
+                        </h3>
+                        <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink-600 dark:text-ink-300">
+                          {fillResult.flagged_fields.map((f) => (
+                            <li key={f.field}>
+                              <span className="font-medium">{f.field.replaceAll("_", " ")}</span> — {f.reason}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    <a href={job.url} target="_blank" rel="noreferrer" className="btn-secondary">
+                      <ExternalLink className="h-4 w-4" aria-hidden />
+                      Open form to finish and submit
+                    </a>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </>
+        )}
       </section>
     </div>
   );

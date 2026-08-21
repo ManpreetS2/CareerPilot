@@ -40,6 +40,10 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
+    # Unpacked extensions get a chrome-extension:// origin whose id varies
+    # per install (no fixed manifest key) — matched by regex rather than an
+    # exact origin. Local-only dev server, single machine, single user.
+    allow_origin_regex=r"^chrome-extension://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

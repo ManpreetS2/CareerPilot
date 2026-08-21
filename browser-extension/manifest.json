@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "CareerPilot Assisted Apply",
+  "version": "0.1.0",
+  "description": "Fills your approved CareerPilot application into the real Greenhouse or Lever form on the page you're viewing. Never submits.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "CareerPilot Assisted Apply"
+  },
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://localhost:8000/*"]
+}

@@ -45,6 +45,18 @@ class TargetPreference(Base):
     work_authorization: Mapped[str | None] = mapped_column(String(128), nullable=True)
     sponsorship_required: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     constraints: Mapped[list] = mapped_column(JSON, default=list)
+    legal_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    linkedin_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    github_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    portfolio_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    earliest_start_date: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    currently_enrolled_in_program: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    expected_graduation: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    degree_pursuing: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    race_ethnicity: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    veteran_status: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    disability_status: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -74,6 +86,7 @@ class JobRecord(Base):
     intelligence: Mapped["JobIntelligenceRecord | None"] = relationship(back_populates="job")
     match_scores: Mapped[list["MatchScoreRecord"]] = relationship(back_populates="job")
     applications: Mapped[list["ApplicationPackageRecord"]] = relationship(back_populates="job")
+    form_fill_attempts: Mapped[list["FormFillAttemptRecord"]] = relationship(back_populates="job")
 
 
 class JobIntelligenceRecord(Base):
@@ -137,3 +150,25 @@ class ApplicationPackageRecord(Base):
     )
 
     job: Mapped[JobRecord] = relationship(back_populates="applications")
+
+
+class FormFillAttemptRecord(Base):
+    """One assisted-apply run against a real ATS form. Multiple attempts per
+    job are kept (not upserted) — each run is a fresh browser session
+    against a live external page, and a re-run legitimately produces new
+    results as the page or the mapped data changes."""
+
+    __tablename__ = "form_fill_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
+    ats_platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    filled_fields: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    flagged_fields: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    job: Mapped[JobRecord] = relationship(back_populates="form_fill_attempts")

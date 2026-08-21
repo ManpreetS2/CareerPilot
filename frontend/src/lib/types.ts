@@ -45,6 +45,18 @@ export type TargetPreferences = {
   work_authorization?: string | null;
   sponsorship_required?: boolean | null;
   constraints: string[];
+  legal_name?: string | null;
+  linkedin_url?: string | null;
+  github_url?: string | null;
+  portfolio_url?: string | null;
+  earliest_start_date?: string | null;
+  currently_enrolled_in_program?: string | null;
+  expected_graduation?: string | null;
+  degree_pursuing?: string | null;
+  gender?: string | null;
+  race_ethnicity?: string | null;
+  veteran_status?: string | null;
+  disability_status?: string | null;
 };
 
 export type JobStatus = "discovered" | "verified" | "flagged" | "stale";
@@ -101,6 +113,26 @@ export type ApplicationPackage = {
 };
 
 export type ApprovalDecision = "approved" | "edit_requested" | "rejected";
+
+export type FlaggedField = {
+  field: string;
+  reason: string;
+};
+
+export type FilledField = {
+  field: string;
+  value: string;
+};
+
+export type FormFillResult = {
+  job_id: string;
+  ats_platform: "greenhouse" | "lever" | "unsupported";
+  status: "filled" | "needs_review" | "failed";
+  filled_fields: FilledField[];
+  flagged_fields: FlaggedField[];
+  error_message?: string | null;
+  created_at?: string | null;
+};
 
 export type ApprovalResponse = {
   job_id: string;

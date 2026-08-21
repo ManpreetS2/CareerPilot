@@ -1638,6 +1638,74 @@ def test_preferences_accept_annual_salary(isolated_client) -> None:
         assert db.query(TargetPreference).count() == 1
 
 
+def test_preferences_associates_saved_row_with_the_current_candidate(isolated_client) -> None:
+    """Regression test: save_preferences used to create a TargetPreference
+    row without ever setting candidate_id, so nothing that later looked up
+    a candidate's preferences by candidate_id (e.g. the Form Fill agent's
+    location/LinkedIn/etc. lookups) could ever find it."""
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        candidate = Candidate(name="Jordan Quill", email="jordan@example.com", skills=[], projects=[],
+                               experience=[], education=[], certifications=[], strengths=[], evidence_links=[])
+        db.add(candidate)
+        db.commit()
+        db.refresh(candidate)
+        candidate_id = candidate.id
+
+    response = client.post(
+        "/api/preferences",
+        json={
+            "target_roles": ["Software Engineer"],
+            "preferred_locations": ["Austin, TX"],
+            "salary_min": None,
+            "work_authorization": None,
+            "sponsorship_required": None,
+            "remote_preference": None,
+            "constraints": [],
+        },
+    )
+    assert response.status_code == 201
+    with SessionLocal() as db:
+        record = db.query(TargetPreference).order_by(TargetPreference.id.desc()).first()
+        assert record.candidate_id == candidate_id
+
+
+def test_preferences_round_trips_new_reusable_fields(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    payload = {
+        "target_roles": ["Software Engineer"],
+        "preferred_locations": ["Austin, TX"],
+        "salary_min": None,
+        "work_authorization": "US Citizen",
+        "sponsorship_required": False,
+        "remote_preference": None,
+        "constraints": [],
+        "legal_name": "Jordan A. Quill",
+        "linkedin_url": "https://www.linkedin.com/in/jordanquill",
+        "github_url": "https://github.com/jordanquill",
+        "portfolio_url": "https://jordanquill.dev",
+        "earliest_start_date": "Immediately",
+        "currently_enrolled_in_program": "Yes",
+        "expected_graduation": "May 2027",
+        "degree_pursuing": "Bachelor's in Computer Science",
+        "gender": "Non-binary",
+        "race_ethnicity": "No",
+        "veteran_status": "I am not a protected veteran",
+        "disability_status": "No, I do not have a disability and have not had one in the past",
+    }
+    response = client.post("/api/preferences", json=payload)
+    assert response.status_code == 201
+    body = response.json()
+    for key, value in payload.items():
+        assert body[key] == value
+
+    with SessionLocal() as db:
+        record = db.query(TargetPreference).order_by(TargetPreference.id.desc()).first()
+        assert record.legal_name == "Jordan A. Quill"
+        assert record.linkedin_url == "https://www.linkedin.com/in/jordanquill"
+        assert record.disability_status == payload["disability_status"]
+
+
 def test_preferences_reject_hourly_sized_salary(isolated_client) -> None:
     client, _ = isolated_client
     response = client.post(

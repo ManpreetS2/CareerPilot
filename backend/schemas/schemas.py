@@ -64,6 +64,18 @@ class TargetPreferences(BaseModel):
     work_authorization: str | None = None
     sponsorship_required: bool | None = None
     constraints: list[str] = Field(default_factory=list)
+    legal_name: str | None = None
+    linkedin_url: str | None = None
+    github_url: str | None = None
+    portfolio_url: str | None = None
+    earliest_start_date: str | None = None
+    currently_enrolled_in_program: str | None = None
+    expected_graduation: str | None = None
+    degree_pursuing: str | None = None
+    gender: str | None = None
+    race_ethnicity: str | None = None
+    veteran_status: str | None = None
+    disability_status: str | None = None
 
     @field_validator("salary_min")
     @classmethod
@@ -180,3 +192,58 @@ class ApprovalResponse(BaseModel):
 class JobWithScore(BaseModel):
     job: Job
     match: MatchScore | None = None
+
+
+class FlaggedField(BaseModel):
+    field: str
+    reason: str
+
+
+class FilledField(BaseModel):
+    field: str
+    value: str
+
+
+class FormFillResult(BaseModel):
+    job_id: str
+    ats_platform: Literal["greenhouse", "lever", "unsupported"]
+    status: Literal["filled", "needs_review", "failed"]
+    filled_fields: list[FilledField] = Field(default_factory=list)
+    flagged_fields: list[FlaggedField] = Field(default_factory=list)
+    error_message: str | None = None
+    created_at: datetime | None = None
+
+
+class AutofillFields(BaseModel):
+    """Raw candidate/application field values for the browser extension's
+    content script to fill directly into a real page — no server-side
+    browser involved, so no field-detection results here, only values."""
+
+    full_name: str
+    first_name: str
+    last_name: str
+    email: str | None = None
+    phone: str | None = None
+    current_company: str | None = None
+    location: str | None = None
+    legal_name: str | None = None
+    linkedin_url: str | None = None
+    github_url: str | None = None
+    portfolio_url: str | None = None
+    cover_letter: str | None = None
+    work_authorization: str | None = None
+    sponsorship_required: bool | None = None
+    earliest_start_date: str | None = None
+    currently_enrolled_in_program: str | None = None
+    expected_graduation: str | None = None
+    degree_pursuing: str | None = None
+    gender: str | None = None
+    race_ethnicity: str | None = None
+    veteran_status: str | None = None
+    disability_status: str | None = None
+
+
+class AutofillResponse(BaseModel):
+    job_id: str
+    platform: Literal["greenhouse", "lever", "unsupported"]
+    fields: AutofillFields
