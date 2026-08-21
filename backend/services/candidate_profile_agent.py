@@ -15,6 +15,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -264,16 +265,22 @@ _PERCENT_TOKEN_RE = re.compile(
 )
 _PLAIN_NUMBER_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
 _EMAIL_SPAN_RE = re.compile(
-    r"[A-Za-z0-9._%+\-]+[ \t]*@[ \t]*[A-Za-z0-9](?:[A-Za-z0-9\-]*[ \t]*\.[ \t]*[A-Za-z]{2,})+"
+    r"(?<![A-Za-z0-9._%+\-])"
+    r"([A-Za-z0-9._%+\-]+[ \t]*@[ \t]*[A-Za-z0-9](?:[A-Za-z0-9\-]*[ \t]*\.[ \t]*[A-Za-z]{2,})+)"
+    r"(?![A-Za-z0-9._%+\-])"
 )
 _PHONE_SPAN_RE = re.compile(
     r"""
-    (?:(?:\+|00)[ \t]*1[ \t.\-]*)?
-    (?:
-        \([ \t]*\d{3}[ \t]*\)[ \t.\-]*\d{3}[ \t.\-]*\d{4}
-        | \d{3}[ \t.\-]\d{3}[ \t.\-]\d{4}
-        | \d{3}[ \t.\-]\d{4}
+    (?<!\d)
+    (?P<span>
+        (?:\+[ \t]*(?P<cc>\d{1,3})[ \t.\-]*)?
+        (?:
+            \([ \t]*\d{3}[ \t]*\)[ \t.\-]*\d{3}[ \t.\-]*\d{4}
+            | \d{3}[ \t.\-]\d{3}[ \t.\-]\d{4}
+            | \d{3}[ \t.\-]\d{4}
+        )
     )
+    (?!\d)
     """,
     flags=re.VERBOSE,
 )
@@ -308,8 +315,27 @@ _TITLE_HINTS = frozenset(
         "consultant",
         "programmer",
         "intern",
+        "president",
+        "director",
     }
 )
+_TITLE_LEVELS = frozenset({"i", "ii", "iii", "iv", "1", "2", "3", "4"})
+_TITLE_LEVEL_NORM = {
+    "i": "1",
+    "1": "1",
+    "ii": "2",
+    "2": "2",
+    "iii": "3",
+    "3": "3",
+    "iv": "4",
+    "4": "4",
+}
+_TITLE_ALIASES = {
+    "sr": "senior",
+    "sr.": "senior",
+    "jr": "junior",
+    "jr.": "junior",
+}
 
 
 def _digits_only(num_fragment: str) -> str:
@@ -347,16 +373,42 @@ def _month_date_values(match: re.Match[str]) -> list[str]:
     return values
 
 
-def _canonical_iso_date(token: str) -> str:
-    if re.fullmatch(r"\d{4}-\d{2}(?:-\d{2})?", token):
-        return token[:7]
+def _parse_date_token(token: str) -> str | None:
+    """Canonical YYYY-MM or YYYY-MM-DD. Invalid calendar dates return None."""
+    iso_day = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", token)
+    if iso_day:
+        year, month, day = (int(iso_day.group(1)), int(iso_day.group(2)), int(iso_day.group(3)))
+        try:
+            date(year, month, day)
+        except ValueError:
+            return None
+        return f"{year:04d}-{month:02d}-{day:02d}"
+    iso_month = re.fullmatch(r"(\d{4})-(\d{2})", token)
+    if iso_month:
+        year, month = int(iso_month.group(1)), int(iso_month.group(2))
+        if not 1 <= month <= 12:
+            return None
+        return f"{year:04d}-{month:02d}"
     slash = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", token)
     if slash:
-        month, _day, year = slash.group(1), slash.group(2), slash.group(3)
-        if len(year) == 2:
-            year = f"20{year}"
-        return f"{year}-{int(month):02d}"
-    return token
+        month, day, year = int(slash.group(1)), int(slash.group(2)), int(slash.group(3))
+        if year < 100:
+            year += 2000
+        try:
+            date(year, month, day)
+        except ValueError:
+            return None
+        return f"{year:04d}-{month:02d}-{day:02d}"
+    return None
+
+
+def _is_date_like_claim(claim: str) -> bool:
+    stripped = claim.strip()
+    if re.fullmatch(r"\d{4}-\d{2}(?:-\d{2})?", stripped):
+        return True
+    if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{2,4}", stripped):
+        return True
+    return bool(_MONTH_DATE_RE.search(stripped)) and len(stripped) <= 48
 
 
 def _normalize_email_address(value: str) -> str:
@@ -373,68 +425,126 @@ def _email_supported(claim: str, source_text: str) -> bool:
     if not claimed or "@" not in claimed:
         return False
     for match in _EMAIL_SPAN_RE.finditer(source_text):
-        if "\n" in match.group(0):
+        span = match.group(1) if match.lastindex else match.group(0)
+        if "\n" in span:
             continue
-        if _normalize_email_address(match.group(0)) == claimed:
+        if _normalize_email_address(span) == claimed:
             return True
     return False
 
 
-def _canonical_phone_digits(value: str) -> str | None:
-    digits = re.sub(r"\D", "", value)
-    if digits.startswith("1") and len(digits) == 11:
-        digits = digits[1:]
-    if len(digits) < 7:
+def _phone_identity(value: str) -> tuple[str | None, str] | None:
+    """Return (country_code, national_digits) for one phone span."""
+    stripped = value.strip()
+    cc: str | None = None
+    rest = stripped
+    cc_match = re.match(r"\+[ \t]*(\d{1,3})[ \t.\-]*", stripped)
+    if cc_match:
+        cc = cc_match.group(1).lstrip("0") or "0"
+        rest = stripped[cc_match.end() :]
+    national = re.sub(r"\D", "", rest)
+    if cc is None and len(national) == 11 and national.startswith("1"):
+        cc = "1"
+        national = national[1:]
+    if cc == "1" and len(national) == 11 and national.startswith("1"):
+        national = national[1:]
+    if len(national) < 7:
         return None
-    return digits
+    return cc, national
+
+
+def _phone_countries_compatible(left: str | None, right: str | None) -> bool:
+    us = {None, "1"}
+    if left in us and right in us:
+        return True
+    return left is not None and left == right
 
 
 def _phone_supported(claim: str, source_text: str) -> bool:
-    """Compare a claimed phone with one extracted span. Never join resume digits."""
-    claimed = _canonical_phone_digits(claim)
+    """Compare a claimed phone with one bounded span. Never join resume digits."""
+    claimed = _phone_identity(claim)
     if claimed is None:
         return False
+    claim_cc, claim_national = claimed
     for match in _PHONE_SPAN_RE.finditer(source_text):
-        span = match.group(0)
+        span = match.group("span")
         if "\n" in span:
             continue
-        canonical = _canonical_phone_digits(span)
-        if canonical and canonical == claimed:
+        identity = _phone_identity(span)
+        if identity is None:
+            continue
+        source_cc, source_national = identity
+        if source_national == claim_national and _phone_countries_compatible(claim_cc, source_cc):
             return True
     return False
+
+
+def _looks_like_phone_claim(claim: str) -> bool:
+    if "@" in claim or _is_date_like_claim(claim):
+        return False
+    digits = re.sub(r"\D", "", claim)
+    return len(digits) >= 7 and bool(re.search(r"\d[\d() \t.\-]{5,}\d", claim))
+
+
+def _canonicalize_title_token(token: str) -> str:
+    lowered = token.lower()
+    if lowered in _TITLE_ALIASES:
+        return _TITLE_ALIASES[lowered]
+    stripped = lowered.rstrip(".")
+    return _TITLE_ALIASES.get(stripped, stripped)
+
+
+def _title_parts(tokens: list[str]) -> tuple[set[str], list[str], set[str]]:
+    quals: set[str] = set()
+    levels: set[str] = set()
+    body: list[str] = []
+    for token in tokens:
+        canon = _canonicalize_title_token(token)
+        if canon in _ROLE_QUALIFIERS:
+            quals.add(canon)
+        elif canon in _TITLE_LEVELS:
+            levels.add(_TITLE_LEVEL_NORM.get(canon, canon))
+        else:
+            body.append(canon)
+    return quals, body, levels
 
 
 def _looks_like_job_title(claim_n: str) -> bool:
     tokens = [token for token in claim_n.split() if token]
     if len(tokens) < 2:
         return False
-    token_set = set(tokens)
+    token_set = {_canonicalize_title_token(token) for token in tokens}
     return bool(token_set & _ROLE_QUALIFIERS) or bool(token_set & _TITLE_HINTS)
+
+
+def _title_anchor_supported(claim: str, source_text: str) -> bool:
+    """Title cores require matching role qualifiers and levels; Sr./Jr. aliases only."""
+    claim_n = _normalize_for_match(claim)
+    source_n = _normalize_for_match(source_text)
+    if not claim_n or not source_n:
+        return False
+    claim_tokens = [token for token in claim_n.split() if token]
+    claim_q, body, claim_levels = _title_parts(claim_tokens)
+    if not body:
+        return False
+    body_pattern = r"[\s]+".join(re.escape(token) for token in body)
+    pattern = rf"(?<![a-z0-9]){body_pattern}(?![a-z0-9])"
+    for match in re.finditer(pattern, source_n):
+        prefix = source_n[: match.start()].split()[-1:]
+        suffix = source_n[match.end() :].split()[:1]
+        window_q, _window_body, window_levels = _title_parts(
+            [*prefix, *match.group(0).split(), *suffix]
+        )
+        if window_q == claim_q and window_levels == claim_levels:
+            return True
+    return False
 
 
 def _title_qualifiers_aligned(claim_n: str, source_n: str) -> bool:
     """Role-level qualifiers cannot be invented or dropped from a title phrase."""
     if not _looks_like_job_title(claim_n):
         return True
-    claim_tokens = [token for token in claim_n.split() if token]
-    claim_q = {token for token in claim_tokens if token in _ROLE_QUALIFIERS}
-    body = [token for token in claim_tokens if token not in _ROLE_QUALIFIERS]
-    if not body:
-        pattern = rf"(?<![a-z0-9]){re.escape(claim_n)}(?![a-z0-9])"
-        return re.search(pattern, source_n) is not None
-    body_pattern = r"[\s]+".join(re.escape(token) for token in body)
-    pattern = rf"(?<![a-z0-9]){body_pattern}(?![a-z0-9])"
-    for match in re.finditer(pattern, source_n):
-        prefix = source_n[: match.start()].split()[-1:]
-        suffix = source_n[match.end() :].split()[:1]
-        window_q = {
-            token
-            for token in [*prefix, *suffix, *match.group(0).split()]
-            if token in _ROLE_QUALIFIERS
-        }
-        if window_q == claim_q:
-            return True
-    return False
+    return _title_anchor_supported(claim_n, source_n)
 
 
 def _extract_typed_numeric_evidence(text: str) -> list[tuple[str, str]]:
@@ -460,9 +570,12 @@ def _extract_typed_numeric_evidence(text: str) -> list[tuple[str, str]]:
             _mark(match.start(), match.end())
 
     for match in _DATE_TOKEN_RE.finditer(lower):
-        if _free(match.start(), match.end()):
-            evidence.append(("date", _canonical_iso_date(match.group(0))))
-            _mark(match.start(), match.end())
+        if not _free(match.start(), match.end()):
+            continue
+        canonical = _parse_date_token(match.group(0))
+        if canonical is not None:
+            evidence.append(("date", canonical))
+        _mark(match.start(), match.end())
 
     for match in _CURRENCY_TOKEN_RE.finditer(lower):
         if _free(match.start(), match.end()):
@@ -545,6 +658,14 @@ def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RA
     """Conservative evidence check: substring, token coverage, or fuzzy window match."""
     if _looks_like_email(claim):
         return _email_supported(claim, source_text)
+
+    if _is_date_like_claim(claim):
+        if not _extract_typed_numeric_evidence(claim):
+            return False
+        return _typed_numeric_claim_supported(claim, source_text, min_ratio=min_ratio)
+
+    if _looks_like_phone_claim(claim):
+        return _phone_supported(claim, source_text)
 
     # Typed numeric/date path runs on originals so $ / % / percent stay semantic.
     if _extract_typed_numeric_evidence(claim):
@@ -636,11 +757,37 @@ def _line_has_inline_bullet(line: str) -> bool:
     return " - " in line or " – " in line
 
 
-def _is_core_anchor_line(claim: str, line: str) -> bool:
+def _is_core_anchor_line(claim: str, line: str, *, role: str = "phrase") -> bool:
     """Title/company/name cores ignore highlight bullets that mention the same company."""
     if _line_is_bullet(line):
         return False
+    if role == "title":
+        return _title_anchor_supported(claim, line)
     return _anchor_supported(claim, line)
+
+
+def _line_is_experience_date(line: str) -> bool:
+    """Standalone month-name, ISO, numeric, and Present/Current range lines."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if _DATE_TOKEN_RE.search(stripped):
+        return True
+    if _MONTH_DATE_RE.search(stripped):
+        return True
+    if re.search(
+        rf"\b(?:{_MONTH_NAME_ALT})\.?\s+\d{{4}}\s*[–\-]\s*(?:present|current|now)\b",
+        stripped,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"\b(?:\d{4}-\d{2}(?:-\d{2})?|\d{1,2}/\d{1,2}/\d{2,4})\s*[–\-]\s*(?:present|current|now)\b",
+        stripped,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return False
 
 
 def _find_minimal_cores(
@@ -648,6 +795,7 @@ def _find_minimal_cores(
     anchors: list[str],
     *,
     max_span: int,
+    kind: str = "experience",
 ) -> list[tuple[int, int]]:
     """Return minimal (start, end) inclusive cores in document order."""
     cleaned = [anchor for anchor in anchors if anchor and str(anchor).strip()]
@@ -663,7 +811,12 @@ def _find_minimal_cores(
     else:
         primary = cleaned[0]
         secondary = cleaned[1]
-        primary_idxs = [idx for idx, line in enumerate(lines) if _is_core_anchor_line(primary, line)]
+        primary_role = "title" if kind == "experience" else "phrase"
+        primary_idxs = [
+            idx
+            for idx, line in enumerate(lines)
+            if _is_core_anchor_line(primary, line, role=primary_role)
+        ]
         secondary_idxs = [
             idx for idx, line in enumerate(lines) if _is_core_anchor_line(secondary, line)
         ]
@@ -721,7 +874,12 @@ def _expand_context_end(
             nxt = lines[peek].strip()
             if kind == "education" and _line_looks_like_institution(nxt):
                 break
-            if kind in {"experience", "project"} and not _line_is_bullet(nxt) and not _DATE_TOKEN_RE.search(nxt):
+            if kind == "experience" and not _line_is_bullet(nxt) and not _line_is_experience_date(
+                nxt
+            ):
+                if not nxt.lower().startswith("technologies:"):
+                    break
+            if kind == "project" and not _line_is_bullet(nxt) and not _DATE_TOKEN_RE.search(nxt):
                 # Next non-continuation heading starts a peer entry.
                 if not nxt.lower().startswith("technologies:"):
                     break
@@ -732,7 +890,7 @@ def _expand_context_end(
             break
         if kind == "experience" and idx > core_end and not _line_is_bullet(stripped) and not _line_has_inline_bullet(
             stripped
-        ) and not _DATE_TOKEN_RE.search(stripped):
+        ) and not _line_is_experience_date(stripped):
             # A bare heading line after the core is the next role/company block.
             # Allow same-core company/title already covered by core_end.
             break
@@ -774,7 +932,7 @@ def allocate_parent_contexts(
         return [None for _ in anchor_groups]
 
     candidates = [
-        _find_minimal_cores(lines, group, max_span=max_span) for group in anchor_groups
+        _find_minimal_cores(lines, group, max_span=max_span, kind=kind) for group in anchor_groups
     ]
 
     assigned: list[tuple[int, int] | None] = [None] * len(anchor_groups)

@@ -1075,6 +1075,249 @@ def test_iso_date_behavior_preserved() -> None:
     assert claim_supported("2025-05", "May 2025") is True
 
 
+def test_full_date_day_rewrite_rejected() -> None:
+    assert claim_supported("2025-05-31", "2025-05-01") is False
+    assert claim_supported("05/31/2025", "05/01/2025") is False
+
+
+def test_full_date_month_only_granularity_mismatch_rejected() -> None:
+    assert claim_supported("2025-05-31", "May 2025") is False
+    assert claim_supported("May 2025", "2025-05-31") is False
+    assert claim_supported("2025-05-31", "2025-05") is False
+
+
+def test_safe_equivalent_full_date_formatting_retained() -> None:
+    assert claim_supported("2025-05-31", "05/31/2025") is True
+    assert claim_supported("05/31/2025", "2025-05-31") is True
+
+
+def test_malformed_calendar_dates_rejected() -> None:
+    assert claim_supported("2025-02-31", "2025-02-31") is False
+    assert claim_supported("2025-13-01", "2025-13-01") is False
+    assert claim_supported("02/31/2025", "02/31/2025") is False
+
+
+def test_email_prefix_suffix_boundary_attacks_rejected() -> None:
+    assert claim_supported("john@example.com", "john@example.com2") is False
+    assert claim_supported("john@example.com", "john@example.com_extra") is False
+    assert claim_supported("john@example.com", "ajohn@example.com") is False
+    assert claim_supported("john@example.com", "john@example.com.extra.org") is False
+
+
+def test_exact_spaced_case_insensitive_email_retained() -> None:
+    assert claim_supported("john@example.com", "john@example.com") is True
+    assert claim_supported("john@example.com", "John@Example.COM") is True
+    assert claim_supported("john@example.com", "john @ example.com") is True
+
+
+def test_phone_embedded_inside_longer_numbers_rejected() -> None:
+    assert claim_supported("555-123-4567", "2555-123-4567") is False
+    source = "Alex Rivera\n2555-123-4567"
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="555-123-4567"), source
+    )
+    assert profile.phone is None
+    assert report.as_counts().get("removed_phones") == 1
+    source = "Alex Rivera\n9555 123 4567"
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="555-123-4567"), source
+    )
+    assert profile.phone is None
+    source = "Alex Rivera\n555-123-45678"
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="555-123-4567"), source
+    )
+    assert profile.phone is None
+
+
+def test_non_us_country_prefix_suffix_match_rejected() -> None:
+    source = "Alex Rivera\n+44 555-123-4567"
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="555-123-4567"), source
+    )
+    assert profile.phone is None
+    assert report.as_counts().get("removed_phones") == 1
+
+
+def test_us_plus_one_equivalence_retained() -> None:
+    source = "Alex Rivera\n+1 555-123-4567"
+    profile, _report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="555-123-4567"), source
+    )
+    assert profile.phone == "555-123-4567"
+
+
+def _experience_resume(title: str, extra: str = "2025-05\n- Built APIs.") -> str:
+    return f"Alex Rivera\n{title}\nAcme\n{extra}"
+
+
+def _experience_payload(title: str, **date_fields: object) -> dict:
+    item = {
+        "title": title,
+        "company": "Acme",
+        "start_date": date_fields.get("start_date", "2025-05"),
+        "end_date": date_fields.get("end_date"),
+        "highlights": ["Built APIs."],
+    }
+    return _contact_only_payload(email=None, phone=None, experience=[item])
+
+
+def test_pipeline_rejects_removed_experience_qualifiers() -> None:
+    cases = [
+        ("Senior Software Engineer", "Software Engineer"),
+        ("Staff Software Engineer", "Software Engineer"),
+        ("Software Engineer Intern", "Software Engineer"),
+        ("Software Engineer II", "Software Engineer"),
+        ("Senior Vice President", "Vice President"),
+    ]
+    for source_title, claimed_title in cases:
+        profile, report = validate_and_ground_profile(
+            _experience_payload(claimed_title), _experience_resume(source_title)
+        )
+        assert profile.experience == []
+        assert report.as_counts().get("removed_experience") == 1
+
+
+def test_pipeline_rejects_invented_experience_qualifiers() -> None:
+    cases = [
+        ("Software Engineer", "Senior Software Engineer"),
+        ("Software Engineer", "Staff Software Engineer"),
+        ("Software Engineer", "Software Engineer Intern"),
+        ("Vice President", "Senior Vice President"),
+    ]
+    for source_title, claimed_title in cases:
+        profile, report = validate_and_ground_profile(
+            _experience_payload(claimed_title), _experience_resume(source_title)
+        )
+        assert profile.experience == []
+        assert report.as_counts().get("removed_experience") == 1
+
+
+def test_pipeline_rejects_roman_or_numeric_title_level_removal() -> None:
+    profile, report = validate_and_ground_profile(
+        _experience_payload("Software Engineer"),
+        _experience_resume("Software Engineer II"),
+    )
+    assert profile.experience == []
+    profile, report = validate_and_ground_profile(
+        _experience_payload("Software Engineer"),
+        _experience_resume("Software Engineer 2"),
+    )
+    assert profile.experience == []
+    assert report.as_counts().get("removed_experience") == 1
+
+
+def test_safe_sr_senior_and_jr_junior_title_equivalence() -> None:
+    profile, report = validate_and_ground_profile(
+        _experience_payload("Senior Software Engineer"),
+        _experience_resume("Sr. Software Engineer"),
+    )
+    assert len(profile.experience) == 1
+    assert profile.experience[0].title == "Senior Software Engineer"
+    assert report.as_counts().get("removed_experience") is None
+    profile, report = validate_and_ground_profile(
+        _experience_payload("Junior Software Engineer"),
+        _experience_resume("Jr. Software Engineer"),
+    )
+    assert len(profile.experience) == 1
+    assert profile.experience[0].title == "Junior Software Engineer"
+
+
+def test_standalone_natural_month_date_retained_through_pipeline() -> None:
+    resume = """
+Alex Rivera
+Software Engineer
+Acme
+May 2025
+- Built APIs.
+""".strip()
+    profile, report = validate_and_ground_profile(
+        _experience_payload("Software Engineer", start_date="May 2025"), resume
+    )
+    assert len(profile.experience) == 1
+    assert profile.experience[0].start_date == "May 2025"
+    assert profile.experience[0].highlights == ["Built APIs."]
+    assert report.as_counts().get("removed_experience_dates") is None
+    assert report.as_counts().get("removed_highlights") is None
+
+
+def test_present_and_current_ranges_retained() -> None:
+    resume = """
+Alex Rivera
+Software Engineer
+Acme
+May 2025 – Present
+- Built APIs.
+""".strip()
+    profile, report = validate_and_ground_profile(
+        _experience_payload("Software Engineer", start_date="May 2025", end_date="Present"),
+        resume,
+    )
+    assert profile.experience[0].start_date == "May 2025"
+    assert profile.experience[0].end_date == "Present"
+    assert profile.experience[0].highlights == ["Built APIs."]
+    resume = """
+Alex Rivera
+Software Engineer
+Acme
+Jan 2024 - Current
+- Built APIs.
+""".strip()
+    profile, report = validate_and_ground_profile(
+        _experience_payload("Software Engineer", start_date="Jan 2024", end_date="Current"),
+        resume,
+    )
+    assert profile.experience[0].start_date == "Jan 2024"
+    assert profile.experience[0].end_date == "Current"
+
+
+def test_neighboring_experience_isolation_with_month_dates() -> None:
+    resume = """
+Alex Rivera
+Software Engineer
+Acme
+May 2025 – August 2025
+- First tour work.
+Software Engineer
+Beta Labs
+June 2025 – July 2025
+- Second tour work.
+""".strip()
+    raw = _contact_only_payload(
+        email=None,
+        phone=None,
+        experience=[
+            {
+                "title": "Software Engineer",
+                "company": "Acme",
+                "start_date": "June 2025",
+                "end_date": "July 2025",
+                "highlights": ["Second tour work."],
+            }
+        ],
+    )
+    profile, report = validate_and_ground_profile(raw, resume)
+    assert profile.experience[0].start_date is None
+    assert profile.experience[0].end_date is None
+    assert profile.experience[0].highlights == []
+    assert report.as_counts().get("removed_experience_dates") == 2
+    assert report.as_counts().get("removed_highlights") == 1
+
+
+def test_adversarial_grounding_logs_remain_count_only(caplog: pytest.LogCaptureFixture) -> None:
+    source = "Alex Rivera\njohn@example.com2\n2555-123-4567"
+    raw = _contact_only_payload(email="john@example.com", phone="555-123-4567")
+    with caplog.at_level(logging.INFO, logger="backend.services.candidate_profile_agent"):
+        profile, report = validate_and_ground_profile(raw, source)
+    assert profile.email is None
+    assert profile.phone is None
+    blob = json.dumps(report.as_counts()) + "".join(report.rejected) + caplog.text
+    assert "john@example.com" not in blob
+    assert "555-123-4567" not in blob
+    assert all(key.startswith("removed_") for key in report.as_counts())
+
+
+
 
 def test_multiline_education_keeps_own_fields() -> None:
     resume = """
