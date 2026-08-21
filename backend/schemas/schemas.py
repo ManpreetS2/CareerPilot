@@ -132,6 +132,7 @@ class ApplicationPackage(BaseModel):
     )
     eligibility_confirmed: bool = False
     eligibility_notes: str | None = None
+    decision_notes: str | None = None
 
 
 class InterviewPrep(BaseModel):

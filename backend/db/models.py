@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -118,17 +119,19 @@ class MatchScoreRecord(Base):
 
 class ApplicationPackageRecord(Base):
     __tablename__ = "application_packages"
+    __table_args__ = (Index("ux_application_packages_job_id", "job_id", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
     candidate_id: Mapped[int | None] = mapped_column(ForeignKey("candidates.id"), nullable=True)
-    tailored_bullets: Mapped[list] = mapped_column(JSON, default=list)
+    tailored_bullets: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     cover_letter_draft: Mapped[str | None] = mapped_column(Text, nullable=True)
     recruiter_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_traceability_notes: Mapped[list] = mapped_column(JSON, default=list)
+    source_traceability_notes: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     approval_status: Mapped[str] = mapped_column(String(32), default="draft")
     eligibility_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     eligibility_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

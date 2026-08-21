@@ -23,38 +23,42 @@ export function ApplicationPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [eligibilityConfirmed, setEligibilityConfirmed] = useState(false);
   const [eligibilityNotes, setEligibilityNotes] = useState("");
+  const [decisionNotes, setDecisionNotes] = useState("");
 
   useEffect(() => {
     if (!jobId) {
       setLoading(false);
       return;
     }
+    const id = jobId;
     let cancelled = false;
     async function load() {
       setLoading(true);
       setError(null);
-      try {
-        const [nextJob, nextMaterials] = await Promise.all([
-          api.getJob(jobId as string),
-          api.generateMaterials(jobId as string),
-        ]);
-        if (cancelled) return;
-        setJob(nextJob);
-        setMaterials(nextMaterials);
-        setEligibilityConfirmed(nextMaterials.eligibility_confirmed);
-        setEligibilityNotes(nextMaterials.eligibility_notes || "");
-        saveSelectedJobId(jobId as string);
-        try {
-          const nextMatch = await api.scoreJob(jobId as string);
-          if (!cancelled) setMatch(nextMatch);
-        } catch {
-          if (!cancelled) setMatch(null);
-        }
-      } catch (err) {
-        if (!cancelled) setError(err);
-      } finally {
-        if (!cancelled) setLoading(false);
+      // Independent requests run concurrently — a fit score failure (no
+      // candidate profile yet, scoring error) shouldn't block showing the
+      // job and materials, so it's handled separately from the other two.
+      const [jobResult, materialsResult, scoreResult] = await Promise.allSettled([
+        api.getJob(id),
+        api.generateMaterials(id),
+        api.scoreJob(id),
+      ]);
+      if (cancelled) return;
+
+      if (jobResult.status === "rejected" || materialsResult.status === "rejected") {
+        setError(jobResult.status === "rejected" ? jobResult.reason : (materialsResult as PromiseRejectedResult).reason);
+        setLoading(false);
+        return;
       }
+
+      setJob(jobResult.value);
+      setMaterials(materialsResult.value);
+      setEligibilityConfirmed(materialsResult.value.eligibility_confirmed);
+      setEligibilityNotes(materialsResult.value.eligibility_notes || "");
+      setDecisionNotes(materialsResult.value.decision_notes || "");
+      setMatch(scoreResult.status === "fulfilled" ? scoreResult.value : null);
+      saveSelectedJobId(id);
+      setLoading(false);
     }
     void load();
     return () => {
@@ -69,8 +73,9 @@ export function ApplicationPage() {
     setMessage(null);
     try {
       const result = await api.approveApplication(jobId, decision, {
+        notes: decisionNotes,
         eligibilityConfirmed,
-        eligibilityNotes: eligibilityNotes || undefined,
+        eligibilityNotes,
       });
       setMessage(result.message);
       setMaterials((prev) =>
@@ -78,8 +83,12 @@ export function ApplicationPage() {
           ? {
               ...prev,
               approval_status: result.approval_status as ApplicationPackage["approval_status"],
-              eligibility_confirmed: eligibilityConfirmed,
+              // Mirrors the backend: only an "approved" decision can move
+              // eligibility_confirmed to true; edit/reject never touch it,
+              // so a prior confirmation is never silently lost.
+              eligibility_confirmed: decision === "approved" ? true : prev.eligibility_confirmed,
               eligibility_notes: eligibilityNotes || null,
+              decision_notes: decisionNotes || null,
             }
           : prev,
       );
@@ -232,6 +241,16 @@ export function ApplicationPage() {
             onChange={(event) => setEligibilityNotes(event.target.value)}
           />
         </div>
+
+        <label className="mt-4 block text-sm">
+          <span className="text-ink-600 dark:text-ink-300">Reviewer notes</span>
+          <textarea
+            className="input mt-2 min-h-[72px]"
+            placeholder="Optional — e.g. what needs to change, or why this was rejected…"
+            value={decisionNotes}
+            onChange={(event) => setDecisionNotes(event.target.value)}
+          />
+        </label>
 
         <div className="mt-4 flex flex-wrap gap-2">
           <button
