@@ -127,6 +127,8 @@ class ApplicationPackageRecord(Base):
     recruiter_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_traceability_notes: Mapped[list] = mapped_column(JSON, default=list)
     approval_status: Mapped[str] = mapped_column(String(32), default="draft")
+    eligibility_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    eligibility_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
