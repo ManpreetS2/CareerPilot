@@ -14,7 +14,6 @@ from backend.services.analysis_service import (
     JobNotFoundError,
     RequirementsUnavailableError,
     ScoringError,
-    score_job,
 )
 from backend.services.job_intelligence_service import (
     EmptyGroundedIntelligenceError,
@@ -25,6 +24,7 @@ from backend.services.job_intelligence_service import (
     get_stored_job_intelligence,
 )
 from backend.services.llm_client import LLMConfigurationError, LLMProviderError
+from backend.services.scoring_orchestrator import score_job_with_intelligence
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,19 @@ def _http_for_intelligence_error(exc: Exception) -> HTTPException:
     )
 
 
+def _is_intelligence_pipeline_error(exc: Exception) -> bool:
+    return isinstance(
+        exc,
+        (
+            PostingEvidenceError,
+            EmptyGroundedIntelligenceError,
+            LLMConfigurationError,
+            LLMProviderError,
+            StructuredIntelligenceError,
+        ),
+    )
+
+
 @router.get("/jobs/{job_id}/intelligence", response_model=JobIntelligence)
 def get_job_intelligence_route(
     job_id: str,
@@ -95,6 +108,8 @@ def extract_job_intelligence_route(
 def score_job_route(job_id: str, db: Session = Depends(get_db)) -> MatchScore:
     """Calculate and persist an explainable fit score using the request session."""
     try:
-        return score_job(db, job_id)
+        return score_job_with_intelligence(db, job_id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
+        if _is_intelligence_pipeline_error(exc):
+            raise _http_for_intelligence_error(exc) from exc
         raise _http_for_scoring_error(exc) from exc

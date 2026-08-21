@@ -126,15 +126,34 @@ export function JobDetailPage() {
     const requestJobId = jobId;
     setScoring(true);
     setScoreError(null);
+    async function refreshIntelligence() {
+      try {
+        const stored = await api.getJobIntelligence(requestJobId);
+        if (requestId === scoringRequest.current && requestJobId === jobId) {
+          setIntelligence(stored);
+          setIntelligenceError(null);
+        }
+      } catch (err) {
+        if (requestId === scoringRequest.current && requestJobId === jobId) {
+          if (err instanceof ApiClientError && err.status === 404) {
+            setIntelligence(null);
+          } else {
+            setIntelligenceError(err);
+          }
+        }
+      }
+    }
     try {
       const nextMatch = await api.scoreJob(jobId);
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         setMatch(nextMatch);
+        await refreshIntelligence();
       }
     } catch (err) {
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         setMatch(null);
         setScoreError(err);
+        await refreshIntelligence();
       }
     } finally {
       if (requestId === scoringRequest.current && requestJobId === jobId) {

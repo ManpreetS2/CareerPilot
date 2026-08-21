@@ -228,6 +228,15 @@ def _require_posting_evidence(job: JobRecord) -> None:
         raise PostingEvidenceError()
 
 
+def has_usable_posting_evidence(job: JobRecord) -> bool:
+    """Return whether the stored posting is sufficient for provider extraction."""
+    try:
+        _require_posting_evidence(job)
+    except PostingEvidenceError:
+        return False
+    return True
+
+
 def _parse_structured_output(raw: str) -> JobIntelligence:
     if not raw or not str(raw).strip():
         raise StructuredIntelligenceError()

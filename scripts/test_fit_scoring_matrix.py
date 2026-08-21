@@ -191,6 +191,24 @@ def run_scenario(manifest: dict[str, Any], database_path: Path) -> MatrixResult:
     response_payload: dict[str, Any] = {}
     response_status = 0
 
+    extraction_responses = list(manifest.get("extraction_responses") or [])
+    if manifest.get("extraction_response") is not None:
+        extraction_responses = [manifest["extraction_response"]]
+
+    class _MatrixLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, _prompt: str, system_prompt: str | None = None) -> str:
+            del system_prompt
+            if self.calls >= len(extraction_responses):
+                raise AssertionError("unexpected provider call in scoring matrix")
+            response = extraction_responses[self.calls]
+            self.calls += 1
+            return response if isinstance(response, str) else json.dumps(response)
+
+    matrix_llm = _MatrixLLM()
+
     try:
         with SessionLocal() as session:
             job, _candidate = _seed(session, manifest)
@@ -224,36 +242,43 @@ def run_scenario(manifest: dict[str, Any], database_path: Path) -> MatrixResult:
         repeats = int(manifest.get("request_count", 1))
         first_success_payload: dict[str, Any] | None = None
 
-        with TestClient(app) as client:
-            for request_index in range(repeats):
-                if request_index == 1 and manifest.get("equivalent_intelligence"):
-                    with SessionLocal() as session:
-                        record = session.query(JobIntelligenceRecord).one()
-                        for key, value in manifest["equivalent_intelligence"].items():
-                            setattr(record, key, value)
-                        session.commit()
-                with _network_blocked():
-                    response = client.post(f"/api/jobs/{endpoint_job_id}/score")
-                response_status = response.status_code
-                response_payload = response.json()
-                if response_status == 200:
-                    if first_success_payload is None:
-                        first_success_payload = response_payload
-                    elif manifest.get("equivalent_intelligence"):
-                        comparable_fields = [
-                            "overall_score",
-                            "skill_score",
-                            "experience_score",
-                            "education_score",
-                            "location_score",
-                            "preference_score",
-                            "recommendation",
-                        ]
-                        if any(
-                            response_payload[field] != first_success_payload[field]
-                            for field in comparable_fields
-                        ):
-                            failures.append("equivalent_order_changed_score")
+        with patch(
+            "backend.services.job_intelligence_service.get_llm_client",
+            return_value=matrix_llm,
+        ):
+            with TestClient(app) as client:
+                for request_index in range(repeats):
+                    if request_index == 1 and manifest.get("equivalent_intelligence"):
+                        with SessionLocal() as session:
+                            record = session.query(JobIntelligenceRecord).one()
+                            for key, value in manifest["equivalent_intelligence"].items():
+                                setattr(record, key, value)
+                            session.commit()
+                    with _network_blocked():
+                        response = client.post(f"/api/jobs/{endpoint_job_id}/score")
+                    response_status = response.status_code
+                    response_payload = response.json()
+                    if response_status == 200:
+                        if first_success_payload is None:
+                            first_success_payload = response_payload
+                        elif manifest.get("equivalent_intelligence"):
+                            comparable_fields = [
+                                "overall_score",
+                                "skill_score",
+                                "experience_score",
+                                "education_score",
+                                "location_score",
+                                "preference_score",
+                                "recommendation",
+                            ]
+                            if any(
+                                response_payload[field] != first_success_payload[field]
+                                for field in comparable_fields
+                            ):
+                                failures.append("equivalent_order_changed_score")
+
+        if matrix_llm.calls != int(manifest.get("expected_provider_calls", 0)):
+            failures.append("provider_call_count")
 
         if response_status != int(expected["http_status"]):
             failures.append("http_status")
@@ -302,6 +327,26 @@ def run_scenario(manifest: dict[str, Any], database_path: Path) -> MatrixResult:
                     failures.append("persistence_response_mismatch")
             intelligence_after = _intelligence_snapshot(session, job)
             expected_intelligence_after = intelligence_before
+            if (
+                intelligence_before is None
+                and response_status == 200
+                and manifest.get("extraction_response") is not None
+            ):
+                generated = manifest["extraction_response"]
+                expected_intelligence_after = {
+                    "required_skills": list(generated.get("required_skills") or []),
+                    "preferred_skills": list(generated.get("preferred_skills") or []),
+                    "years_experience": generated.get("years_experience"),
+                    "education_requirements": list(
+                        generated.get("education_requirements") or []
+                    ),
+                    "tech_stack": list(generated.get("tech_stack") or []),
+                    "seniority": generated.get("seniority"),
+                    "responsibilities": list(generated.get("responsibilities") or []),
+                    "likely_interview_focus": list(
+                        generated.get("likely_interview_focus") or []
+                    ),
+                }
             if intelligence_before is not None and manifest.get("equivalent_intelligence"):
                 expected_intelligence_after = {
                     **intelligence_before,

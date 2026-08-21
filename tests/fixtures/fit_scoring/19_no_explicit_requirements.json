@@ -23,6 +23,8 @@
   },
   "preferences": null,
   "intelligence": null,
+  "extraction_responses": [{}, {}],
+  "expected_provider_calls": 2,
   "expected": {
     "available_components": [],
     "null_components": ["skill", "experience", "education", "location", "preference"],
