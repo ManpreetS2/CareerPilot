@@ -107,11 +107,16 @@ export type FlaggedField = {
   reason: string;
 };
 
+export type FilledField = {
+  field: string;
+  value: string;
+};
+
 export type FormFillResult = {
   job_id: string;
   ats_platform: "greenhouse" | "lever" | "unsupported";
   status: "filled" | "needs_review" | "failed";
-  filled_fields: string[];
+  filled_fields: FilledField[];
   flagged_fields: FlaggedField[];
   error_message?: string | null;
   created_at?: string | null;

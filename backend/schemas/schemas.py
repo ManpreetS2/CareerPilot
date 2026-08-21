@@ -187,11 +187,37 @@ class FlaggedField(BaseModel):
     reason: str
 
 
+class FilledField(BaseModel):
+    field: str
+    value: str
+
+
 class FormFillResult(BaseModel):
     job_id: str
     ats_platform: Literal["greenhouse", "lever", "unsupported"]
     status: Literal["filled", "needs_review", "failed"]
-    filled_fields: list[str] = Field(default_factory=list)
+    filled_fields: list[FilledField] = Field(default_factory=list)
     flagged_fields: list[FlaggedField] = Field(default_factory=list)
     error_message: str | None = None
     created_at: datetime | None = None
+
+
+class AutofillFields(BaseModel):
+    """Raw candidate/application field values for the browser extension's
+    content script to fill directly into a real page — no server-side
+    browser involved, so no field-detection results here, only values."""
+
+    full_name: str
+    first_name: str
+    last_name: str
+    email: str | None = None
+    phone: str | None = None
+    current_company: str | None = None
+    portfolio_url: str | None = None
+    cover_letter: str | None = None
+
+
+class AutofillResponse(BaseModel):
+    job_id: str
+    platform: Literal["greenhouse", "lever", "unsupported"]
+    fields: AutofillFields

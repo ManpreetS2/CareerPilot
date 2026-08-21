@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Check, ExternalLink, PencilLine, Wand2, X } from "lucide-react";
+import { Check, Clipboard, ClipboardCheck, ExternalLink, PencilLine, Wand2, X } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
@@ -27,6 +27,7 @@ export function ApplicationPage() {
   const [filling, setFilling] = useState(false);
   const [fillResult, setFillResult] = useState<FormFillResult | null>(null);
   const [fillError, setFillError] = useState<unknown>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   useEffect(() => {
     if (!jobId) {
@@ -113,6 +114,17 @@ export function ApplicationPage() {
       setFillError(err);
     } finally {
       setFilling(false);
+    }
+  }
+
+  async function copyValue(field: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField((current) => (current === field ? null : current)), 1500);
+    } catch {
+      // Clipboard access can be denied by the browser — the value is still
+      // shown on screen, so the user can select and copy it manually.
     }
   }
 
@@ -311,9 +323,10 @@ export function ApplicationPage() {
         ) : (
           <>
             <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
-              Fills what it can confidently match on the real application form (Greenhouse or
-              Lever) and flags anything it can't — it never submits. Review and submit the
-              application yourself.
+              Runs on the server against the real application form (Greenhouse or Lever) to work
+              out what can be confidently filled and what can't — it never submits, and it has no
+              connection to your own browser. Copy each value below into the form you open
+              yourself.
             </p>
             <ErrorBanner error={fillError} />
             <button
@@ -336,17 +349,42 @@ export function ApplicationPage() {
                   <>
                     <p className="text-sm text-ink-600 dark:text-ink-300">
                       Detected <strong className="capitalize">{fillResult.ats_platform}</strong> —{" "}
-                      {fillResult.filled_fields.length} field(s) filled,{" "}
+                      {fillResult.filled_fields.length} value(s) matched,{" "}
                       {fillResult.flagged_fields.length} need your input.
                     </p>
                     {fillResult.filled_fields.length > 0 ? (
                       <div>
                         <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-500">
-                          Filled automatically
+                          Copy these into the form
                         </h3>
-                        <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-ink-600 dark:text-ink-300">
+                        <ul className="mt-1 space-y-1.5">
                           {fillResult.filled_fields.map((f) => (
-                            <li key={f}>{f.replaceAll("_", " ")}</li>
+                            <li
+                              key={f.field}
+                              className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+                            >
+                              <span className="min-w-0">
+                                <span className="text-ink-500 capitalize">{f.field.replaceAll("_", " ")}:</span>{" "}
+                                <span className="font-medium text-ink-700 dark:text-ink-200">{f.value}</span>
+                              </span>
+                              <button
+                                type="button"
+                                className="btn-ghost shrink-0 px-2 py-1 text-xs"
+                                onClick={() => void copyValue(f.field, f.value)}
+                              >
+                                {copiedField === f.field ? (
+                                  <>
+                                    <ClipboardCheck className="h-3.5 w-3.5" aria-hidden />
+                                    Copied
+                                  </>
+                                ) : (
+                                  <>
+                                    <Clipboard className="h-3.5 w-3.5" aria-hidden />
+                                    Copy
+                                  </>
+                                )}
+                              </button>
+                            </li>
                           ))}
                         </ul>
                       </div>

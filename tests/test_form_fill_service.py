@@ -33,7 +33,10 @@ from backend.services.form_fill_service import (
     _first_url,
     _navigation_url,
     _split_name,
+    _strip_lever_apply_suffix,
     detect_ats_platform,
+    find_job_by_url,
+    get_autofill_data,
     run_assisted_apply,
 )
 
@@ -42,6 +45,14 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "ats_forms"
 
 def _fixture_url(name: str) -> str:
     return f"file://{(FIXTURES_DIR / name).resolve()}"
+
+
+def _names(filled_or_flagged) -> set[str]:
+    return {f.field for f in filled_or_flagged}
+
+
+def _value_of(filled, field_name: str) -> str | None:
+    return next((f.value for f in filled if f.field == field_name), None)
 
 
 # ---------------------------------------------------------------------------
@@ -361,12 +372,15 @@ def test_fill_greenhouse_standard_fills_mappable_fields(page) -> None:
 
     filled, flagged = _fill_greenhouse(page, fields)
 
-    assert "first_name" in filled
-    assert "last_name" in filled
-    assert "email" in filled
-    assert "phone" in filled
-    assert "current_company" in filled
-    assert "cover_letter" in filled
+    names = _names(filled)
+    assert {"first_name", "last_name", "email", "phone", "current_company", "cover_letter"} <= names
+    # The whole point of returning filled fields at all: the actual value,
+    # not just that some field named "email" exists — a human needs the
+    # real value to copy into the form themselves.
+    assert _value_of(filled, "first_name") == "Jordan"
+    assert _value_of(filled, "last_name") == "Quill"
+    assert _value_of(filled, "email") == "jordan@example.com"
+    assert _value_of(filled, "current_company") == "Acme"
     assert page.locator("#first_name").input_value() == "Jordan"
     assert page.locator("#last_name").input_value() == "Quill"
     assert page.locator("#email").input_value() == "jordan@example.com"
@@ -410,8 +424,10 @@ def test_fill_greenhouse_combined_full_name_field(page) -> None:
     page.goto(_fixture_url("greenhouse_combined_name.html"))
     fields = _fields(name="Jordan Quill")
     filled, _flagged = _fill_greenhouse(page, fields)
-    assert "full_name" in filled
-    assert "first_name" not in filled  # combined field used, not both
+    names = _names(filled)
+    assert "full_name" in names
+    assert "first_name" not in names  # combined field used, not both
+    assert _value_of(filled, "full_name") == "Jordan Quill"
     assert page.locator("#full_name").input_value() == "Jordan Quill"
 
 
@@ -422,6 +438,14 @@ def test_fill_greenhouse_label_fallback_when_selectors_miss(page) -> None:
     assert page.locator("#q1").input_value() == "Jordan"
     assert page.locator("#q2").input_value() == "Quill"
     assert page.locator("#q3").input_value() == "jordan@example.com"
+    # Regression: the label-fallback path filled these successfully but
+    # previously never recorded them in `filled` at all — they'd silently
+    # vanish from both filled and flagged, undercounting what the human
+    # actually needs to review.
+    names = _names(filled)
+    assert {"first_name", "last_name", "email"} <= names
+    assert _value_of(filled, "first_name") == "Jordan"
+    assert _value_of(filled, "email") == "jordan@example.com"
 
 
 def test_fill_greenhouse_missing_candidate_email_is_flagged_not_left_blank(page) -> None:
@@ -443,12 +467,11 @@ def test_fill_lever_standard_fills_mappable_fields(page) -> None:
 
     filled, flagged = _fill_lever(page, fields)
 
-    assert "full_name" in filled
-    assert "email" in filled
-    assert "phone" in filled
-    assert "current_company" in filled
-    assert "portfolio_url" in filled
-    assert "cover_letter" in filled
+    names = _names(filled)
+    assert {"full_name", "email", "phone", "current_company", "portfolio_url", "cover_letter"} <= names
+    assert _value_of(filled, "full_name") == "Jordan Quill"
+    assert _value_of(filled, "current_company") == "Acme"
+    assert _value_of(filled, "portfolio_url") == "https://portfolio.example.com"
     assert page.locator("input[name='name']").input_value() == "Jordan Quill"
     assert page.locator("input[name='org']").input_value() == "Acme"
     assert page.locator("input[name='urls[Portfolio]']").input_value() == "https://portfolio.example.com"
@@ -471,8 +494,8 @@ def test_fill_lever_does_not_reflag_a_required_field_it_already_filled(page) -> 
 
     filled, flagged = _fill_lever(page, fields)
 
-    assert "full_name" in filled
-    flagged_names = {f.field for f in flagged}
+    assert "full_name" in _names(filled)
+    flagged_names = _names(flagged)
     assert "name" not in flagged_names
     assert "email" not in flagged_names
     assert "phone" not in flagged_names
@@ -508,7 +531,8 @@ def test_run_assisted_apply_full_success_path(isolated_session, monkeypatch) -> 
     result = run_assisted_apply(isolated_session, "manual-abc123")
 
     assert result.status == "needs_review"  # resume + custom question always flagged
-    assert "email" in result.filled_fields
+    assert "email" in _names(result.filled_fields)
+    assert _value_of(result.filled_fields, "email") == "jordan@example.com"
     assert any(f.field == "resume" for f in result.flagged_fields)
     assert result.error_message is None
     assert isolated_session.query(FormFillAttemptRecord).count() == 1
@@ -528,7 +552,7 @@ def test_run_assisted_apply_persists_filled_and_flagged_fields(isolated_session,
 
     record = isolated_session.query(FormFillAttemptRecord).first()
     assert record.ats_platform == "lever"
-    assert "email" in record.filled_fields
+    assert any(f["field"] == "email" and f["value"] == "jordan@example.com" for f in record.filled_fields)
     assert any(f["field"] == "resume" for f in record.flagged_fields)
 
 
@@ -548,6 +572,104 @@ def test_fill_application_route_requires_approval(isolated_client) -> None:
 def test_fill_application_route_missing_job_404s(isolated_client) -> None:
     client, _SessionLocal = isolated_client
     response = client.post("/api/jobs/does-not-exist/fill-application")
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Extension autofill: URL matching and the field-data endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_strip_lever_apply_suffix_removes_apply() -> None:
+    assert _strip_lever_apply_suffix("https://jobs.lever.co/acme/abc-123/apply") == "https://jobs.lever.co/acme/abc-123"
+
+
+def test_strip_lever_apply_suffix_handles_trailing_slash() -> None:
+    assert _strip_lever_apply_suffix("https://jobs.lever.co/acme/abc-123/apply/") == "https://jobs.lever.co/acme/abc-123"
+
+
+def test_strip_lever_apply_suffix_no_op_without_apply() -> None:
+    assert _strip_lever_apply_suffix("https://job-boards.greenhouse.io/acme/jobs/1") == "https://job-boards.greenhouse.io/acme/jobs/1"
+
+
+def test_find_job_by_url_exact_match(isolated_session) -> None:
+    job = _job(isolated_session, url="https://job-boards.greenhouse.io/acme/jobs/1")
+    found = find_job_by_url(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1")
+    assert found is not None
+    assert found.id == job.id
+
+
+def test_find_job_by_url_matches_lever_apply_page(isolated_session) -> None:
+    """The extension passes the tab's actual URL, which for Lever is the
+    /apply form page — the stored job.url is always the plain posting
+    page, so matching must strip that suffix to find it."""
+    job = _job(isolated_session, url="https://jobs.lever.co/acme/abc-123")
+    found = find_job_by_url(isolated_session, "https://jobs.lever.co/acme/abc-123/apply")
+    assert found is not None
+    assert found.id == job.id
+
+
+def test_find_job_by_url_no_match_returns_none(isolated_session) -> None:
+    _job(isolated_session, url="https://job-boards.greenhouse.io/acme/jobs/1")
+    assert find_job_by_url(isolated_session, "https://job-boards.greenhouse.io/other/jobs/2") is None
+
+
+def test_get_autofill_data_returns_field_values(isolated_session) -> None:
+    job = _job(isolated_session, url="https://job-boards.greenhouse.io/acme/jobs/1")
+    candidate = _seed_candidate(isolated_session)
+    _approved_package(isolated_session, job, candidate)
+
+    result = get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1")
+
+    assert result.job_id == "manual-abc123"
+    assert result.platform == "greenhouse"
+    assert result.fields.full_name == "Jordan Quill"
+    assert result.fields.email == "jordan@example.com"
+
+
+def test_get_autofill_data_unknown_url_404s(isolated_session) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/nope/jobs/1")
+    assert exc_info.value.status_code == 404
+
+
+def test_get_autofill_data_requires_approval(isolated_session) -> None:
+    job = _job(isolated_session, url="https://job-boards.greenhouse.io/acme/jobs/1")
+    candidate = _seed_candidate(isolated_session)
+    record = ApplicationPackageRecord(
+        job_id=job.id,
+        candidate_id=candidate.id,
+        tailored_bullets=[],
+        source_traceability_notes=[],
+        approval_status="pending_review",
+    )
+    isolated_session.add(record)
+    isolated_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1")
+    assert exc_info.value.status_code == 409
+
+
+def test_extension_autofill_route_returns_data(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(db, url="https://job-boards.greenhouse.io/acme/jobs/1")
+        candidate = _seed_candidate(db)
+        _approved_package(db, job, candidate)
+
+    response = client.get(
+        "/api/extension/autofill", params={"url": "https://job-boards.greenhouse.io/acme/jobs/1"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["platform"] == "greenhouse"
+    assert body["fields"]["email"] == "jordan@example.com"
+
+
+def test_extension_autofill_route_unknown_url_404s(isolated_client) -> None:
+    client, _SessionLocal = isolated_client
+    response = client.get("/api/extension/autofill", params={"url": "https://example.com/nope"})
     assert response.status_code == 404
 
 

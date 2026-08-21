@@ -6,9 +6,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from backend.db.database import get_db
-from backend.schemas.schemas import ApplicationPackage, ApprovalRequest, ApprovalResponse, FormFillResult
+from backend.schemas.schemas import (
+    ApplicationPackage,
+    ApprovalRequest,
+    ApprovalResponse,
+    AutofillResponse,
+    FormFillResult,
+)
 from backend.services.application_service import apply_approval, get_or_generate_application_package
-from backend.services.form_fill_service import run_assisted_apply
+from backend.services.form_fill_service import get_autofill_data, run_assisted_apply
 
 router = APIRouter(prefix="/api", tags=["applications"])
 
@@ -34,3 +40,11 @@ def fill_application(job_id: str, db: Session = Depends(get_db)) -> FormFillResu
     anything it can't map, and never submits. Requires the application to
     already be approved."""
     return run_assisted_apply(db, job_id)
+
+
+@router.get("/extension/autofill", response_model=AutofillResponse)
+def extension_autofill(url: str, db: Session = Depends(get_db)) -> AutofillResponse:
+    """Field values for the browser extension's content script to fill
+    directly into the real page the user is on — matched by the tab's own
+    URL, since the extension has no other way to know which job this is."""
+    return get_autofill_data(db, url)

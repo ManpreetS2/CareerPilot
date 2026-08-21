@@ -7,6 +7,13 @@ in manually rather than left blank or invented. The automation never
 reaches a submit action; this agent prepares an application for a human to
 review and submit themselves, it does not apply on anyone's behalf.
 
+The fill itself runs in a throwaway, isolated headless browser session on
+the server — it has no connection to the user's own browser and can't leave
+anything filled there. What it hands back is the exact field/value mapping
+it determined, so the user can copy it into the real form themselves. (An
+earlier version returned only field *names*, which was useless for that —
+learned this from watching someone actually try to use it.)
+
 Runs only against jobs whose application package is already "approved" —
 the same review gate the Approval Agent enforces elsewhere. Assisted apply
 is downstream of human sign-off, not a way around it.
@@ -33,7 +40,7 @@ from sqlalchemy.orm import Session
 
 from backend.core.config import settings
 from backend.db.models import ApplicationPackageRecord, Candidate, FormFillAttemptRecord, JobRecord
-from backend.schemas.schemas import FlaggedField, FormFillResult
+from backend.schemas.schemas import AutofillFields, AutofillResponse, FilledField, FlaggedField, FormFillResult
 
 logger = logging.getLogger(__name__)
 
@@ -166,32 +173,36 @@ def _fill_common_fields(
     last_name_selectors: list[str],
     email_selectors: list[str],
     phone_selectors: list[str],
-) -> tuple[list[str], list[FlaggedField]]:
-    filled: list[str] = []
+) -> tuple[list[FilledField], list[FlaggedField]]:
+    filled: list[FilledField] = []
     flagged: list[FlaggedField] = []
 
     # Prefer a single full-name field where the platform has one; only fall
     # back to first/last if a combined field isn't present, so a page with
     # both doesn't get double-filled.
     if _try_fill_by_selectors(page, name_selectors, fields.full_name):
-        filled.append("full_name")
+        filled.append(FilledField(field="full_name", value=fields.full_name))
     else:
         first_ok = fields.first_name and _try_fill_by_selectors(page, first_name_selectors, fields.first_name)
         last_ok = fields.last_name and _try_fill_by_selectors(page, last_name_selectors, fields.last_name)
         if first_ok:
-            filled.append("first_name")
+            filled.append(FilledField(field="first_name", value=fields.first_name))
         elif not _try_fill_by_label(page, [r"first\s*name"], fields.first_name or ""):
             flagged.append(FlaggedField(field="first_name", reason="No matching name field found on the form."))
+        elif fields.first_name:
+            filled.append(FilledField(field="first_name", value=fields.first_name))
         if last_ok:
-            filled.append("last_name")
+            filled.append(FilledField(field="last_name", value=fields.last_name))
         elif fields.last_name and not _try_fill_by_label(page, [r"last\s*name"], fields.last_name):
             flagged.append(FlaggedField(field="last_name", reason="No matching name field found on the form."))
+        elif fields.last_name:
+            filled.append(FilledField(field="last_name", value=fields.last_name))
 
     if fields.email:
         if _try_fill_by_selectors(page, email_selectors, fields.email) or _try_fill_by_label(
             page, [r"email"], fields.email
         ):
-            filled.append("email")
+            filled.append(FilledField(field="email", value=fields.email))
         else:
             flagged.append(FlaggedField(field="email", reason="No matching email field found on the form."))
     else:
@@ -201,14 +212,14 @@ def _fill_common_fields(
         if _try_fill_by_selectors(page, phone_selectors, fields.phone) or _try_fill_by_label(
             page, [r"phone"], fields.phone
         ):
-            filled.append("phone")
+            filled.append(FilledField(field="phone", value=fields.phone))
         else:
             flagged.append(FlaggedField(field="phone", reason="No matching phone field found on the form."))
 
     return filled, flagged
 
 
-def _fill_greenhouse(page: Page, fields: _CandidateFields) -> tuple[list[str], list[FlaggedField]]:
+def _fill_greenhouse(page: Page, fields: _CandidateFields) -> tuple[list[FilledField], list[FlaggedField]]:
     filled, flagged = _fill_common_fields(
         page,
         fields,
@@ -220,13 +231,16 @@ def _fill_greenhouse(page: Page, fields: _CandidateFields) -> tuple[list[str], l
     )
 
     if fields.current_company:
-        if _try_fill_by_selectors(page, ["#company", "input[name='job_application[company]']"], fields.current_company):
-            filled.append("current_company")
-        elif _try_fill_by_label(page, [r"current\s*company", r"^company$"], fields.current_company):
-            filled.append("current_company")
+        filled_company = _try_fill_by_selectors(
+            page, ["#company", "input[name='job_application[company]']"], fields.current_company
+        ) or _try_fill_by_label(page, [r"current\s*company", r"^company$"], fields.current_company)
+        if filled_company:
+            filled.append(FilledField(field="current_company", value=fields.current_company))
 
-    if fields.cover_letter and _try_fill_by_selectors(page, ["#cover_letter_text", "textarea[name*='cover_letter']"], fields.cover_letter):
-        filled.append("cover_letter")
+    if fields.cover_letter and _try_fill_by_selectors(
+        page, ["#cover_letter_text", "textarea[name*='cover_letter']"], fields.cover_letter
+    ):
+        filled.append(FilledField(field="cover_letter", value=fields.cover_letter))
     elif fields.cover_letter:
         flagged.append(
             FlaggedField(field="cover_letter", reason="No cover letter text field found — this posting may require a file upload instead.")
@@ -239,7 +253,7 @@ def _fill_greenhouse(page: Page, fields: _CandidateFields) -> tuple[list[str], l
     return filled, flagged
 
 
-def _fill_lever(page: Page, fields: _CandidateFields) -> tuple[list[str], list[FlaggedField]]:
+def _fill_lever(page: Page, fields: _CandidateFields) -> tuple[list[FilledField], list[FlaggedField]]:
     filled, flagged = _fill_common_fields(
         page,
         fields,
@@ -251,16 +265,16 @@ def _fill_lever(page: Page, fields: _CandidateFields) -> tuple[list[str], list[F
     )
 
     if fields.current_company and _try_fill_by_selectors(page, ["input[name='org']"], fields.current_company):
-        filled.append("current_company")
+        filled.append(FilledField(field="current_company", value=fields.current_company))
 
     if fields.portfolio_url:
         for selector in ("input[name='urls[Portfolio]']", "input[name='urls[LinkedIn]']", "input[name='urls[GitHub]']"):
             if _try_fill_by_selectors(page, [selector], fields.portfolio_url):
-                filled.append("portfolio_url")
+                filled.append(FilledField(field="portfolio_url", value=fields.portfolio_url))
                 break
 
     if fields.cover_letter and _try_fill_by_selectors(page, ["textarea[name='comments']"], fields.cover_letter):
-        filled.append("cover_letter")
+        filled.append(FilledField(field="cover_letter", value=fields.cover_letter))
     elif fields.cover_letter:
         flagged.append(
             FlaggedField(field="cover_letter", reason="No additional-information field found for the cover letter text.")
@@ -331,11 +345,11 @@ def _nearest_label_text(locator: Locator) -> str | None:
     return text.strip().rstrip("*").strip()[:150]
 
 
-def _flag_unmatched_required_fields(page: Page, filled: list[str], flagged: list[FlaggedField]) -> None:
+def _flag_unmatched_required_fields(page: Page, filled: list[FilledField], flagged: list[FlaggedField]) -> None:
     """Any field the platform marks required that this agent didn't already
     fill or flag gets flagged too — silently leaving a required field blank
     is exactly the "guessing by omission" this agent is supposed to avoid."""
-    already = {f.field for f in flagged} | set(filled)
+    already = {f.field for f in flagged} | {f.field for f in filled}
     try:
         required_inputs = page.locator("input[required], textarea[required], select[required]")
         count = min(required_inputs.count(), 50)  # bounded: never scan an unbounded page
@@ -365,11 +379,9 @@ def _flag_unmatched_required_fields(page: Page, filled: list[str], flagged: list
         already.add(name)
 
 
-def run_assisted_apply(db: Session, job_id: str) -> FormFillResult:
-    job = db.query(JobRecord).filter(JobRecord.public_id == job_id).first()
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' not found")
-
+def _load_approved_application(db: Session, job: JobRecord) -> tuple[ApplicationPackageRecord, Candidate]:
+    """The same approval + candidate gate both fill paths (server-side
+    Playwright preview and the extension's live autofill) require."""
     package = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.job_id == job.id).first()
     if package is None or package.approval_status != "approved":
         raise HTTPException(
@@ -383,6 +395,67 @@ def run_assisted_apply(db: Session, job_id: str) -> FormFillResult:
             status_code=status.HTTP_409_CONFLICT,
             detail="No candidate profile is associated with this application.",
         )
+    return package, candidate
+
+
+def _strip_lever_apply_suffix(url: str) -> str:
+    trimmed = url.rstrip("/")
+    if trimmed.endswith("/apply"):
+        return trimmed[: -len("/apply")]
+    return trimmed
+
+
+def find_job_by_url(db: Session, url: str) -> JobRecord | None:
+    """Match a real browser tab's URL back to a stored job.
+
+    The extension passes whatever URL the user is actually looking at,
+    which for Lever is the .../apply form URL — the stored JobRecord.url is
+    always the plain posting URL (what job_scout_service persists), so an
+    exact match alone would miss every Lever match.
+    """
+    candidates = {url, url.rstrip("/"), _strip_lever_apply_suffix(url)}
+    for candidate_url in candidates:
+        record = db.query(JobRecord).filter(JobRecord.url == candidate_url).first()
+        if record is not None:
+            return record
+    return None
+
+
+def get_autofill_data(db: Session, url: str) -> AutofillResponse:
+    """Field values only, no server-side browser — the extension's content
+    script does the actual DOM fill live, in the user's own tab."""
+    job = find_job_by_url(db, url)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No job in CareerPilot matches this URL.",
+        )
+
+    package, candidate = _load_approved_application(db, job)
+    platform = detect_ats_platform(job.url)
+    fields = _build_candidate_fields(candidate, package)
+    return AutofillResponse(
+        job_id=job.public_id,
+        platform=platform,  # type: ignore[arg-type]
+        fields=AutofillFields(
+            full_name=fields.full_name,
+            first_name=fields.first_name,
+            last_name=fields.last_name,
+            email=fields.email,
+            phone=fields.phone,
+            current_company=fields.current_company,
+            portfolio_url=fields.portfolio_url,
+            cover_letter=fields.cover_letter,
+        ),
+    )
+
+
+def run_assisted_apply(db: Session, job_id: str) -> FormFillResult:
+    job = db.query(JobRecord).filter(JobRecord.public_id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' not found")
+
+    package, candidate = _load_approved_application(db, job)
 
     platform = detect_ats_platform(job.url)
     if platform == "unsupported":
@@ -396,7 +469,7 @@ def run_assisted_apply(db: Session, job_id: str) -> FormFillResult:
         return result
 
     fields = _build_candidate_fields(candidate, package)
-    filled: list[str] = []
+    filled: list[FilledField] = []
     flagged: list[FlaggedField] = list(fields.flagged)
     error_message: str | None = None
 
@@ -417,7 +490,10 @@ def run_assisted_apply(db: Session, job_id: str) -> FormFillResult:
                 filled.extend(run_filled)
                 flagged.extend(run_flagged)
                 # Deliberately no submit action anywhere in this function —
-                # the browser closes with the form filled but unsent.
+                # the browser closes with the form filled but unsent. This
+                # session has no connection to the user's own browser: the
+                # actual values are returned below so they can be copied
+                # into the real form the user opens themselves.
             finally:
                 browser.close()
     except PlaywrightError as exc:
@@ -448,7 +524,7 @@ def _persist_attempt(db: Session, job_internal_id: int, result: FormFillResult) 
         job_id=job_internal_id,
         ats_platform=result.ats_platform,
         status=result.status,
-        filled_fields=list(result.filled_fields),
+        filled_fields=[f.model_dump() for f in result.filled_fields],
         flagged_fields=[f.model_dump() for f in result.flagged_fields],
         error_message=result.error_message,
     )
