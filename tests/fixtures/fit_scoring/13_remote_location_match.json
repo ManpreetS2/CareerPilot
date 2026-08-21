@@ -1,0 +1,56 @@
+{
+  "scenario_id": "remote-location-preference-match",
+  "job": {
+    "public_id": "fit-matrix-013",
+    "title": "Backend Engineer",
+    "company": "Fictional Snowcap Cloud",
+    "location": "Remote (US)",
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-013",
+    "description": "Requirements:\nPython",
+    "source": "matrix",
+    "status": "verified"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 013",
+    "skills": ["Python"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": {
+    "target_roles": [],
+    "preferred_locations": ["Remote"],
+    "remote_preference": "remote",
+    "salary_min": null,
+    "work_authorization": "Synthetic authorization value",
+    "sponsorship_required": false,
+    "constraints": []
+  },
+  "intelligence": {
+    "required_skills": ["Python"],
+    "preferred_skills": [],
+    "years_experience": null,
+    "education_requirements": [],
+    "tech_stack": [],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "expected": {
+    "available_components": ["skill", "location"],
+    "null_components": ["experience", "education", "preference"],
+    "component_scores": {"skill": 100.0, "experience": null, "education": null, "location": 100.0, "preference": null},
+    "overall_score": 100.0,
+    "recommendation": "apply",
+    "matched": ["Python"],
+    "partial": [],
+    "missing": [],
+    "http_status": 200,
+    "row_count": 1,
+    "persistence": "insert"
+  }
+}

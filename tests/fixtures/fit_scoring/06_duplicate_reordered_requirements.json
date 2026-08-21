@@ -1,0 +1,52 @@
+{
+  "scenario_id": "duplicate-and-reordered-requirements",
+  "job": {
+    "public_id": "fit-matrix-006",
+    "title": "Database Engineer",
+    "company": "Fictional Pinecone Data",
+    "location": null,
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-006",
+    "description": "Requirements:\nPython\nPostgreSQL (Postgres)",
+    "source": "matrix",
+    "status": "verified"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 006",
+    "skills": ["Python", "PostgreSQL"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": null,
+  "intelligence": {
+    "required_skills": ["Python", "Postgres", "PostgreSQL", "Python"],
+    "preferred_skills": [],
+    "years_experience": null,
+    "education_requirements": [],
+    "tech_stack": [],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "request_count": 2,
+  "equivalent_intelligence": {
+    "required_skills": ["PostgreSQL", "Python", "Postgres"]
+  },
+  "expected": {
+    "available_components": ["skill"],
+    "null_components": ["experience", "education", "location", "preference"],
+    "component_scores": {"skill": 100.0, "experience": null, "education": null, "location": null, "preference": null},
+    "overall_score": 100.0,
+    "recommendation": "apply",
+    "matched": ["PostgreSQL", "Python"],
+    "partial": [],
+    "missing": [],
+    "http_status": 200,
+    "row_count": 1,
+    "persistence": "upsert"
+  }
+}

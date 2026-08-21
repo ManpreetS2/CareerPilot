@@ -29,7 +29,7 @@ def _http_for_scoring_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, ScoringError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    logger.exception("Unexpected scoring failure: %s", type(exc).__name__)
+    logger.error("Unexpected scoring failure category=internal")
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Unable to calculate fit score.",

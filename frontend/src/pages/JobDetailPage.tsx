@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ExternalLink, ShieldCheck } from "lucide-react";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -18,11 +18,16 @@ export function JobDetailPage() {
   const [scoreError, setScoreError] = useState<unknown>(null);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const scoringInFlight = useRef(false);
+  const scoringRequest = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    scoringRequest.current += 1;
+    scoringInFlight.current = false;
     async function load() {
       setLoading(true);
+      setScoring(false);
       setError(null);
       setMatch(null);
       setScoreError(null);
@@ -56,17 +61,27 @@ export function JobDetailPage() {
   }
 
   async function handleCalculateFit() {
-    if (!jobId) return;
+    if (!jobId || scoringInFlight.current) return;
+    scoringInFlight.current = true;
+    const requestId = ++scoringRequest.current;
+    const requestJobId = jobId;
     setScoring(true);
     setScoreError(null);
     try {
       const nextMatch = await api.scoreJob(jobId);
-      setMatch(nextMatch);
+      if (requestId === scoringRequest.current && requestJobId === jobId) {
+        setMatch(nextMatch);
+      }
     } catch (err) {
-      setMatch(null);
-      setScoreError(err);
+      if (requestId === scoringRequest.current && requestJobId === jobId) {
+        setMatch(null);
+        setScoreError(err);
+      }
     } finally {
-      setScoring(false);
+      if (requestId === scoringRequest.current && requestJobId === jobId) {
+        scoringInFlight.current = false;
+        setScoring(false);
+      }
     }
   }
 
@@ -151,7 +166,7 @@ export function JobDetailPage() {
       </div>
 
       <FitScorePanel
-        match={match}
+        match={match?.job_id === jobId ? match : null}
         loading={scoring}
         error={scoreError}
         onCalculate={() => void handleCalculateFit()}

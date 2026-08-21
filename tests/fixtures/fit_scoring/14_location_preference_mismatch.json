@@ -1,0 +1,56 @@
+{
+  "scenario_id": "onsite-city-preference-mismatch",
+  "job": {
+    "public_id": "fit-matrix-014",
+    "title": "Backend Engineer",
+    "company": "Fictional Copper Peak",
+    "location": "Austin, TX (On-site)",
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-014",
+    "description": "Requirements:\nPython",
+    "source": "matrix",
+    "status": "verified"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 014",
+    "skills": ["Python"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": {
+    "target_roles": [],
+    "preferred_locations": ["Dallas, TX"],
+    "remote_preference": "remote",
+    "salary_min": null,
+    "work_authorization": null,
+    "sponsorship_required": null,
+    "constraints": []
+  },
+  "intelligence": {
+    "required_skills": ["Python"],
+    "preferred_skills": [],
+    "years_experience": null,
+    "education_requirements": [],
+    "tech_stack": [],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "expected": {
+    "available_components": ["skill", "location"],
+    "null_components": ["experience", "education", "preference"],
+    "component_scores": {"skill": 100.0, "experience": null, "education": null, "location": 0.0, "preference": null},
+    "overall_score": 91.7,
+    "recommendation": "apply",
+    "matched": ["Python"],
+    "partial": [],
+    "missing": [],
+    "http_status": 200,
+    "row_count": 1,
+    "persistence": "insert"
+  }
+}

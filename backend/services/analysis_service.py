@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -49,6 +49,8 @@ _ALIAS_TO_CANONICAL: dict[str, str] = {
     "ts": "TypeScript",
     "react": "React",
     "node.js": "Node.js",
+    "node js": "Node.js",
+    "node-js": "Node.js",
     "nodejs": "Node.js",
     "node": "Node.js",
     "fastapi": "FastAPI",
@@ -111,7 +113,6 @@ _PREFERRED_SIGNALS = (
 _DEGREE_ALIASES = {
     "b.s.": "bachelor",
     "b.s": "bachelor",
-    "bs": "bachelor",
     "bachelor": "bachelor",
     "bachelors": "bachelor",
     "bachelor's": "bachelor",
@@ -122,7 +123,6 @@ _DEGREE_ALIASES = {
     "m s": "master",
     "m.s.": "master",
     "m.s": "master",
-    "ms": "master",
     "master": "master",
     "masters": "master",
     "master's": "master",
@@ -131,12 +131,12 @@ _DEGREE_ALIASES = {
     "phd": "phd",
     "doctorate": "phd",
     "a.a.": "associate",
-    "aa": "associate",
+    "a.a": "associate",
+    "a a": "associate",
     "associate": "associate",
 }
 _FIELD_ALIASES = {
     "computer science": "computer science",
-    "cs": "computer science",
     "computing": "computer science",
     "software engineering": "software engineering",
     "information systems": "information systems",
@@ -234,6 +234,10 @@ def canonicalize_skill(label: str) -> str | None:
     return _ALIAS_TO_CANONICAL.get(key)
 
 
+def _canonical_skill_key(label: str) -> str:
+    return canonicalize_skill(label) or _skill_key(label)
+
+
 def _alias_pattern(alias: str) -> re.Pattern[str]:
     body = re.escape(alias.lower())
     # Period is allowed as trailing punctuation ("Python.") and is not a token character,
@@ -261,7 +265,7 @@ def _ordered_unique(labels: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     for label in labels:
-        key = _skill_key(label)
+        key = _canonical_skill_key(label)
         if key in seen:
             continue
         seen.add(key)
@@ -279,25 +283,97 @@ def _looks_like_education_claim(value: str, source: str) -> bool:
     return re.search(pattern, source.lower()) is not None
 
 
+def _explicit_year_requirements(source: str) -> set[int]:
+    """Return only explicit numeric work-experience requirements."""
+    patterns = (
+        r"(?<!\d)(\d{1,2})(?:\s*\+)?\s+(?:years?|yrs?)\s+of\s+"
+        r"(?:(?:professional|relevant|work|industry)\s+)?experience\b",
+        r"(?<!\d)(\d{1,2})(?:\s*\+)?\s+(?:years?|yrs?)\s+"
+        r"(?:(?:professional|relevant|work|industry)\s+)?experience\b",
+        r"\bexperience\s*(?::|of|for)?\s*(?:at\s+least\s+|minimum\s+)?"
+        r"(\d{1,2})(?:\s*\+)?\s+(?:years?|yrs?)\b",
+        r"\b(?:at\s+least|minimum(?:\s+of)?)\s+(\d{1,2})(?:\s*\+)?\s+"
+        r"(?:years?|yrs?)\s+(?:(?:professional|relevant|work|industry)\s+)?experience\b",
+    )
+    found: set[int] = set()
+    for pattern in patterns:
+        found.update(int(match) for match in re.findall(pattern, source, flags=re.I))
+    return {years for years in found if years > 0}
+
+
+def _source_skill_classifications(source: str) -> dict[str, str]:
+    extracted = extract_explicit_skills_from_description(source)
+    classifications: dict[str, str] = {}
+    for kind, labels in (
+        ("required", extracted.required),
+        ("preferred", extracted.preferred),
+        ("stack", extracted.tech_stack),
+    ):
+        for label in labels:
+            classifications[_canonical_skill_key(label)] = kind
+    return classifications
+
+
+def _source_skill_kind(
+    label: str,
+    source: str,
+    known_classifications: dict[str, str],
+) -> str | None:
+    key = _canonical_skill_key(label)
+    if key in known_classifications:
+        return known_classifications[key]
+    heading: str | None = None
+    best: str | None = None
+    priority = {"stack": 0, "preferred": 1, "required": 2}
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            heading = None
+            continue
+        if stripped.endswith(":") or re.match(
+            r"^(?:requirements?|qualifications?|preferred|nice[- ]to[- ]have|bonus)\s*:",
+            stripped,
+            flags=re.I,
+        ):
+            heading = line
+        if not _skill_in_text(label, line):
+            continue
+        kind = _classify_line(line, heading)
+        if best is None or priority[kind] > priority[best]:
+            best = kind
+    return best
+
+
 def _ground_intelligence(
     intelligence: JobIntelligenceRecord,
     job: JobRecord,
 ) -> GroundedRequirements:
     source = f"{job.title}\n{job.description}"
     dropped = 0
-
-    def _keep_skills(items: list | None) -> list[str]:
-        nonlocal dropped
-        kept: list[str] = []
+    source_classifications = _source_skill_classifications(source)
+    classified: dict[str, list[str]] = {
+        "required": [],
+        "preferred": [],
+        "stack": [],
+    }
+    seen_skills: set[str] = set()
+    for items in (
+        intelligence.required_skills,
+        intelligence.preferred_skills,
+        intelligence.tech_stack,
+    ):
         for raw in items or []:
             if not isinstance(raw, str) or not raw.strip():
                 dropped += 1
                 continue
-            if _skill_in_text(raw, source):
-                kept.append(raw.strip())
-            else:
+            label = raw.strip()
+            key = _canonical_skill_key(label)
+            kind = _source_skill_kind(label, source, source_classifications)
+            if kind is None or key in seen_skills:
                 dropped += 1
-        return _ordered_unique(kept)
+                continue
+            seen_skills.add(key)
+            classified[kind].append(label)
 
     def _keep_education(items: list | None) -> list[str]:
         nonlocal dropped
@@ -312,13 +388,22 @@ def _ground_intelligence(
                 dropped += 1
         return kept
 
-    required = _keep_skills(intelligence.required_skills)
-    preferred = _keep_skills(intelligence.preferred_skills)
-    tech = _keep_skills(intelligence.tech_stack)
+    required = _ordered_unique(classified["required"])
+    preferred = _ordered_unique(classified["preferred"])
+    tech = _ordered_unique(classified["stack"])
     education = _keep_education(intelligence.education_requirements)
     years = intelligence.years_experience if isinstance(intelligence.years_experience, int) else None
-    if years is not None and years < 0:
+    explicit_years = _explicit_year_requirements(source)
+    if years is not None and (years <= 0 or years not in explicit_years):
         years = None
+        dropped += 1
+    seniority = intelligence.seniority
+    if seniority and not re.search(
+        rf"(?<![a-z0-9]){re.escape(seniority)}(?![a-z0-9])",
+        source,
+        flags=re.I,
+    ):
+        seniority = None
         dropped += 1
     return GroundedRequirements(
         required=required,
@@ -326,7 +411,7 @@ def _ground_intelligence(
         tech_stack=tech,
         years_experience=years,
         education_requirements=education,
-        seniority=intelligence.seniority,
+        seniority=seniority,
         source="intelligence",
         dropped=dropped,
     )
@@ -342,11 +427,7 @@ def _classify_line(line: str, heading: str | None) -> str:
         return "required"
     if _has_signal(line, _PREFERRED_SIGNALS):
         return "preferred"
-    stripped = line.strip()
-    inherit = heading and (
-        len(stripped.split()) <= 4 or stripped.startswith(("-", "*", "•"))
-    )
-    if inherit and heading:
+    if heading:
         if _has_signal(heading, _REQUIRED_SIGNALS):
             return "required"
         if _has_signal(heading, _PREFERRED_SIGNALS):
@@ -358,19 +439,22 @@ def extract_explicit_skills_from_description(description: str) -> GroundedRequir
     """Closed-vocabulary explicit mentions only. Stable source order, alias-deduped."""
     aliases = sorted(_ALIAS_TO_CANONICAL.items(), key=lambda item: len(item[0]), reverse=True)
     lines = description.splitlines() or [description]
-    found: dict[str, tuple[int, int, str]] = {}
+    found: dict[str, tuple[int, int, str, str]] = {}
     occupied = [[False] * len(line) for line in lines]
     heading: str | None = None
-    line_kind: list[str] = []
+    kind_priority = {"stack": 0, "preferred": 1, "required": 2}
     for line_idx, line in enumerate(lines):
         stripped = line.strip()
         if not stripped:
             heading = None
-            line_kind.append("stack")
             continue
-        if stripped.endswith(":") or _has_signal(line, _REQUIRED_SIGNALS + _PREFERRED_SIGNALS):
+        if stripped.endswith(":") or re.match(
+            r"^(?:requirements?|qualifications?|preferred|nice[- ]to[- ]have|bonus)\s*:",
+            stripped,
+            flags=re.I,
+        ):
             heading = line
-        line_kind.append(_classify_line(line, heading))
+        kind = _classify_line(line, heading)
         lowered = line.lower()
         for alias, canonical in aliases:
             for match in _alias_pattern(alias).finditer(lowered):
@@ -380,14 +464,15 @@ def extract_explicit_skills_from_description(description: str) -> GroundedRequir
                 for pos in range(start, end):
                     occupied[line_idx][pos] = True
                 if canonical not in found:
-                    found[canonical] = (line_idx, match.start(), canonical)
-    ordered = [item[2] for item in sorted(found.values(), key=lambda row: (row[0], row[1]))]
+                    found[canonical] = (line_idx, match.start(), canonical, kind)
+                elif kind_priority[kind] > kind_priority[found[canonical][3]]:
+                    first_line, first_pos, _, _ = found[canonical]
+                    found[canonical] = (first_line, first_pos, canonical, kind)
+    ordered = sorted(found.values(), key=lambda row: (row[0], row[1]))
     required: list[str] = []
     preferred: list[str] = []
     stack: list[str] = []
-    for canonical in ordered:
-        line_idx = found[canonical][0]
-        kind = line_kind[line_idx]
+    for _, _, canonical, kind in ordered:
         if kind == "required":
             required.append(canonical)
         elif kind == "preferred":
@@ -438,9 +523,7 @@ def _candidate_skill_evidence(candidate: Candidate) -> set[str]:
             labels.extend(extract_explicit_skills_from_description(cert).tech_stack)
     evidence: set[str] = set()
     for label in labels:
-        canonical = canonicalize_skill(label)
-        if canonical:
-            evidence.add(canonical)
+        evidence.add(_canonical_skill_key(label))
     return evidence
 
 
@@ -453,7 +536,7 @@ def _match_skills(requirements: GroundedRequirements, evidence: set[str]) -> Ski
         missing: list[str] = []
         scores: list[float] = []
         for label in job_labels:
-            canonical = canonicalize_skill(label) or label
+            canonical = _canonical_skill_key(label)
             if canonical in evidence:
                 matched.append(label)
                 scores.append(FULL_MATCH)
@@ -471,9 +554,9 @@ def _match_skills(requirements: GroundedRequirements, evidence: set[str]) -> Ski
     req_m, req_p, req_miss, req_ratio = _bucket(requirements.required)
     pref_labels = _ordered_unique([*requirements.preferred, *requirements.tech_stack])
     # Keep preferred/stack labels that are not already required canonicals.
-    required_canon = {canonicalize_skill(item) or item for item in requirements.required}
+    required_canon = {_canonical_skill_key(item) for item in requirements.required}
     pref_labels = [
-        item for item in pref_labels if (canonicalize_skill(item) or item) not in required_canon
+        item for item in pref_labels if _canonical_skill_key(item) not in required_canon
     ]
     pref_m, pref_p, pref_miss, pref_ratio = _bucket(pref_labels)
 
@@ -508,12 +591,9 @@ def _parse_month_year(value: str) -> date | None:
         year, month = int(iso.group(1)), int(iso.group(2))
         day = int(iso.group(3) or "1")
         try:
-            return date(year, month, min(day, 28) if iso.group(3) is None else day)
+            return date(year, month, day)
         except ValueError:
-            try:
-                return date(year, month, 1)
-            except ValueError:
-                return None
+            return None
     month_match = re.fullmatch(
         r"(january|february|march|april|may|june|july|august|september|october|november|december|"
         r"jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+(\d{4})",
@@ -550,10 +630,10 @@ def _employment_intervals(candidate: Candidate, as_of: date) -> list[tuple[date,
             parsed_end = _parse_month_year(end_raw)
             if parsed_end is None:
                 continue
-            end = parsed_end
+            end = min(parsed_end, as_of)
         else:
             continue
-        if end < start:
+        if start > as_of or end < start:
             continue
         intervals.append((start, end))
     if not intervals:
@@ -602,6 +682,20 @@ def _normalize_field(value: str) -> str:
     return _FIELD_ALIASES.get(key, key)
 
 
+def _closed_alias_in_text(
+    value: str,
+    aliases: dict[str, str],
+) -> str | None:
+    lowered = value.lower()
+    for alias, canonical in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
+        if re.search(
+            rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])",
+            lowered,
+        ):
+            return canonical
+    return None
+
+
 def _education_score(requirements: GroundedRequirements, candidate: Candidate) -> float | None:
     needed = [item for item in requirements.education_requirements if item and item.strip()]
     if not needed:
@@ -611,29 +705,19 @@ def _education_score(requirements: GroundedRequirements, candidate: Candidate) -
         return 0.0
     hits = 0
     for requirement in needed:
-        req_l = requirement.lower()
-        req_degree = None
-        for alias, canonical in _DEGREE_ALIASES.items():
-            if re.search(rf"\b{re.escape(alias)}\b", req_l):
-                req_degree = canonical
-                break
-        req_field = None
-        for alias, canonical in _FIELD_ALIASES.items():
-            if alias in req_l:
-                req_field = canonical
-                break
+        req_degree = _closed_alias_in_text(requirement, _DEGREE_ALIASES)
+        req_field = _closed_alias_in_text(requirement, _FIELD_ALIASES)
         matched = False
         for edu in records:
             degree = _normalize_degree(str(edu.get("degree") or ""))
             field = _normalize_field(str(edu.get("field") or ""))
-            institution = str(edu.get("institution") or "").lower()
-            blob = f"{degree} {field} {institution}"
             if req_degree and degree != req_degree:
                 continue
-            if req_field and field != req_field and req_field not in blob:
+            if req_field and field != req_field:
                 continue
             if not req_degree and not req_field:
-                if not _looks_like_education_claim(requirement, blob):
+                candidate_claim = f"{edu.get('degree') or ''} {edu.get('field') or ''}"
+                if not _looks_like_education_claim(requirement, candidate_claim):
                     continue
             matched = True
             break
@@ -642,63 +726,112 @@ def _education_score(requirements: GroundedRequirements, candidate: Candidate) -
     return 100.0 * hits / len(needed)
 
 
-def _is_remote_text(value: str | None) -> bool:
+def _explicit_work_modes(value: str | None) -> set[str]:
     if not value:
-        return False
-    return bool(re.search(r"\bremote\b", value, flags=re.I))
+        return set()
+    modes: set[str] = set()
+    if re.search(r"\bremote\b", value, flags=re.I):
+        modes.add("remote")
+    if re.search(r"\bhybrid\b", value, flags=re.I):
+        modes.add("hybrid")
+    if re.search(r"\b(?:on[\s-]?site|in[\s-]?office)\b", value, flags=re.I):
+        modes.add("onsite")
+    return modes
+
+
+def _candidate_work_modes(preferences: TargetPreference) -> set[str]:
+    value = (preferences.remote_preference or "").strip().lower().replace("-", "_")
+    mapping = {
+        "remote": {"remote"},
+        "hybrid": {"hybrid"},
+        "onsite": {"onsite"},
+        "on_site": {"onsite"},
+        "hybrid_or_remote": {"hybrid", "remote"},
+    }
+    modes = set(mapping.get(value, set()))
+    for location in preferences.preferred_locations or []:
+        if isinstance(location, str):
+            modes.update(_explicit_work_modes(location))
+    return modes
+
+
+def _city_state(value: str | None) -> tuple[str, str] | None:
+    if not value:
+        return None
+    match = re.match(
+        r"^\s*([a-z][a-z .'-]*?),\s*([a-z]{2})(?=\s*(?:$|[(/-]))",
+        value,
+        flags=re.I,
+    )
+    if not match:
+        return None
+    city = re.sub(r"[^a-z]+", " ", match.group(1).lower()).strip()
+    state = match.group(2).lower()
+    if not city:
+        return None
+    return city, state
 
 
 def _location_score(job: JobRecord, preferences: TargetPreference | None) -> float | None:
     if preferences is None:
         return None
-    job_location = job.location or ""
-    preferred = [item for item in (preferences.preferred_locations or []) if isinstance(item, str) and item.strip()]
-    remote_pref = (preferences.remote_preference or "").strip().lower()
-    if not job_location and not remote_pref and not preferred:
+    parts: list[float] = []
+    job_modes = _explicit_work_modes(job.location)
+    candidate_modes = _candidate_work_modes(preferences)
+    if job_modes and candidate_modes:
+        parts.append(100.0 if job_modes & candidate_modes else 0.0)
+
+    job_place = _city_state(job.location)
+    preferred_places = [
+        parsed
+        for item in (preferences.preferred_locations or [])
+        if isinstance(item, str)
+        for parsed in [_city_state(item)]
+        if parsed is not None
+    ]
+    if job_place is not None and preferred_places:
+        parts.append(100.0 if job_place in preferred_places else 0.0)
+
+    if not parts:
         return None
-    if not job_location and not _is_remote_text(job.title):
-        if not remote_pref and not preferred:
-            return None
-    job_is_remote = _is_remote_text(job_location) or _is_remote_text(job.title)
-    if job_is_remote and remote_pref in {"remote", "hybrid_or_remote"}:
-        return 100.0
-    if job_is_remote and remote_pref == "hybrid":
-        return 70.0
-    if job_is_remote and remote_pref == "onsite":
-        return 20.0
-    for place in preferred:
-        if _is_remote_text(place) and job_is_remote:
-            return 100.0
-        pattern = rf"(?<![a-z0-9]){re.escape(place.strip().lower())}(?![a-z0-9])"
-        if job_location and re.search(pattern, job_location.lower()):
-            return 100.0
-    if not preferred and not remote_pref:
-        return None
-    if not job_location and not job_is_remote:
-        return None
-    if preferred or remote_pref:
-        return 40.0
-    return None
+    return sum(parts) / len(parts)
 
 
 def _parse_annual_salary(text: str | None) -> int | None:
     if not text:
         return None
     lowered = text.lower()
-    if re.search(r"\b(hour|hourly|/hr|per hour)\b", lowered):
+    if re.search(
+        r"\b(?:estimated|estimate|approx(?:imately)?|negotiable|bonus|commission|"
+        r"equity|ote|total compensation)\b",
+        lowered,
+    ):
         return None
-    if re.search(r"\b(week|weekly|/wk|month|monthly|/mo)\b", lowered):
+    if re.search(
+        r"(?:/|\bper\s+)(?:hour|hr|day|daily|week|wk|month|mo)\b|"
+        r"\b(?:hourly|daily|weekly|monthly)\b",
+        lowered,
+    ):
+        return None
+    if not re.search(r"(?:/|\bper\s+)(?:year|yr)\b|\b(?:annual|annually|per annum)\b", lowered):
+        return None
+    if re.search(r"[€£¥]|\b(?:cad|eur|gbp|aud|jpy)\b", lowered):
+        return None
+    if "$" not in text and not re.search(r"\busd\b", lowered):
         return None
     compact = text.replace(",", "")
-    match = re.search(r"\$?\s*(\d{2,3})\s*k\b", compact, flags=re.I)
-    if match:
-        return int(match.group(1)) * 1000
-    match = re.search(r"\$?\s*(\d{5,7})(?:\s*(?:per\s+year|/year|annually|a year))?", compact, flags=re.I)
-    if match:
+    amounts: list[int] = []
+    for match in re.finditer(
+        r"(?:\busd\s*|\$\s*)?(\d{2,7})(?:\.\d+)?\s*(k)?\b",
+        compact,
+        flags=re.I,
+    ):
         amount = int(match.group(1))
+        if match.group(2):
+            amount *= 1000
         if 10_000 <= amount <= 1_000_000:
-            return amount
-    return None
+            amounts.append(amount)
+    return max(amounts) if amounts else None
 
 
 def _role_matches(job_title: str, roles: list[str]) -> bool | None:
@@ -826,7 +959,13 @@ def load_requirements(db: Session, job: JobRecord) -> GroundedRequirements:
             grounded.dropped,
             job.id,
         )
-        if grounded.required or grounded.preferred or grounded.tech_stack or grounded.education_requirements:
+        if (
+            grounded.required
+            or grounded.preferred
+            or grounded.tech_stack
+            or grounded.years_experience is not None
+            or grounded.education_requirements
+        ):
             return grounded
         # Intelligence existed but nothing grounded; do not invent from it.
     fallback = extract_explicit_skills_from_description(f"{job.title}\n{job.description}")
@@ -882,12 +1021,13 @@ def persist_score(
     candidate: Candidate,
     breakdown: ScoreBreakdown,
 ) -> MatchScore:
-    existing = (
+    existing_rows = (
         db.query(MatchScoreRecord)
         .filter(MatchScoreRecord.job_id == job.id, MatchScoreRecord.candidate_id == candidate.id)
         .order_by(MatchScoreRecord.id.desc())
-        .first()
+        .all()
     )
+    existing = existing_rows[0] if existing_rows else None
     payload = {
         "job_id": job.id,
         "candidate_id": candidate.id,
@@ -907,6 +1047,8 @@ def persist_score(
         if existing is not None:
             for key, value in payload.items():
                 setattr(existing, key, value)
+            for duplicate in existing_rows[1:]:
+                db.delete(duplicate)
             record = existing
         else:
             record = MatchScoreRecord(**payload)
@@ -915,14 +1057,18 @@ def persist_score(
         db.refresh(record)
     except Exception:
         db.rollback()
-        logger.exception("scoring persist failed job_pk=%s candidate_pk=%s", job.id, candidate.id)
+        logger.error(
+            "scoring persist failed job_pk=%s candidate_pk=%s category=%s",
+            job.id,
+            candidate.id,
+            "database",
+        )
         raise
     logger.info(
-        "scoring persisted job_pk=%s candidate_pk=%s overall=%s recommendation=%s",
+        "scoring persisted job_pk=%s candidate_pk=%s rows=%s",
         job.id,
         candidate.id,
-        record.overall_score,
-        record.recommendation,
+        1,
     )
     return MatchScore(
         job_id=job.public_id,

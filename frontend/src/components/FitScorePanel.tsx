@@ -1,7 +1,9 @@
 import { Calculator } from "lucide-react";
+import { Link } from "react-router-dom";
 import { ErrorBanner } from "./ErrorBanner";
 import { LoadingState } from "./LoadingState";
 import { MatchBadge } from "./MatchBadge";
+import { ApiClientError } from "../lib/api";
 import type { MatchScore } from "../lib/types";
 
 function ChipList({ items }: { items: string[] }) {
@@ -49,6 +51,10 @@ export function FitScorePanel({
   onCalculate: () => void;
 }) {
   const provisional = Boolean(match?.rationale?.toLowerCase().includes("provisional"));
+  const missingProfile =
+    error instanceof ApiClientError &&
+    error.status === 409 &&
+    error.message.toLowerCase().includes("candidate profile");
 
   return (
     <section className="card space-y-4 p-6">
@@ -66,7 +72,19 @@ export function FitScorePanel({
         </button>
       </div>
 
-      <ErrorBanner error={error} />
+      {missingProfile ? (
+        <div
+          role="alert"
+          className="card mb-4 border-amber-300/70 bg-amber-50/80 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
+        >
+          <p className="font-semibold">Build a candidate profile before calculating fit.</p>
+          <Link className="mt-2 inline-flex font-semibold underline" to="/profile">
+            Build Profile
+          </Link>
+        </div>
+      ) : (
+        <ErrorBanner error={error} />
+      )}
       {loading ? <LoadingState label="Calculating fit…" /> : null}
 
       {!loading && !match ? (

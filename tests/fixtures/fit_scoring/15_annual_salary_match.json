@@ -1,0 +1,56 @@
+{
+  "scenario_id": "annual-salary-range-match",
+  "job": {
+    "public_id": "fit-matrix-015",
+    "title": "Backend Engineer",
+    "company": "Fictional Elm Compute",
+    "location": null,
+    "salary": "$80,000 - $120,000/year",
+    "url": "https://example.invalid/jobs/fit-matrix-015",
+    "description": "Requirements:\nPython",
+    "source": "matrix",
+    "status": "verified"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 015",
+    "skills": ["Python"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": {
+    "target_roles": [],
+    "preferred_locations": [],
+    "remote_preference": null,
+    "salary_min": 100000,
+    "work_authorization": null,
+    "sponsorship_required": null,
+    "constraints": []
+  },
+  "intelligence": {
+    "required_skills": ["Python"],
+    "preferred_skills": [],
+    "years_experience": null,
+    "education_requirements": [],
+    "tech_stack": [],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "expected": {
+    "available_components": ["skill", "preference"],
+    "null_components": ["experience", "education", "location"],
+    "component_scores": {"skill": 100.0, "experience": null, "education": null, "location": null, "preference": 100.0},
+    "overall_score": 100.0,
+    "recommendation": "apply",
+    "matched": ["Python"],
+    "partial": [],
+    "missing": [],
+    "http_status": 200,
+    "row_count": 1,
+    "persistence": "insert"
+  }
+}
