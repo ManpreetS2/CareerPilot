@@ -588,7 +588,10 @@ def run_browser_e2e() -> dict[str, int]:
                     ),
                 )
                 page.get_by_role("button", name="Calculate fit").click()
-                expect(page.get_by_role("alert")).to_contain_text("Unable to calculate fit score.")
+                fit_region = page.get_by_role("region", name="Fit score")
+                expect(fit_region.get_by_role("alert")).to_contain_text(
+                    "Unable to calculate fit score."
+                )
                 expect(page.get_by_text("Overall:")).to_have_count(0)
                 page.unroute("**/api/jobs/*/score")
                 page.route(
@@ -600,7 +603,7 @@ def run_browser_e2e() -> dict[str, int]:
                     ),
                 )
                 page.get_by_role("button", name="Calculate fit").click()
-                expect(page.get_by_role("alert")).to_contain_text("Job not found.")
+                expect(fit_region.get_by_role("alert")).to_contain_text("Job not found.")
                 expect(page.get_by_text("Overall:")).to_have_count(0)
                 page.unroute("**/api/jobs/*/score")
 
@@ -611,7 +614,9 @@ def run_browser_e2e() -> dict[str, int]:
                     session.commit()
                 page.goto(success_url)
                 page.get_by_role("button", name="Calculate fit").click()
-                expect(page.get_by_role("alert")).to_contain_text("Build a candidate profile")
+                expect(page.get_by_role("region", name="Fit score").get_by_role("alert")).to_contain_text(
+                    "Build a candidate profile"
+                )
                 expect(page.get_by_role("link", name="Build Profile")).to_have_attribute(
                     "href", "/profile"
                 )
@@ -633,9 +638,9 @@ def run_browser_e2e() -> dict[str, int]:
                 page.goto(f"{base_url}/jobs/browser-fit-no-requirements")
                 expect(page.get_by_text("Overall:")).to_have_count(0)
                 page.get_by_role("button", name="Calculate fit").click()
-                expect(page.get_by_role("alert")).to_contain_text(
-                    "Job requirements are not available"
-                )
+                expect(
+                    page.get_by_role("region", name="Fit score").get_by_role("alert")
+                ).to_contain_text("Job requirements are not available")
                 expect(page.get_by_role("link", name="Build Profile")).to_have_count(0)
 
                 score_count_before_verify = len(score_requests)
