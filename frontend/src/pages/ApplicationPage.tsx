@@ -12,7 +12,7 @@ import type { ApplicationPackage, ApprovalDecision, Job, MatchScore } from "../l
 
 export function ApplicationPage() {
   const params = useParams();
-  const jobId = params.jobId || getSelectedJobId() || "job-001";
+  const jobId = params.jobId || getSelectedJobId();
 
   const [job, setJob] = useState<Job | null>(null);
   const [materials, setMaterials] = useState<ApplicationPackage | null>(null);
@@ -21,32 +21,44 @@ export function ApplicationPage() {
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [eligibilityConfirmed, setEligibilityConfirmed] = useState(false);
+  const [eligibilityNotes, setEligibilityNotes] = useState("");
+  const [decisionNotes, setDecisionNotes] = useState("");
 
   useEffect(() => {
+    if (!jobId) {
+      setLoading(false);
+      return;
+    }
+    const id = jobId;
     let cancelled = false;
     async function load() {
       setLoading(true);
       setError(null);
-      try {
-        const [nextJob, nextMaterials] = await Promise.all([
-          api.getJob(jobId),
-          api.generateMaterials(jobId),
-        ]);
-        if (cancelled) return;
-        setJob(nextJob);
-        setMaterials(nextMaterials);
-        saveSelectedJobId(jobId);
-        try {
-          const nextMatch = await api.scoreJob(jobId);
-          if (!cancelled) setMatch(nextMatch);
-        } catch {
-          if (!cancelled) setMatch(null);
-        }
-      } catch (err) {
-        if (!cancelled) setError(err);
-      } finally {
-        if (!cancelled) setLoading(false);
+      // Independent requests run concurrently — a fit score failure (no
+      // candidate profile yet, scoring error) shouldn't block showing the
+      // job and materials, so it's handled separately from the other two.
+      const [jobResult, materialsResult, scoreResult] = await Promise.allSettled([
+        api.getJob(id),
+        api.generateMaterials(id),
+        api.scoreJob(id),
+      ]);
+      if (cancelled) return;
+
+      if (jobResult.status === "rejected" || materialsResult.status === "rejected") {
+        setError(jobResult.status === "rejected" ? jobResult.reason : (materialsResult as PromiseRejectedResult).reason);
+        setLoading(false);
+        return;
       }
+
+      setJob(jobResult.value);
+      setMaterials(materialsResult.value);
+      setEligibilityConfirmed(materialsResult.value.eligibility_confirmed);
+      setEligibilityNotes(materialsResult.value.eligibility_notes || "");
+      setDecisionNotes(materialsResult.value.decision_notes || "");
+      setMatch(scoreResult.status === "fulfilled" ? scoreResult.value : null);
+      saveSelectedJobId(id);
+      setLoading(false);
     }
     void load();
     return () => {
@@ -55,17 +67,28 @@ export function ApplicationPage() {
   }, [jobId]);
 
   async function decide(decision: ApprovalDecision) {
+    if (!jobId) return;
     setActing(true);
     setError(null);
     setMessage(null);
     try {
-      const result = await api.approveApplication(jobId, decision);
+      const result = await api.approveApplication(jobId, decision, {
+        notes: decisionNotes,
+        eligibilityConfirmed,
+        eligibilityNotes,
+      });
       setMessage(result.message);
       setMaterials((prev) =>
         prev
           ? {
               ...prev,
               approval_status: result.approval_status as ApplicationPackage["approval_status"],
+              // Mirrors the backend: only an "approved" decision can move
+              // eligibility_confirmed to true; edit/reject never touch it,
+              // so a prior confirmation is never silently lost.
+              eligibility_confirmed: decision === "approved" ? true : prev.eligibility_confirmed,
+              eligibility_notes: eligibilityNotes || null,
+              decision_notes: decisionNotes || null,
             }
           : prev,
       );
@@ -74,6 +97,20 @@ export function ApplicationPage() {
     } finally {
       setActing(false);
     }
+  }
+
+  if (!jobId) {
+    return (
+      <EmptyState
+        title="No application selected"
+        description="Pick a role from Jobs to review tailored materials."
+        action={
+          <Link to="/jobs" className="btn-primary">
+            Browse jobs
+          </Link>
+        }
+      />
+    );
   }
 
   if (loading) return <LoadingState label="Loading application package…" />;
@@ -97,7 +134,9 @@ export function ApplicationPage() {
       <div>
         <h1 className="font-display text-4xl font-semibold">Application</h1>
         <p className="mt-2 text-ink-600 dark:text-ink-300">
-          Human approval for tailored materials. Generation remains mocked until Day 4.
+          Human approval for tailored materials. Material generation is still a placeholder
+          until the Application Material Agent lands — approval, editing, and eligibility
+          confirmation below are real.
         </p>
       </div>
 
@@ -181,11 +220,44 @@ export function ApplicationPage() {
         <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
           Current state: <strong className="capitalize">{materials.approval_status.replaceAll("_", " ")}</strong>
         </p>
+
+        <div className="mt-4 rounded-xl border border-[var(--line)] p-4">
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={eligibilityConfirmed}
+              onChange={(event) => setEligibilityConfirmed(event.target.checked)}
+            />
+            <span>
+              I confirm my work authorization, salary expectations, and eligibility for this role
+              are accurate for this application.
+            </span>
+          </label>
+          <textarea
+            className="input mt-3 min-h-[72px]"
+            placeholder="Optional notes (e.g. sponsorship needed, salary flexibility)…"
+            value={eligibilityNotes}
+            onChange={(event) => setEligibilityNotes(event.target.value)}
+          />
+        </div>
+
+        <label className="mt-4 block text-sm">
+          <span className="text-ink-600 dark:text-ink-300">Reviewer notes</span>
+          <textarea
+            className="input mt-2 min-h-[72px]"
+            placeholder="Optional — e.g. what needs to change, or why this was rejected…"
+            value={decisionNotes}
+            onChange={(event) => setDecisionNotes(event.target.value)}
+          />
+        </label>
+
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
             className="btn-primary"
-            disabled={acting}
+            disabled={acting || !eligibilityConfirmed}
+            title={!eligibilityConfirmed ? "Confirm eligibility above before approving" : undefined}
             onClick={() => void decide("approved")}
           >
             <Check className="h-4 w-4" aria-hidden />
