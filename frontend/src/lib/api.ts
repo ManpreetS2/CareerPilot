@@ -3,6 +3,7 @@ import type {
   ApplicationPackage,
   ApprovalDecision,
   ApprovalResponse,
+  FormFillResult,
   HealthResponse,
   InterviewPrep,
   Job,
@@ -119,6 +120,11 @@ export const api = {
 
   prepareInterview: (jobId: string) =>
     request<InterviewPrep>(`/api/jobs/${jobId}/prepare-interview`, {
+      method: "POST",
+    }),
+
+  fillApplication: (jobId: string) =>
+    request<FormFillResult>(`/api/jobs/${jobId}/fill-application`, {
       method: "POST",
     }),
 };

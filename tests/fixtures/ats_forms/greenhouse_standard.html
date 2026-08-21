@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head><title>Apply — Acme Corp</title></head>
+<body>
+  <form id="application_form">
+    <label for="first_name">First Name</label>
+    <input type="text" id="first_name" name="job_application[first_name]" required />
+
+    <label for="last_name">Last Name</label>
+    <input type="text" id="last_name" name="job_application[last_name]" required />
+
+    <label for="email">Email</label>
+    <input type="email" id="email" name="job_application[email]" required />
+
+    <label for="phone">Phone</label>
+    <input type="tel" id="phone" name="job_application[phone]" />
+
+    <label for="company">Current Company</label>
+    <input type="text" id="company" name="job_application[company]" />
+
+    <label for="resume">Resume/CV</label>
+    <input type="file" id="resume" name="job_application[resume]" required />
+
+    <label for="cover_letter_text">Cover Letter</label>
+    <textarea id="cover_letter_text" name="job_application[cover_letter_text]"></textarea>
+
+    <label for="how_did_you_hear">How did you hear about us?</label>
+    <input type="text" id="how_did_you_hear" name="job_application[answers][0][text_value]" required />
+
+    <button type="submit" id="submit_app">Submit Application</button>
+  </form>
+</body>
+</html>

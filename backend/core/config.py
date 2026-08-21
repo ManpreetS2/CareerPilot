@@ -40,5 +40,11 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 15.0
     http_user_agent: str = "CareerPilotAI/0.1 (job search assistant; +https://github.com/ManpreetS2/CareerPilot)"
 
+    # Headless in normal (server-triggered) operation. Set to false only for
+    # local interactive debugging of the form-fill agent, where watching the
+    # browser is the point — the deployed app always runs headless.
+    form_fill_headless: bool = True
+    form_fill_timeout_ms: int = 20_000
+
 
 settings = Settings()

@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from backend.db.database import get_db
-from backend.schemas.schemas import ApplicationPackage, ApprovalRequest, ApprovalResponse
+from backend.schemas.schemas import ApplicationPackage, ApprovalRequest, ApprovalResponse, FormFillResult
 from backend.services.application_service import apply_approval, get_or_generate_application_package
+from backend.services.form_fill_service import run_assisted_apply
 
 router = APIRouter(prefix="/api", tags=["applications"])
 
@@ -24,3 +25,12 @@ def approve_materials(
     job_id: str, payload: ApprovalRequest, db: Session = Depends(get_db)
 ) -> ApprovalResponse:
     return apply_approval(db, job_id, payload)
+
+
+@router.post("/jobs/{job_id}/fill-application", response_model=FormFillResult)
+def fill_application(job_id: str, db: Session = Depends(get_db)) -> FormFillResult:
+    """Assisted apply: fills a real Greenhouse/Lever form with what can be
+    confidently mapped from the approved application package, flags
+    anything it can't map, and never submits. Requires the application to
+    already be approved."""
+    return run_assisted_apply(db, job_id)

@@ -21,6 +21,7 @@ REQUIRED_TABLES = (
     "job_intelligence",
     "match_scores",
     "application_packages",
+    "form_fill_attempts",
 )
 
 

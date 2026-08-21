@@ -102,6 +102,21 @@ export type ApplicationPackage = {
 
 export type ApprovalDecision = "approved" | "edit_requested" | "rejected";
 
+export type FlaggedField = {
+  field: string;
+  reason: string;
+};
+
+export type FormFillResult = {
+  job_id: string;
+  ats_platform: "greenhouse" | "lever" | "unsupported";
+  status: "filled" | "needs_review" | "failed";
+  filled_fields: string[];
+  flagged_fields: FlaggedField[];
+  error_message?: string | null;
+  created_at?: string | null;
+};
+
 export type ApprovalResponse = {
   job_id: string;
   approval_status: string;

@@ -180,3 +180,18 @@ class ApprovalResponse(BaseModel):
 class JobWithScore(BaseModel):
     job: Job
     match: MatchScore | None = None
+
+
+class FlaggedField(BaseModel):
+    field: str
+    reason: str
+
+
+class FormFillResult(BaseModel):
+    job_id: str
+    ats_platform: Literal["greenhouse", "lever", "unsupported"]
+    status: Literal["filled", "needs_review", "failed"]
+    filled_fields: list[str] = Field(default_factory=list)
+    flagged_fields: list[FlaggedField] = Field(default_factory=list)
+    error_message: str | None = None
+    created_at: datetime | None = None
