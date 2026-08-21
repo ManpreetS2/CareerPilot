@@ -1,0 +1,39 @@
+{
+  "scenario_id": "no-explicit-requirements-409",
+  "job": {
+    "public_id": "fit-matrix-019",
+    "title": "Team Contributor",
+    "company": "Fictional Meadow Collective",
+    "location": null,
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-019",
+    "description": "Join a collaborative team solving thoughtful customer problems.",
+    "source": "matrix",
+    "status": "discovered"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 019",
+    "skills": ["Python"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": null,
+  "intelligence": null,
+  "expected": {
+    "available_components": [],
+    "null_components": ["skill", "experience", "education", "location", "preference"],
+    "component_scores": {"skill": null, "experience": null, "education": null, "location": null, "preference": null},
+    "overall_score": null,
+    "recommendation": null,
+    "matched": [],
+    "partial": [],
+    "missing": [],
+    "http_status": 409,
+    "row_count": 0,
+    "persistence": "none"
+  }
+}

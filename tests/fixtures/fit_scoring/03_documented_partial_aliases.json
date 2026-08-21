@@ -1,0 +1,48 @@
+{
+  "scenario_id": "documented-partial-aliases",
+  "job": {
+    "public_id": "fit-matrix-003",
+    "title": "Data Application Engineer",
+    "company": "Fictional Cedar Analytics",
+    "location": null,
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-003",
+    "description": "Requirements:\nSQL\nJavaScript",
+    "source": "matrix",
+    "status": "verified"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 003",
+    "skills": ["PostgreSQL", "TypeScript"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": null,
+  "intelligence": {
+    "required_skills": ["SQL", "JavaScript"],
+    "preferred_skills": [],
+    "years_experience": null,
+    "education_requirements": [],
+    "tech_stack": [],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "expected": {
+    "available_components": ["skill"],
+    "null_components": ["experience", "education", "location", "preference"],
+    "component_scores": {"skill": 50.0, "experience": null, "education": null, "location": null, "preference": null},
+    "overall_score": 50.0,
+    "recommendation": "skip",
+    "matched": [],
+    "partial": ["SQL", "JavaScript"],
+    "missing": [],
+    "http_status": 200,
+    "row_count": 1,
+    "persistence": "insert"
+  }
+}

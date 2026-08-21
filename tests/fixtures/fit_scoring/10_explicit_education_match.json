@@ -1,0 +1,48 @@
+{
+  "scenario_id": "explicit-education-match",
+  "job": {
+    "public_id": "fit-matrix-010",
+    "title": "Software Engineer",
+    "company": "Fictional Harbor Research",
+    "location": null,
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-010",
+    "description": "Requirements:\nPython\nBachelor's in Computer Science",
+    "source": "matrix",
+    "status": "verified"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 010",
+    "skills": ["Python"],
+    "projects": [],
+    "experience": [],
+    "education": [{"institution": "Fictional North University", "degree": "B.S.", "field": "Computer Science", "graduation_year": "2024"}],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": null,
+  "intelligence": {
+    "required_skills": ["Python"],
+    "preferred_skills": [],
+    "years_experience": null,
+    "education_requirements": ["Bachelor's in Computer Science"],
+    "tech_stack": [],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "expected": {
+    "available_components": ["skill", "education"],
+    "null_components": ["experience", "location", "preference"],
+    "component_scores": {"skill": 100.0, "experience": null, "education": 100.0, "location": null, "preference": null},
+    "overall_score": 100.0,
+    "recommendation": "apply",
+    "matched": ["Python"],
+    "partial": [],
+    "missing": [],
+    "http_status": 200,
+    "row_count": 1,
+    "persistence": "insert"
+  }
+}

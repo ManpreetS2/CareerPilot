@@ -1,0 +1,49 @@
+{
+  "scenario_id": "database-commit-failure-rolls-back",
+  "job": {
+    "public_id": "fit-matrix-021",
+    "title": "Backend Engineer",
+    "company": "Fictional Ember Stack",
+    "location": null,
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-021",
+    "description": "Requirements:\nPython",
+    "source": "matrix",
+    "status": "verified"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 021",
+    "skills": ["Python"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": null,
+  "intelligence": {
+    "required_skills": ["Python"],
+    "preferred_skills": [],
+    "years_experience": null,
+    "education_requirements": [],
+    "tech_stack": [],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "commit_failure": true,
+  "expected": {
+    "available_components": [],
+    "null_components": ["skill", "experience", "education", "location", "preference"],
+    "component_scores": {"skill": null, "experience": null, "education": null, "location": null, "preference": null},
+    "overall_score": null,
+    "recommendation": null,
+    "matched": [],
+    "partial": [],
+    "missing": [],
+    "http_status": 500,
+    "row_count": 0,
+    "persistence": "none"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "scenario_id": "required-preferred-weighting",
+  "job": {
+    "public_id": "fit-matrix-002",
+    "title": "Platform Engineer",
+    "company": "Fictional Meridian Works",
+    "location": null,
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-002",
+    "description": "Requirements:\nPython\nDocker\nPreferred:\nReact\nGit",
+    "source": "matrix",
+    "status": "verified"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 002",
+    "skills": ["Python", "Docker", "React"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": null,
+  "intelligence": {
+    "required_skills": ["Python", "Docker"],
+    "preferred_skills": ["React"],
+    "years_experience": null,
+    "education_requirements": [],
+    "tech_stack": ["Git"],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "expected": {
+    "available_components": ["skill"],
+    "null_components": ["experience", "education", "location", "preference"],
+    "component_scores": {"skill": 87.5, "experience": null, "education": null, "location": null, "preference": null},
+    "overall_score": 87.5,
+    "recommendation": "apply",
+    "matched": ["Python", "Docker", "React"],
+    "partial": [],
+    "missing": ["Git"],
+    "http_status": 200,
+    "row_count": 1,
+    "persistence": "insert"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "scenario_id": "overlapping-experience-intervals",
+  "job": {
+    "public_id": "fit-matrix-008",
+    "title": "Software Engineer",
+    "company": "Fictional Lantern Robotics",
+    "location": null,
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-008",
+    "description": "Requirements:\nPython\n2 years of work experience",
+    "source": "matrix",
+    "status": "verified"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 008",
+    "skills": ["Python"],
+    "projects": [],
+    "experience": [
+      {"title": "Engineer I", "company": "Fictional Alpha", "start_date": "2023-01-01", "end_date": "2024-01-01", "highlights": []},
+      {"title": "Engineer II", "company": "Fictional Beta", "start_date": "2023-06-01", "end_date": "2024-06-01", "highlights": []}
+    ],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": null,
+  "intelligence": {
+    "required_skills": ["Python"],
+    "preferred_skills": [],
+    "years_experience": 2,
+    "education_requirements": [],
+    "tech_stack": [],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "expected": {
+    "available_components": ["skill", "experience"],
+    "null_components": ["education", "location", "preference"],
+    "component_scores": {"skill": 100.0, "experience": 70.8, "education": null, "location": null, "preference": null},
+    "overall_score": 92.2,
+    "recommendation": "apply",
+    "matched": ["Python"],
+    "partial": [],
+    "missing": [],
+    "http_status": 200,
+    "row_count": 1,
+    "persistence": "insert"
+  }
+}

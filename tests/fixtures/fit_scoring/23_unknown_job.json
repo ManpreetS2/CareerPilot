@@ -1,0 +1,30 @@
+{
+  "scenario_id": "unknown-job-404",
+  "job": null,
+  "request_job_id": "fit-matrix-missing",
+  "candidate": {
+    "name": "Synthetic Candidate 023",
+    "skills": ["Python"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": null,
+  "intelligence": null,
+  "expected": {
+    "available_components": [],
+    "null_components": ["skill", "experience", "education", "location", "preference"],
+    "component_scores": {"skill": null, "experience": null, "education": null, "location": null, "preference": null},
+    "overall_score": null,
+    "recommendation": null,
+    "matched": [],
+    "partial": [],
+    "missing": [],
+    "http_status": 404,
+    "row_count": 0,
+    "persistence": "none"
+  }
+}

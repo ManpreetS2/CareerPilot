@@ -1,0 +1,39 @@
+{
+  "scenario_id": "provisional-description-fallback",
+  "job": {
+    "public_id": "fit-matrix-018",
+    "title": "Backend Engineer",
+    "company": "Fictional Vale Applications",
+    "location": null,
+    "salary": null,
+    "url": "https://example.invalid/jobs/fit-matrix-018",
+    "description": "Requirements:\nPython\nPreferred:\nDocker",
+    "source": "matrix",
+    "status": "discovered"
+  },
+  "candidate": {
+    "name": "Synthetic Candidate 018",
+    "skills": ["Python"],
+    "projects": [],
+    "experience": [],
+    "education": [],
+    "certifications": [],
+    "strengths": [],
+    "evidence_links": []
+  },
+  "preferences": null,
+  "intelligence": null,
+  "expected": {
+    "available_components": ["skill"],
+    "null_components": ["experience", "education", "location", "preference"],
+    "component_scores": {"skill": 75.0, "experience": null, "education": null, "location": null, "preference": null},
+    "overall_score": 75.0,
+    "recommendation": "consider",
+    "matched": ["Python"],
+    "partial": [],
+    "missing": ["Docker"],
+    "http_status": 200,
+    "row_count": 1,
+    "persistence": "insert"
+  }
+}
