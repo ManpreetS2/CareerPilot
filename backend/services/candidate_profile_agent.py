@@ -208,16 +208,233 @@ def _tokens(value: str) -> set[str]:
 _DATE_TOKEN_RE = re.compile(
     r"\b(?:\d{4}-\d{2}(?:-\d{2})?|\d{1,2}/\d{1,2}/\d{2,4})\b"
 )
+_MONTH_NAME_ALT = (
+    "january|february|march|april|may|june|july|august|"
+    "september|october|november|december|"
+    "jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec"
+)
+_MONTH_DATE_RE = re.compile(
+    r"""
+    \b
+    (?P<a>(?:MONTH))\.?
+    (?:
+        [ \t]+(?P<ay>\d{4})
+        (?:
+            [ \t]*[–\-][ \t]*
+            (?P<b>(?:MONTH))\.?[ \t]+(?P<by>\d{4})
+        )?
+      |
+        [ \t]*[–\-][ \t]*
+        (?P<c>(?:MONTH))\.?[ \t]+(?P<cy>\d{4})
+    )
+    \b
+    """.replace("MONTH", _MONTH_NAME_ALT),
+    flags=re.IGNORECASE | re.VERBOSE,
+)
+_MONTH_TO_NUM = {
+    "january": "01",
+    "jan": "01",
+    "february": "02",
+    "feb": "02",
+    "march": "03",
+    "mar": "03",
+    "april": "04",
+    "apr": "04",
+    "may": "05",
+    "june": "06",
+    "jun": "06",
+    "july": "07",
+    "jul": "07",
+    "august": "08",
+    "aug": "08",
+    "september": "09",
+    "sept": "09",
+    "sep": "09",
+    "october": "10",
+    "oct": "10",
+    "november": "11",
+    "nov": "11",
+    "december": "12",
+    "dec": "12",
+}
 _CURRENCY_TOKEN_RE = re.compile(r"\$\s*\d+(?:,\d{3})*(?:\.\d+)?")
 _PERCENT_TOKEN_RE = re.compile(
     r"\d+(?:,\d{3})*(?:\.\d+)?\s*(?:%|percent\b)",
     flags=re.IGNORECASE,
 )
 _PLAIN_NUMBER_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
+_EMAIL_SPAN_RE = re.compile(
+    r"[A-Za-z0-9._%+\-]+[ \t]*@[ \t]*[A-Za-z0-9](?:[A-Za-z0-9\-]*[ \t]*\.[ \t]*[A-Za-z]{2,})+"
+)
+_PHONE_SPAN_RE = re.compile(
+    r"""
+    (?:(?:\+|00)[ \t]*1[ \t.\-]*)?
+    (?:
+        \([ \t]*\d{3}[ \t]*\)[ \t.\-]*\d{3}[ \t.\-]*\d{4}
+        | \d{3}[ \t.\-]\d{3}[ \t.\-]\d{4}
+        | \d{3}[ \t.\-]\d{4}
+    )
+    """,
+    flags=re.VERBOSE,
+)
+_ROLE_QUALIFIERS = frozenset(
+    {
+        "senior",
+        "junior",
+        "jr",
+        "sr",
+        "staff",
+        "lead",
+        "principal",
+        "intern",
+        "associate",
+        "founding",
+        "chief",
+        "head",
+        "director",
+    }
+)
+_TITLE_HINTS = frozenset(
+    {
+        "engineer",
+        "developer",
+        "software",
+        "manager",
+        "analyst",
+        "scientist",
+        "designer",
+        "architect",
+        "specialist",
+        "consultant",
+        "programmer",
+        "intern",
+    }
+)
 
 
 def _digits_only(num_fragment: str) -> str:
     return re.sub(r"[^\d.]", "", num_fragment)
+
+
+def _month_to_num(token: str) -> str | None:
+    return _MONTH_TO_NUM.get(token.lower().rstrip("."))
+
+
+def _month_date_values(match: re.Match[str]) -> list[str]:
+    """Canonical YYYY-MM values from a month-name date/range match."""
+    values: list[str] = []
+    a = match.group("a")
+    ay = match.group("ay")
+    b = match.group("b")
+    by = match.group("by")
+    c = match.group("c")
+    cy = match.group("cy")
+    if a and ay:
+        month = _month_to_num(a)
+        if month:
+            values.append(f"{ay}-{month}")
+        if b and by:
+            month_b = _month_to_num(b)
+            if month_b:
+                values.append(f"{by}-{month_b}")
+    elif a and c and cy:
+        month_a = _month_to_num(a)
+        month_c = _month_to_num(c)
+        if month_a:
+            values.append(f"{cy}-{month_a}")
+        if month_c:
+            values.append(f"{cy}-{month_c}")
+    return values
+
+
+def _canonical_iso_date(token: str) -> str:
+    if re.fullmatch(r"\d{4}-\d{2}(?:-\d{2})?", token):
+        return token[:7]
+    slash = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", token)
+    if slash:
+        month, _day, year = slash.group(1), slash.group(2), slash.group(3)
+        if len(year) == 2:
+            year = f"20{year}"
+        return f"{year}-{int(month):02d}"
+    return token
+
+
+def _normalize_email_address(value: str) -> str:
+    return re.sub(r"[ \t]+", "", value).strip().lower()
+
+
+def _looks_like_email(claim: str) -> bool:
+    return "@" in claim and "." in claim.rsplit("@", 1)[-1]
+
+
+def _email_supported(claim: str, source_text: str) -> bool:
+    """Compare against complete email spans only. Never combine scattered parts."""
+    claimed = _normalize_email_address(claim)
+    if not claimed or "@" not in claimed:
+        return False
+    for match in _EMAIL_SPAN_RE.finditer(source_text):
+        if "\n" in match.group(0):
+            continue
+        if _normalize_email_address(match.group(0)) == claimed:
+            return True
+    return False
+
+
+def _canonical_phone_digits(value: str) -> str | None:
+    digits = re.sub(r"\D", "", value)
+    if digits.startswith("1") and len(digits) == 11:
+        digits = digits[1:]
+    if len(digits) < 7:
+        return None
+    return digits
+
+
+def _phone_supported(claim: str, source_text: str) -> bool:
+    """Compare a claimed phone with one extracted span. Never join resume digits."""
+    claimed = _canonical_phone_digits(claim)
+    if claimed is None:
+        return False
+    for match in _PHONE_SPAN_RE.finditer(source_text):
+        span = match.group(0)
+        if "\n" in span:
+            continue
+        canonical = _canonical_phone_digits(span)
+        if canonical and canonical == claimed:
+            return True
+    return False
+
+
+def _looks_like_job_title(claim_n: str) -> bool:
+    tokens = [token for token in claim_n.split() if token]
+    if len(tokens) < 2:
+        return False
+    token_set = set(tokens)
+    return bool(token_set & _ROLE_QUALIFIERS) or bool(token_set & _TITLE_HINTS)
+
+
+def _title_qualifiers_aligned(claim_n: str, source_n: str) -> bool:
+    """Role-level qualifiers cannot be invented or dropped from a title phrase."""
+    if not _looks_like_job_title(claim_n):
+        return True
+    claim_tokens = [token for token in claim_n.split() if token]
+    claim_q = {token for token in claim_tokens if token in _ROLE_QUALIFIERS}
+    body = [token for token in claim_tokens if token not in _ROLE_QUALIFIERS]
+    if not body:
+        pattern = rf"(?<![a-z0-9]){re.escape(claim_n)}(?![a-z0-9])"
+        return re.search(pattern, source_n) is not None
+    body_pattern = r"[\s]+".join(re.escape(token) for token in body)
+    pattern = rf"(?<![a-z0-9]){body_pattern}(?![a-z0-9])"
+    for match in re.finditer(pattern, source_n):
+        prefix = source_n[: match.start()].split()[-1:]
+        suffix = source_n[match.end() :].split()[:1]
+        window_q = {
+            token
+            for token in [*prefix, *suffix, *match.group(0).split()]
+            if token in _ROLE_QUALIFIERS
+        }
+        if window_q == claim_q:
+            return True
+    return False
 
 
 def _extract_typed_numeric_evidence(text: str) -> list[tuple[str, str]]:
@@ -236,9 +453,15 @@ def _extract_typed_numeric_evidence(text: str) -> list[tuple[str, str]]:
         for i in range(start, end):
             occupied[i] = True
 
+    for match in _MONTH_DATE_RE.finditer(lower):
+        if _free(match.start(), match.end()):
+            for canonical in _month_date_values(match):
+                evidence.append(("date", canonical))
+            _mark(match.start(), match.end())
+
     for match in _DATE_TOKEN_RE.finditer(lower):
         if _free(match.start(), match.end()):
-            evidence.append(("date", match.group(0)))
+            evidence.append(("date", _canonical_iso_date(match.group(0))))
             _mark(match.start(), match.end())
 
     for match in _CURRENCY_TOKEN_RE.finditer(lower):
@@ -262,6 +485,7 @@ def _extract_typed_numeric_evidence(text: str) -> list[tuple[str, str]]:
 def _mask_typed_numeric_evidence(text: str) -> str:
     """Replace typed numeric/date spans with placeholders for context comparison."""
     masked = text.lower()
+    masked = _MONTH_DATE_RE.sub("#", masked)
     masked = _DATE_TOKEN_RE.sub("#", masked)
     masked = _CURRENCY_TOKEN_RE.sub("#", masked)
     masked = _PERCENT_TOKEN_RE.sub("#", masked)
@@ -280,7 +504,12 @@ def _evidence_covered(required: list[tuple[str, str]], available: list[tuple[str
     return True
 
 
-def _typed_numeric_claim_supported(claim: str, source_text: str) -> bool:
+def _typed_numeric_claim_supported(
+    claim: str,
+    source_text: str,
+    *,
+    min_ratio: float = FUZZY_RATIO_THRESHOLD,
+) -> bool:
     """Require same-kind numeric/date evidence in similar surrounding context."""
     claim_evidence = _extract_typed_numeric_evidence(claim)
     if not claim_evidence:
@@ -290,8 +519,8 @@ def _typed_numeric_claim_supported(claim: str, source_text: str) -> bool:
     if not _evidence_covered(claim_evidence, source_evidence):
         return False
 
-    # Pure date fields (e.g. start_date) must match exactly — no nearby rewrite.
-    if all(kind == "date" for kind, _ in claim_evidence) and len(claim.strip()) <= 12:
+    # Pure date fields must match canonical evidence — no nearby rewrite.
+    if all(kind == "date" for kind, _ in claim_evidence) and len(claim.strip()) <= 32:
         return True
 
     claim_skeleton = _mask_typed_numeric_evidence(claim)
@@ -299,12 +528,13 @@ def _typed_numeric_claim_supported(claim: str, source_text: str) -> bool:
     if not re.search(r"[a-z]", claim_skeleton):
         return True
 
+    needed = max(0.82, min_ratio)
     source_l = source_text.lower()
     window = max(len(claim_skeleton), 12)
     step = max(window // 3, 4)
     for idx in range(0, max(len(source_l) - window + 1, 1), step):
         chunk = source_l[idx : idx + window + 24]
-        if SequenceMatcher(None, claim_skeleton, _mask_typed_numeric_evidence(chunk)).ratio() < 0.82:
+        if SequenceMatcher(None, claim_skeleton, _mask_typed_numeric_evidence(chunk)).ratio() < needed:
             continue
         if _evidence_covered(claim_evidence, _extract_typed_numeric_evidence(chunk)):
             return True
@@ -313,9 +543,12 @@ def _typed_numeric_claim_supported(claim: str, source_text: str) -> bool:
 
 def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RATIO_THRESHOLD) -> bool:
     """Conservative evidence check: substring, token coverage, or fuzzy window match."""
+    if _looks_like_email(claim):
+        return _email_supported(claim, source_text)
+
     # Typed numeric/date path runs on originals so $ / % / percent stay semantic.
     if _extract_typed_numeric_evidence(claim):
-        return _typed_numeric_claim_supported(claim, source_text)
+        return _typed_numeric_claim_supported(claim, source_text, min_ratio=min_ratio)
 
     claim_n = _normalize_for_match(claim)
     source_n = _normalize_for_match(source_text)
@@ -328,17 +561,21 @@ def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RA
         return re.search(pattern, source_n) is not None
 
     if claim_n in source_n:
-        return True
+        return _title_qualifiers_aligned(claim_n, source_n)
 
     # URLs/paths must not fuzzy-match a neighboring repo that shares a host prefix.
     if "://" in claim or "/" in claim_n:
         return False
 
     claim_tokens = _tokens(claim)
-    if claim_tokens and len(claim_tokens & _tokens(source_text)) / len(claim_tokens) >= TOKEN_COVERAGE_THRESHOLD:
+    coverage_needed = max(TOKEN_COVERAGE_THRESHOLD, min_ratio)
+    if (
+        claim_tokens
+        and len(claim_tokens & _tokens(source_text)) / len(claim_tokens) >= coverage_needed
+    ):
         distinctive = {t for t in claim_tokens if len(t) >= 4}
         if not distinctive or distinctive & _tokens(source_text):
-            return True
+            return _title_qualifiers_aligned(claim_n, source_n)
 
     window = max(len(claim_n), 8)
     step = max(window // 2, 4)
@@ -347,8 +584,10 @@ def claim_supported(claim: str, source_text: str, *, min_ratio: float = FUZZY_RA
         chunk = source_n[idx : idx + window + 8]
         best = max(best, SequenceMatcher(None, claim_n, chunk).ratio())
         if best >= min_ratio:
-            return True
-    return best >= min_ratio
+            return _title_qualifiers_aligned(claim_n, source_n)
+    if best >= min_ratio:
+        return _title_qualifiers_aligned(claim_n, source_n)
+    return False
 
 
 def _complete_name_supported(name: str, resume_text: str) -> bool:
@@ -870,16 +1109,13 @@ def validate_and_ground_profile(
             "We could not confirm a candidate name from this resume. Please try another PDF export."
         )
 
-    if profile.email and not claim_supported(profile.email, resume_text, min_ratio=0.9):
+    if profile.email and not _email_supported(profile.email, resume_text):
         report.bump("removed_emails")
         profile.email = None
 
-    if profile.phone:
-        phone_digits = re.sub(r"\D", "", profile.phone)
-        source_digits = re.sub(r"\D", "", resume_text)
-        if len(phone_digits) < 7 or phone_digits not in source_digits:
-            report.bump("removed_phones")
-            profile.phone = None
+    if profile.phone and not _phone_supported(profile.phone, resume_text):
+        report.bump("removed_phones")
+        profile.phone = None
 
     grounded_skills: list[str] = []
     for skill in profile.skills:

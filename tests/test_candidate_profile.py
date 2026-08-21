@@ -799,6 +799,283 @@ def test_company_a_does_not_match_company_alpha() -> None:
     assert _anchor_supported("Acme", "Acmeology Lab") is False
 
 
+def _contact_only_payload(**overrides: object) -> dict:
+    raw = _grounded_llm_payload()
+    raw["skills"] = []
+    raw["projects"] = []
+    raw["experience"] = []
+    raw["education"] = []
+    raw["certifications"] = []
+    raw["strengths"] = []
+    raw["evidence_links"] = []
+    raw.update(overrides)
+    return raw
+
+
+def test_scattered_email_parts_rejected(caplog: pytest.LogCaptureFixture) -> None:
+    source = "Alex Rivera\nJohn\nPortfolio: example.com\nPython"
+    assert claim_supported("john@example.com", source, min_ratio=0.9) is False
+    raw = _contact_only_payload(email="john@example.com", phone=None)
+    with caplog.at_level(logging.INFO, logger="backend.services.candidate_profile_agent"):
+        profile, report = validate_and_ground_profile(raw, source)
+    assert profile.email is None
+    assert report.as_counts().get("removed_emails") == 1
+    assert "john@example.com" not in caplog.text
+
+
+def test_exact_email_retained() -> None:
+    source = "Alex Rivera\nalex.rivera@example.com"
+    assert claim_supported("alex.rivera@example.com", source, min_ratio=0.9) is True
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(phone=None), source
+    )
+    assert profile.email == "alex.rivera@example.com"
+    assert report.as_counts().get("removed_emails") is None
+
+
+def test_case_insensitive_exact_email_retained() -> None:
+    source = "Alex Rivera\nAlex.Rivera@Example.COM"
+    assert claim_supported("alex.rivera@example.com", source, min_ratio=0.9) is True
+    profile, _report = validate_and_ground_profile(
+        _contact_only_payload(phone=None), source
+    )
+    assert profile.email == "alex.rivera@example.com"
+
+
+def test_harmless_pdf_spacing_email_retained() -> None:
+    source = "Alex Rivera\nalex.rivera @ example.com"
+    assert claim_supported("alex.rivera@example.com", source, min_ratio=0.9) is True
+    profile, _report = validate_and_ground_profile(
+        _contact_only_payload(phone=None), source
+    )
+    assert profile.email == "alex.rivera@example.com"
+
+
+def test_username_and_domain_on_separate_lines_rejected() -> None:
+    source = "Alex Rivera\nalex.rivera\nexample.com"
+    assert claim_supported("alex.rivera@example.com", source, min_ratio=0.9) is False
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(phone=None), source
+    )
+    assert profile.email is None
+    assert report.as_counts().get("removed_emails") == 1
+
+
+def test_website_domain_without_email_rejected() -> None:
+    source = "Alex Rivera\nhttps://example.com\nPortfolio"
+    assert claim_supported("alex.rivera@example.com", source, min_ratio=0.9) is False
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(phone=None), source
+    )
+    assert profile.email is None
+    assert report.as_counts().get("removed_emails") == 1
+
+
+def test_neighboring_email_address_rejected() -> None:
+    source = "Alex Rivera\njane@example.com"
+    assert claim_supported("alex.rivera@example.com", source, min_ratio=0.9) is False
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(phone=None), source
+    )
+    assert profile.email is None
+    assert report.as_counts().get("removed_emails") == 1
+
+
+def test_concatenated_unrelated_digits_not_a_phone(caplog: pytest.LogCaptureFixture) -> None:
+    source = "Alex Rivera\nGPA 3.9\nZIP 55123\nGraduated 2021"
+    raw = _contact_only_payload(email=None, phone="(955) 123-2021")
+    with caplog.at_level(logging.INFO, logger="backend.services.candidate_profile_agent"):
+        profile, report = validate_and_ground_profile(raw, source)
+    assert profile.phone is None
+    assert report.as_counts().get("removed_phones") == 1
+    assert "(955) 123-2021" not in caplog.text
+    assert "9551232021" not in caplog.text
+
+
+def test_exact_formatted_phone_retained() -> None:
+    source = "Alex Rivera\n+1-555-0142"
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="+1-555-0142"), source
+    )
+    assert profile.phone == "+1-555-0142"
+    assert report.as_counts().get("removed_phones") is None
+
+
+def test_phone_punctuation_formatting_retained() -> None:
+    source = "Alex Rivera\n(555) 123-4567"
+    profile, _report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="555-123-4567"), source
+    )
+    assert profile.phone == "555-123-4567"
+
+
+def test_phone_plus_one_equivalence_retained() -> None:
+    source = "Alex Rivera\n555-123-4567"
+    profile, _report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="+1 555-123-4567"), source
+    )
+    assert profile.phone == "+1 555-123-4567"
+
+
+def test_phone_fragments_on_separate_lines_rejected() -> None:
+    source = "Alex Rivera\n(555)\n123-4567"
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="(555) 123-4567"), source
+    )
+    assert profile.phone is None
+    assert report.as_counts().get("removed_phones") == 1
+
+
+def test_neighboring_different_phone_rejected() -> None:
+    source = "Alex Rivera\n+1-555-0142"
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="+1-555-0199"), source
+    )
+    assert profile.phone is None
+    assert report.as_counts().get("removed_phones") == 1
+
+
+def test_exact_title_retained() -> None:
+    assert claim_supported("Software Engineer", "Software Engineer") is True
+
+
+def test_title_punctuation_variant_retained() -> None:
+    assert claim_supported("Software Engineer,", "Software Engineer") is True
+    assert claim_supported("Software Engineer", "Software Engineer.") is True
+
+
+def test_senior_title_inflation_rejected() -> None:
+    assert claim_supported("Senior Software Engineer", "Software Engineer") is False
+    assert claim_supported("Senior Software Engineer", "Software Engineer", min_ratio=0.9) is False
+
+
+def test_staff_lead_principal_title_inflation_rejected() -> None:
+    source = "Software Engineer"
+    assert claim_supported("Staff Software Engineer", source) is False
+    assert claim_supported("Lead Software Engineer", source) is False
+    assert claim_supported("Principal Software Engineer", source) is False
+    assert claim_supported("Junior Software Engineer", source) is False
+
+
+def test_intern_qualifier_cannot_be_added_or_removed() -> None:
+    assert claim_supported("Software Engineer Intern", "Software Engineer") is False
+    assert claim_supported("Software Engineer", "Software Engineer Intern") is False
+    assert claim_supported("Software Engineer Intern", "Software Engineer Intern") is True
+
+
+def test_company_boundary_protections_remain_intact() -> None:
+    from backend.services.candidate_profile_agent import _anchor_supported
+
+    assert _anchor_supported("Company A", "Company Alpha") is False
+    assert _anchor_supported("Acme", "Acmeology Lab") is False
+    assert _anchor_supported("Acme", "Acme, Inc.") is True
+
+
+def test_exact_may_2025_retained() -> None:
+    source = "Alex Rivera\nSoftware Engineer\nAcme\nMay 2025 – August 2025\n- Built APIs."
+    assert claim_supported("May 2025", source, min_ratio=0.8) is True
+    raw = _contact_only_payload(
+        email=None,
+        phone=None,
+        experience=[
+            {
+                "title": "Software Engineer",
+                "company": "Acme",
+                "start_date": "May 2025",
+                "end_date": "August 2025",
+                "highlights": ["Built APIs."],
+            }
+        ],
+    )
+    profile, report = validate_and_ground_profile(raw, source)
+    assert profile.experience[0].start_date == "May 2025"
+    assert profile.experience[0].end_date == "August 2025"
+    assert report.as_counts().get("removed_experience_dates") is None
+
+
+def test_case_insensitive_month_date_retained() -> None:
+    assert claim_supported("May 2025", "started MAY 2025") is True
+
+
+def test_month_abbreviation_equivalence_retained() -> None:
+    assert claim_supported("May 2025", "May 2025") is True
+    assert claim_supported("Jan 2025", "January 2025") is True
+    assert claim_supported("January 2025", "Jan 2025") is True
+
+
+def test_supported_month_range_retained() -> None:
+    source = "May 2025 – August 2025"
+    assert claim_supported("May 2025", source) is True
+    assert claim_supported("August 2025", source) is True
+    assert claim_supported("May 2025 – August 2025", source) is True
+    assert claim_supported("May–Aug 2025", "May–Aug 2025") is True
+
+
+def test_nearby_month_rewrite_rejected() -> None:
+    assert claim_supported("May 2025", "June 2025") is False
+    source = "Alex Rivera\nSoftware Engineer\nAcme\nJune 2025\n- Built APIs."
+    raw = _contact_only_payload(
+        email=None,
+        phone=None,
+        experience=[
+            {
+                "title": "Software Engineer",
+                "company": "Acme",
+                "start_date": "May 2025",
+                "end_date": None,
+                "highlights": ["Built APIs."],
+            }
+        ],
+    )
+    profile, report = validate_and_ground_profile(raw, source)
+    assert profile.experience[0].start_date is None
+    assert report.as_counts().get("removed_experience_dates") == 1
+
+
+def test_different_year_month_date_rejected() -> None:
+    assert claim_supported("May 2025", "May 2024") is False
+
+
+def test_month_date_from_neighboring_experience_rejected() -> None:
+    resume = """
+Alex Rivera
+Experience
+Software Engineer
+Acme
+May 2025 – August 2025
+- First tour work.
+Software Engineer
+Beta Labs
+June 2025 – July 2025
+- Second tour work.
+""".strip()
+    raw = _contact_only_payload(
+        email=None,
+        phone=None,
+        experience=[
+            {
+                "title": "Software Engineer",
+                "company": "Acme",
+                "start_date": "June 2025",
+                "end_date": "July 2025",
+                "highlights": ["First tour work."],
+            }
+        ],
+    )
+    profile, report = validate_and_ground_profile(raw, resume)
+    assert profile.experience[0].start_date is None
+    assert profile.experience[0].end_date is None
+    assert report.as_counts().get("removed_experience_dates") == 2
+
+
+def test_iso_date_behavior_preserved() -> None:
+    source = "2025-05 – 2025-08"
+    assert claim_supported("2025-05", source) is True
+    assert claim_supported("2025-06", source) is False
+    assert claim_supported("2025-05", "May 2025") is True
+
+
+
 def test_multiline_education_keeps_own_fields() -> None:
     resume = """
 Alex Rivera
