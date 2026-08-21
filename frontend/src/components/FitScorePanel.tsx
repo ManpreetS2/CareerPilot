@@ -42,11 +42,13 @@ function ComponentRow({ label, value }: { label: string; value?: number | null }
 export function FitScorePanel({
   match,
   loading,
+  disabled = false,
   error,
   onCalculate,
 }: {
   match: MatchScore | null;
   loading: boolean;
+  disabled?: boolean;
   error: unknown;
   onCalculate: () => void;
 }) {
@@ -76,7 +78,7 @@ export function FitScorePanel({
           type="button"
           className="btn-primary"
           onClick={onCalculate}
-          disabled={loading}
+          disabled={loading || disabled}
           aria-busy={loading}
         >
           <Calculator className="h-4 w-4" aria-hidden />

@@ -73,6 +73,18 @@ export type JobVerificationResponse = {
   stale: number;
 };
 
+export type JobIntelligence = {
+  job_id?: string | null;
+  required_skills: string[];
+  preferred_skills: string[];
+  years_experience?: number | null;
+  education_requirements: string[];
+  tech_stack: string[];
+  seniority?: string | null;
+  responsibilities: string[];
+  likely_interview_focus: string[];
+};
+
 export type MatchScore = {
   job_id: string;
   overall_score: number;
