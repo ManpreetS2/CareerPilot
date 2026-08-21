@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.db.database import Base
 from backend.db.models import JobIntelligenceRecord, MatchScoreRecord
 from backend.schemas.schemas import JobIntelligence
-from backend.services.analysis_service import RequirementsUnavailableError
+from backend.services.analysis_service import RequirementsUnavailableError, score_job
 from backend.services.llm_client import LLMConfigurationError, LLMProviderError
 from backend.services.job_intelligence_service import StructuredIntelligenceError
 from backend.services.scoring_orchestrator import score_job_with_intelligence
@@ -24,6 +24,7 @@ from scripts.backfill_job_intelligence import (
     BackfillCounts,
     assert_safe_database_path,
     format_backfill_counts,
+    main as backfill_main,
     run_backfill,
     sqlite_path_from_url,
 )
@@ -217,6 +218,117 @@ def test_non_scoreable_extraction_never_falls_back_to_provisional(
     assert isolated_session.query(MatchScoreRecord).count() == 0
 
 
+def test_stored_non_scoreable_intelligence_does_not_fallback_through_score_job(
+    isolated_session,
+) -> None:
+    _candidate(isolated_session, skills=["Python"])
+    job = _job(
+        isolated_session,
+        public_id="stored-non-scoreable",
+        title="Platform Engineer",
+        description="Requirements:\nPython\nResponsibilities:\nBuild APIs",
+    )
+    isolated_session.add(
+        JobIntelligenceRecord(
+            job_id=job.id,
+            required_skills=[],
+            preferred_skills=[],
+            years_experience=None,
+            education_requirements=[],
+            tech_stack=[],
+            seniority=None,
+            responsibilities=["Build APIs"],
+            likely_interview_focus=["System design"],
+        )
+    )
+    isolated_session.commit()
+    provider = Mock(side_effect=AssertionError("score_job must not call a provider"))
+
+    with patch(
+        "backend.services.job_intelligence_service.get_llm_client",
+        provider,
+    ):
+        with pytest.raises(RequirementsUnavailableError):
+            score_job(isolated_session, job.public_id)
+
+    provider.assert_not_called()
+    assert isolated_session.query(MatchScoreRecord).count() == 0
+    assert isolated_session.query(JobIntelligenceRecord).count() == 1
+
+
+def test_persist_recovers_from_duplicate_job_insert(isolated_session) -> None:
+    from backend.services.job_intelligence_service import _persist_grounded
+
+    job = _described_job(isolated_session, public_id="persist-race")
+    isolated_session.add(
+        JobIntelligenceRecord(
+            job_id=job.id,
+            required_skills=["Go"],
+            preferred_skills=[],
+            years_experience=None,
+            education_requirements=[],
+            tech_stack=[],
+            seniority=None,
+            responsibilities=[],
+            likely_interview_focus=[],
+        )
+    )
+    isolated_session.commit()
+    incoming = JobIntelligence(
+        job_id=job.public_id,
+        required_skills=["Python"],
+        preferred_skills=["Docker"],
+        years_experience=2,
+        education_requirements=[],
+        tech_stack=[],
+        seniority="mid",
+        responsibilities=[],
+        likely_interview_focus=[],
+    )
+    original_query = isolated_session.query
+    misses = {"remaining": 1}
+
+    def query(entity, *args, **kwargs):
+        result = original_query(entity, *args, **kwargs)
+        if entity is not JobIntelligenceRecord or misses["remaining"] <= 0:
+            return result
+        original_filter = result.filter
+
+        def filtered(*filter_args, **filter_kwargs):
+            query_result = original_filter(*filter_args, **filter_kwargs)
+            original_first = query_result.first
+
+            def first():
+                if misses["remaining"] > 0:
+                    misses["remaining"] -= 1
+                    return None
+                return original_first()
+
+            query_result.first = first
+            return query_result
+
+        result.filter = filtered
+        return result
+
+    isolated_session.query = query
+    stored = _persist_grounded(isolated_session, job, incoming)
+    isolated_session.query = original_query
+
+    assert stored.required_skills == ["Python"]
+    rows = isolated_session.query(JobIntelligenceRecord).all()
+    assert len(rows) == 1
+    assert rows[0].required_skills == ["Python"]
+    assert rows[0].preferred_skills == ["Docker"]
+
+
+class _NullLock:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
 def test_concurrent_first_scores_extract_once_and_leave_one_row(tmp_path) -> None:
     database_path = tmp_path / "concurrent-pipeline.sqlite"
     engine = create_engine(
@@ -252,6 +364,50 @@ def test_concurrent_first_scores_extract_once_and_leave_one_row(tmp_path) -> Non
         with SessionFactory() as db:
             assert db.query(JobIntelligenceRecord).count() == 1
             assert db.query(MatchScoreRecord).count() == 1
+    finally:
+        engine.dispose()
+
+
+def test_concurrent_first_scores_without_process_lock_leave_one_intelligence_row(
+    tmp_path,
+) -> None:
+    database_path = tmp_path / "concurrent-unlocked.sqlite"
+    engine = create_engine(
+        f"sqlite:///{database_path}",
+        connect_args={"check_same_thread": False},
+        future=True,
+    )
+    Base.metadata.create_all(bind=engine)
+    SessionFactory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    with SessionFactory() as db:
+        _candidate(db, skills=["Python"])
+        job = _described_job(db, public_id="concurrent-unlocked")
+
+    def generate(_prompt: str, _system: str | None) -> str:
+        time.sleep(0.15)
+        return json.dumps(_grounded_payload())
+
+    generator = Mock(side_effect=generate)
+
+    def calculate() -> float:
+        with SessionFactory() as db:
+            return score_job_with_intelligence(
+                db,
+                job.public_id,
+                generate_fn=generator,
+            ).overall_score
+
+    try:
+        with patch(
+            "backend.services.scoring_orchestrator._JOB_LOCKS",
+            tuple(_NullLock() for _ in range(64)),
+        ):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(lambda _index: calculate(), range(2)))
+        assert len(results) == 2
+        with SessionFactory() as db:
+            assert db.query(JobIntelligenceRecord).count() == 1
+            assert db.query(MatchScoreRecord).count() >= 1
     finally:
         engine.dispose()
 
@@ -522,6 +678,140 @@ def test_backfill_refuses_production_database_path() -> None:
     assert production_url_path == PRODUCTION_DATABASE
     with pytest.raises(ValueError, match="production database"):
         assert_safe_database_path(production_url_path)
+    assert assert_safe_database_path(PRODUCTION_DATABASE, dry_run=True) == PRODUCTION_DATABASE
+    assert assert_safe_database_path(PRODUCTION_DATABASE, confirm=True) == PRODUCTION_DATABASE
+
+
+def test_cli_refuses_production_mutation_without_confirm(monkeypatch, capsys) -> None:
+    session_factory = Mock()
+    worker = Mock()
+    extractor = Mock()
+    monkeypatch.setattr(
+        "scripts.backfill_job_intelligence.sqlite_path_from_url",
+        lambda _url: PRODUCTION_DATABASE,
+    )
+    monkeypatch.setattr("scripts.backfill_job_intelligence.SessionLocal", session_factory)
+    monkeypatch.setattr("scripts.backfill_job_intelligence.run_backfill", worker)
+    monkeypatch.setattr(
+        "scripts.backfill_job_intelligence.extract_job_intelligence",
+        extractor,
+    )
+
+    exit_code = backfill_main([])
+
+    assert exit_code == 2
+    session_factory.assert_not_called()
+    worker.assert_not_called()
+    extractor.assert_not_called()
+    output = capsys.readouterr().out.strip()
+    assert output.endswith("result=refused")
+    assert "extracted=0" in output
+    assert "careerpilot.db" not in output
+    assert PRODUCTION_DATABASE.name not in output
+
+
+def test_cli_production_dry_run_is_read_only_without_confirm(
+    isolated_session,
+    monkeypatch,
+    capsys,
+) -> None:
+    from contextlib import contextmanager
+
+    _described_job(isolated_session, public_id="cli-production-dry-run")
+    extractor = Mock(side_effect=AssertionError("dry-run must not call a provider"))
+
+    @contextmanager
+    def fake_session():
+        yield isolated_session
+
+    monkeypatch.setattr(
+        "scripts.backfill_job_intelligence.sqlite_path_from_url",
+        lambda _url: PRODUCTION_DATABASE,
+    )
+    monkeypatch.setattr("scripts.backfill_job_intelligence.SessionLocal", fake_session)
+    monkeypatch.setattr(
+        "scripts.backfill_job_intelligence.extract_job_intelligence",
+        extractor,
+    )
+
+    exit_code = backfill_main(["--dry-run"])
+
+    assert exit_code == 0
+    extractor.assert_not_called()
+    assert isolated_session.query(JobIntelligenceRecord).count() == 0
+    output = capsys.readouterr().out.strip()
+    assert "extracted=0" in output
+    assert "result=refused" not in output
+
+
+def test_cli_confirmed_production_reaches_worker(monkeypatch, capsys) -> None:
+    from contextlib import contextmanager
+
+    worker = Mock(return_value=BackfillCounts())
+    entered = {"value": False}
+
+    @contextmanager
+    def fake_session():
+        entered["value"] = True
+        yield Mock()
+
+    monkeypatch.setattr(
+        "scripts.backfill_job_intelligence.sqlite_path_from_url",
+        lambda _url: PRODUCTION_DATABASE,
+    )
+    monkeypatch.setattr("scripts.backfill_job_intelligence.SessionLocal", fake_session)
+    monkeypatch.setattr("scripts.backfill_job_intelligence.run_backfill", worker)
+
+    exit_code = backfill_main(["--confirm"])
+
+    assert exit_code == 0
+    assert entered["value"] is True
+    worker.assert_called_once()
+    assert worker.call_args.kwargs["dry_run"] is False
+    assert "result=refused" not in capsys.readouterr().out
+
+
+def test_cli_temporary_database_runs_without_confirm(
+    isolated_session,
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    from contextlib import contextmanager
+
+    from backend.services.job_intelligence_service import (
+        extract_job_intelligence as extract_impl,
+    )
+
+    _described_job(isolated_session, public_id="cli-temp-backfill")
+    generator = Mock(return_value=json.dumps(_grounded_payload()))
+
+    @contextmanager
+    def fake_session():
+        yield isolated_session
+
+    def extract_with_fake_provider(db, public_id, generate_fn=None):
+        del generate_fn
+        return extract_impl(db, public_id, generate_fn=generator)
+
+    monkeypatch.setattr(
+        "scripts.backfill_job_intelligence.sqlite_path_from_url",
+        lambda _url: tmp_path / "backfill.sqlite",
+    )
+    monkeypatch.setattr("scripts.backfill_job_intelligence.SessionLocal", fake_session)
+    monkeypatch.setattr(
+        "scripts.backfill_job_intelligence.extract_job_intelligence",
+        extract_with_fake_provider,
+    )
+
+    exit_code = backfill_main([])
+
+    assert exit_code == 0
+    assert generator.call_count == 1
+    assert isolated_session.query(JobIntelligenceRecord).count() == 1
+    output = capsys.readouterr().out.strip()
+    assert "extracted=1" in output
+    assert "result=refused" not in output
 
 
 def test_manual_qa_does_not_mask_validation_failure_as_provider_blocker() -> None:

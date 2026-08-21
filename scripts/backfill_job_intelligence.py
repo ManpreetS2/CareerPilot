@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from backend.core.config import settings
 from backend.db.database import SessionLocal
 from backend.db.models import JobIntelligenceRecord, JobRecord
 from backend.services.job_intelligence_service import (
@@ -38,12 +39,19 @@ class BackfillCounts:
     failed: int = 0
 
 
-def assert_safe_database_path(database_path: Path) -> Path:
-    """Refuse the production SQLite file during automated or disposable runs."""
+def assert_safe_database_path(
+    database_path: Path,
+    *,
+    dry_run: bool = False,
+    confirm: bool = False,
+) -> Path:
+    """Refuse unconfirmed production writes; dry-run and confirmed writes are allowed."""
     resolved = database_path.expanduser().resolve()
-    if resolved == PRODUCTION_DATABASE:
-        raise ValueError("Refusing to run backfill against the production database.")
-    return resolved
+    if resolved != PRODUCTION_DATABASE:
+        return resolved
+    if dry_run or confirm:
+        return resolved
+    raise ValueError("Refusing to mutate the production database without --confirm.")
 
 
 def sqlite_path_from_url(database_url: str) -> Path | None:
@@ -128,10 +136,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--re-extract", action="store_true")
     parser.add_argument("--limit", type=int)
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Allow writing to the production database.",
+    )
     args = parser.parse_args(argv)
 
     if args.limit is not None and args.limit < 0:
         parser.error("--limit must be zero or greater")
+
+    database_path = sqlite_path_from_url(settings.database_url)
+    if database_path is not None:
+        try:
+            assert_safe_database_path(
+                database_path,
+                dry_run=args.dry_run,
+                confirm=args.confirm,
+            )
+        except ValueError:
+            print(f"{format_backfill_counts(BackfillCounts())} result=refused")
+            return 2
 
     previous_logging_disable = logging.root.manager.disable
     logging.disable(logging.CRITICAL)

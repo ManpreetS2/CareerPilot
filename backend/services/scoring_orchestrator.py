@@ -7,6 +7,7 @@ import threading
 from collections.abc import Callable
 from datetime import date
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.db.models import JobIntelligenceRecord
@@ -49,13 +50,25 @@ def score_job_with_intelligence(
         )
         extracted = False
         if not intelligence_exists and has_usable_posting_evidence(job):
-            extract_job_intelligence(
-                db,
-                job_public_id,
-                generate_fn=generate_fn,
-            )
-            intelligence_exists = True
-            extracted = True
+            try:
+                extract_job_intelligence(
+                    db,
+                    job_public_id,
+                    generate_fn=generate_fn,
+                )
+                intelligence_exists = True
+                extracted = True
+            except IntegrityError:
+                db.rollback()
+                intelligence_exists = (
+                    db.query(JobIntelligenceRecord.id)
+                    .filter(JobIntelligenceRecord.job_id == job.id)
+                    .first()
+                    is not None
+                )
+                if not intelligence_exists:
+                    raise
+                extracted = False
 
         logger.info(
             "score orchestration job_pk=%s intelligence_exists=%s extracted=%s",

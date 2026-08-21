@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.db.models import JobIntelligenceRecord, JobRecord
@@ -966,7 +967,20 @@ def _persist_grounded(
     else:
         for key, value in payload.items():
             setattr(record, key, value)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        record = (
+            db.query(JobIntelligenceRecord)
+            .filter(JobIntelligenceRecord.job_id == job.id)
+            .first()
+        )
+        if record is None:
+            raise
+        for key, value in payload.items():
+            setattr(record, key, value)
+        db.commit()
     return JobIntelligence(job_id=job.public_id, **payload)
 
 

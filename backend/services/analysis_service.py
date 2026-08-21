@@ -1074,7 +1074,8 @@ def load_requirements(db: Session, job: JobRecord) -> GroundedRequirements:
             or grounded.education_requirements
         ):
             return grounded
-        # Intelligence existed but nothing grounded; do not invent from it.
+        # Intelligence existed but nothing scoreable; do not invent from the posting.
+        raise RequirementsUnavailableError()
     fallback = extract_explicit_skills_from_description(f"{job.title}\n{job.description}")
     logger.info(
         "scoring requirement_source=description skills=%s job_pk=%s",
