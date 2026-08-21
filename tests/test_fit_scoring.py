@@ -1365,3 +1365,30 @@ def test_grounded_custom_intelligence_skill_uses_exact_evidence_only(
     assert result.skill_score == 100.0
     assert result.matched_skills == ["Rust"]
     assert "Rustacean" not in result.missing_skills
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "We go to market with every release.",
+        "The spring semester internship starts in April.",
+        "Maintain node modules across the workspace.",
+        "Partner with C-level executives.",
+        "The report is R-rated.",
+    ],
+)
+def test_ambiguous_prose_does_not_become_a_skill_requirement(prose: str) -> None:
+    grounded = extract_explicit_skills_from_description(prose)
+
+    assert grounded.required == []
+    assert grounded.preferred == []
+    assert grounded.tech_stack == []
+
+
+def test_ambiguous_skill_names_remain_available_when_explicit() -> None:
+    grounded = extract_explicit_skills_from_description(
+        "Requirements:\nGo\nC\nR\nPreferred:\nSpring\nNode.js"
+    )
+
+    assert grounded.required == ["Go", "C", "R"]
+    assert grounded.preferred == ["Spring", "Node.js"]

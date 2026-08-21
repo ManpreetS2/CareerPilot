@@ -17,6 +17,7 @@ export function JobDetailPage() {
   const [scoring, setScoring] = useState(false);
   const [scoreError, setScoreError] = useState<unknown>(null);
   const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<unknown>(null);
   const [error, setError] = useState<unknown>(null);
   const scoringInFlight = useRef(false);
   const scoringRequest = useRef(0);
@@ -29,6 +30,7 @@ export function JobDetailPage() {
       setLoading(true);
       setScoring(false);
       setError(null);
+      setVerifyError(null);
       setMatch(null);
       setScoreError(null);
       try {
@@ -49,12 +51,12 @@ export function JobDetailPage() {
   async function handleVerify() {
     if (!jobId) return;
     setVerifying(true);
-    setError(null);
+    setVerifyError(null);
     try {
       const updated = await api.verifyJob(jobId);
       setJob(updated);
     } catch (err) {
-      setError(err);
+      setVerifyError(err);
     } finally {
       setVerifying(false);
     }
@@ -142,6 +144,7 @@ export function JobDetailPage() {
               {verifying ? "Verifying…" : job.verified_at ? "Re-verify" : "Verify"}
             </button>
           </div>
+          <ErrorBanner error={verifyError} />
           <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">
             Current status: <span className="font-semibold capitalize">{job.status}</span>
           </p>

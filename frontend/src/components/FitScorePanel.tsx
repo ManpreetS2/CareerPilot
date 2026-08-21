@@ -57,16 +57,28 @@ export function FitScorePanel({
     error.message.toLowerCase().includes("candidate profile");
 
   return (
-    <section className="card space-y-4 p-6">
+    <section
+      className="card space-y-4 p-6"
+      aria-labelledby="fit-score-heading"
+      aria-busy={loading}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="font-display text-2xl font-semibold">Fit score</h2>
+          <h2 id="fit-score-heading" className="font-display text-2xl font-semibold">
+            Fit score
+          </h2>
           <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
             Scoring runs only when you ask. It uses the stored candidate profile and grounded job
             requirements.
           </p>
         </div>
-        <button type="button" className="btn-primary" onClick={onCalculate} disabled={loading}>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={onCalculate}
+          disabled={loading}
+          aria-busy={loading}
+        >
           <Calculator className="h-4 w-4" aria-hidden />
           {loading ? "Calculating…" : "Calculate fit"}
         </button>
@@ -85,7 +97,11 @@ export function FitScorePanel({
       ) : (
         <ErrorBanner error={error} />
       )}
-      {loading ? <LoadingState label="Calculating fit…" /> : null}
+      {loading ? (
+        <div role="status" aria-live="polite">
+          <LoadingState label="Calculating fit…" />
+        </div>
+      ) : null}
 
       {!loading && !match ? (
         <p className="text-sm text-ink-500">No fit score yet. Calculate fit to generate one.</p>

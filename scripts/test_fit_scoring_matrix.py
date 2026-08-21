@@ -564,6 +564,20 @@ def run_browser_e2e() -> dict[str, int]:
                 if len(score_requests) != 2:
                     raise AssertionError("Refresh triggered scoring.")
 
+                page.route(
+                    "**/api/jobs/browser-fit-success/verify",
+                    lambda route: route.fulfill(
+                        status=500,
+                        content_type="application/json",
+                        body='{"detail":"Unable to verify job."}',
+                    ),
+                )
+                page.get_by_role("button", name="Re-verify").click()
+                expect(page.get_by_role("alert")).to_contain_text("Unable to verify job.")
+                expect(page.get_by_role("heading", name="Fit score")).to_be_visible()
+                expect(page.get_by_role("heading", name="Job overview")).to_be_visible()
+                page.unroute("**/api/jobs/browser-fit-success/verify")
+
                 page.unroute("**/api/jobs/*/score", _delay_score)
                 page.route(
                     "**/api/jobs/*/score",
@@ -640,7 +654,7 @@ def run_browser_e2e() -> dict[str, int]:
             return {
                 "score_requests": len(score_requests),
                 "final_rows": final_rows,
-                "browser_checks": 14,
+                "browser_checks": 15,
             }
         finally:
             _stop_process(frontend)

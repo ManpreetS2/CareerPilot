@@ -52,7 +52,6 @@ _ALIAS_TO_CANONICAL: dict[str, str] = {
     "node js": "Node.js",
     "node-js": "Node.js",
     "nodejs": "Node.js",
-    "node": "Node.js",
     "fastapi": "FastAPI",
     "django": "Django",
     "flask": "Flask",
@@ -239,13 +238,36 @@ def _canonical_skill_key(label: str) -> str:
 
 
 def _alias_pattern(alias: str) -> re.Pattern[str]:
-    body = re.escape(alias.lower())
+    lowered = alias.lower()
+    body = re.escape(lowered)
     # Period is allowed as trailing punctuation ("Python.") and is not a token character,
     # except aliases that themselves contain a dot (node.js, .NET).
-    if alias.lower() == "react":
+    if lowered == "react":
         return re.compile(rf"(?<![a-z0-9+#]){body}(?![\s-]*native)(?![a-z0-9+#])", re.I)
-    if alias.lower() == "java":
+    if lowered == "java":
         return re.compile(rf"(?<![a-z0-9+#]){body}(?!script)(?![a-z0-9+#])", re.I)
+    if lowered == "go":
+        return re.compile(
+            rf"(?<![a-z0-9+#]){body}(?![\s-]+(?:to|for|ahead|back|home|live|viral)\b)"
+            rf"(?![a-z0-9+#])",
+            re.I,
+        )
+    if lowered == "spring":
+        return re.compile(
+            rf"(?<![a-z0-9+#]){body}(?!\s+(?:semester|season|break|term)\b)"
+            rf"(?![a-z0-9+#])",
+            re.I,
+        )
+    if lowered == "c":
+        return re.compile(
+            rf"(?<![a-z0-9+#-]){body}(?![\s-]*level\b)(?![a-z0-9+#-])",
+            re.I,
+        )
+    if lowered == "r":
+        return re.compile(
+            rf"(?<![a-z0-9+#-]){body}(?![\s-]*rated\b)(?![a-z0-9+#-])",
+            re.I,
+        )
     return re.compile(rf"(?<![a-z0-9+#]){body}(?![a-z0-9+#])", re.I)
 
 
