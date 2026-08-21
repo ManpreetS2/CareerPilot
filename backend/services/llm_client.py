@@ -20,6 +20,14 @@ class LLMConfigurationError(RuntimeError):
     """Raised when a provider is requested without the required API key."""
 
 
+class LLMProviderError(RuntimeError):
+    """Provider request failed after any allowed internal retry was exhausted."""
+
+
+class LLMEmptyResponseError(RuntimeError):
+    """Provider returned an empty payload (eligible for structured-output retry)."""
+
+
 class LLMClient:
     """Normalize generate() across Gemini, Anthropic, and OpenAI."""
 
@@ -73,20 +81,43 @@ class LLMClient:
     def _generate_gemini(self, prompt: str, system_prompt: str | None) -> str:
         from google import genai
         from google.genai import types
+        from google.genai import errors as genai_errors
 
         client = genai.Client(api_key=self._api_key())
         config = None
         if system_prompt:
             config = types.GenerateContentConfig(system_instruction=system_prompt)
-        response = client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=config,
-        )
-        text = getattr(response, "text", None)
-        if not text:
-            raise RuntimeError("Gemini returned an empty response.")
-        return text.strip()
+
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config,
+                )
+                text = getattr(response, "text", None)
+                if not text:
+                    raise LLMEmptyResponseError("Gemini returned an empty response.")
+                return text.strip()
+            except LLMEmptyResponseError:
+                raise
+            except genai_errors.APIError as exc:
+                last_error = exc
+                status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                logger.warning(
+                    "Gemini APIError attempt=%s status=%s type=%s",
+                    attempt + 1,
+                    status,
+                    type(exc).__name__,
+                )
+                # Retry once on transient provider pressure / rate limits.
+                if status in {429, 500, 503} and attempt == 0:
+                    continue
+                raise LLMProviderError("Gemini provider request failed.") from exc
+            except Exception as exc:  # noqa: BLE001 — normalize provider failures
+                raise LLMProviderError("Gemini provider request failed.") from exc
+        raise LLMProviderError("Gemini provider request failed.") from last_error
 
     def _generate_anthropic(self, prompt: str, system_prompt: str | None) -> str:
         import anthropic
@@ -95,12 +126,15 @@ class LLMClient:
         kwargs: dict[str, object] = {}
         if system_prompt:
             kwargs["system"] = system_prompt
-        message = client.messages.create(
-            model=self.model,
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-            **kwargs,
-        )
+        try:
+            message = client.messages.create(
+                model=self.model,
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+                **kwargs,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise LLMProviderError("Anthropic provider request failed.") from exc
         parts: list[str] = []
         for block in message.content:
             text = getattr(block, "text", None)
@@ -108,7 +142,7 @@ class LLMClient:
                 parts.append(text)
         result = "".join(parts).strip()
         if not result:
-            raise RuntimeError("Anthropic returned an empty response.")
+            raise LLMEmptyResponseError("Anthropic returned an empty response.")
         return result
 
     def _generate_openai(self, prompt: str, system_prompt: str | None) -> str:
@@ -119,10 +153,13 @@ class LLMClient:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        response = client.chat.completions.create(model=self.model, messages=messages)
+        try:
+            response = client.chat.completions.create(model=self.model, messages=messages)
+        except Exception as exc:  # noqa: BLE001
+            raise LLMProviderError("OpenAI provider request failed.") from exc
         text = response.choices[0].message.content
         if not text:
-            raise RuntimeError("OpenAI returned an empty response.")
+            raise LLMEmptyResponseError("OpenAI returned an empty response.")
         return text.strip()
 
 

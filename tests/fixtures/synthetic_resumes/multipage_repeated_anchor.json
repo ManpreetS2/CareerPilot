@@ -1,0 +1,73 @@
+{
+  "name": "Sam Rivera-Holt",
+  "email": "sam.holt@example.com",
+  "phone": "+1-555-0199",
+  "allowed_skills": [
+    "Python",
+    "FastAPI",
+    "React"
+  ],
+  "projects": [
+    {
+      "name": "Campus Beacon",
+      "technologies": [
+        "Python",
+        "FastAPI"
+      ],
+      "url": "https://github.com/example/campus-beacon"
+    },
+    {
+      "name": "Orbit Ledger",
+      "technologies": [
+        "React"
+      ],
+      "url": "https://github.com/example/orbit-ledger"
+    }
+  ],
+  "experience": [
+    {
+      "title": "Software Engineer",
+      "company": "Helix Harbor",
+      "start_date": "2024-01",
+      "end_date": "2024-06",
+      "highlights": [
+        "Built APIs for Helix Harbor."
+      ]
+    },
+    {
+      "title": "Software Engineer",
+      "company": "Helix Harbor",
+      "start_date": "2025-01",
+      "end_date": "2025-06",
+      "highlights": [
+        "Second tour work at Helix Harbor."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "institution": "State Harbor University",
+      "degree": "B.S.",
+      "field": "Computer Science",
+      "graduation_year": "2027"
+    },
+    {
+      "institution": "City Harbor College",
+      "degree": "A.A.",
+      "field": "General Studies",
+      "graduation_year": "2024"
+    }
+  ],
+  "certifications": [],
+  "numeric_unit_claims": [
+    "2024-01",
+    "2025-01",
+    "2027",
+    "2024"
+  ],
+  "never_survive": [
+    "Quantum Teleportation",
+    "$500",
+    "40%"
+  ]
+}

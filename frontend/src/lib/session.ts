@@ -5,6 +5,9 @@ const CANDIDATE_KEY = "careerpilot.candidate";
 const PREFERENCES_KEY = "careerpilot.preferences";
 const SELECTED_JOB_KEY = "careerpilot.selectedJobId";
 
+/** Prototype hourly values were small positives (e.g. 35). Annual salaries are >= 10000. */
+export const LEGACY_HOURLY_SALARY_CEILING = 9999;
+
 function readJson<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
@@ -15,14 +18,33 @@ function readJson<T>(key: string): T | null {
   }
 }
 
+export function isLegacyHourlySalary(value: number | null | undefined): boolean {
+  return typeof value === "number" && value > 0 && value <= LEGACY_HOURLY_SALARY_CEILING;
+}
+
+export function sanitizeStoredPreferences(
+  preferences: TargetPreferences | null,
+): TargetPreferences | null {
+  if (!preferences) return null;
+  if (!isLegacyHourlySalary(preferences.salary_min)) return preferences;
+  return { ...preferences, salary_min: null };
+}
+
+export function saveCandidate(candidate: CandidateProfile) {
+  localStorage.setItem(CANDIDATE_KEY, JSON.stringify(candidate));
+}
+
+export function savePreferences(preferences: TargetPreferences) {
+  localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
+}
+
+/** @deprecated Prefer saveCandidate / savePreferences independently. */
 export function saveCandidateSession(
   candidate: CandidateProfile,
   preferences: TargetPreferences | null,
 ) {
-  localStorage.setItem(CANDIDATE_KEY, JSON.stringify(candidate));
-  if (preferences) {
-    localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
-  }
+  saveCandidate(candidate);
+  if (preferences) savePreferences(preferences);
 }
 
 export function saveSelectedJobId(jobId: string) {
@@ -38,13 +60,13 @@ export function useCandidateSession() {
     readJson<CandidateProfile>(CANDIDATE_KEY),
   );
   const [preferences, setPreferences] = useState<TargetPreferences | null>(() =>
-    readJson<TargetPreferences>(PREFERENCES_KEY),
+    sanitizeStoredPreferences(readJson<TargetPreferences>(PREFERENCES_KEY)),
   );
 
   useEffect(() => {
     const onStorage = () => {
       setCandidate(readJson<CandidateProfile>(CANDIDATE_KEY));
-      setPreferences(readJson<TargetPreferences>(PREFERENCES_KEY));
+      setPreferences(sanitizeStoredPreferences(readJson<TargetPreferences>(PREFERENCES_KEY)));
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -53,10 +75,23 @@ export function useCandidateSession() {
   return {
     candidate,
     preferences,
+    setCandidateProfile: (next: CandidateProfile) => {
+      saveCandidate(next);
+      setCandidate(next);
+    },
+    setJobPreferences: (next: TargetPreferences) => {
+      const cleaned = sanitizeStoredPreferences(next) ?? next;
+      savePreferences(cleaned);
+      setPreferences(cleaned);
+    },
     setSession: (nextCandidate: CandidateProfile, nextPreferences: TargetPreferences | null) => {
-      saveCandidateSession(nextCandidate, nextPreferences);
+      saveCandidate(nextCandidate);
       setCandidate(nextCandidate);
-      setPreferences(nextPreferences);
+      if (nextPreferences) {
+        const cleaned = sanitizeStoredPreferences(nextPreferences) ?? nextPreferences;
+        savePreferences(cleaned);
+        setPreferences(cleaned);
+      }
     },
   };
 }

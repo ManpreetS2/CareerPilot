@@ -1,0 +1,62 @@
+{
+  "name": "Riley Chen-Moss",
+  "email": "riley.moss@example.test",
+  "phone": "+1-555-0147",
+  "allowed_skills": [
+    "Python",
+    "C",
+    "R",
+    "Go",
+    "SQL",
+    "React"
+  ],
+  "projects": [
+    {
+      "name": "Signal Garden",
+      "technologies": [
+        "Go",
+        "React"
+      ],
+      "url": "https://github.com/example/signal-garden"
+    }
+  ],
+  "experience": [
+    {
+      "title": "Backend Engineer",
+      "company": "Maple Circuit Labs",
+      "start_date": "2025-01",
+      "end_date": "2025-05",
+      "highlights": [
+        "Reduced costs by $100,000 annually.",
+        "Improved throughput by 20%."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "institution": "Cedar Ridge University",
+      "degree": "B.S.",
+      "field": "Applied Mathematics",
+      "graduation_year": "2026"
+    }
+  ],
+  "certifications": [],
+  "numeric_unit_claims": [
+    "$100,000",
+    "$100000",
+    "20%"
+  ],
+  "never_survive": [
+    "Career",
+    "Google",
+    "20 points",
+    "$20",
+    "40%",
+    "C++"
+  ],
+  "short_skills": [
+    "C",
+    "R",
+    "Go"
+  ]
+}
