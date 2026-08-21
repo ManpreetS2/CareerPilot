@@ -130,6 +130,9 @@ class ApplicationPackage(BaseModel):
     approval_status: Literal["draft", "pending_review", "approved", "edit_requested", "rejected"] = (
         "draft"
     )
+    eligibility_confirmed: bool = False
+    eligibility_notes: str | None = None
+    decision_notes: str | None = None
 
 
 class InterviewPrep(BaseModel):
@@ -164,6 +167,8 @@ class JobVerificationResponse(BaseModel):
 class ApprovalRequest(BaseModel):
     decision: Literal["approved", "edit_requested", "rejected"]
     notes: str | None = None
+    eligibility_confirmed: bool = False
+    eligibility_notes: str | None = None
 
 
 class ApprovalResponse(BaseModel):

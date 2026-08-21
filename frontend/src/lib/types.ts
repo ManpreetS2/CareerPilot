@@ -107,6 +107,9 @@ export type ApplicationPackage = {
   recruiter_message?: string | null;
   source_traceability_notes: string[];
   approval_status: "draft" | "pending_review" | "approved" | "edit_requested" | "rejected";
+  eligibility_confirmed: boolean;
+  eligibility_notes?: string | null;
+  decision_notes?: string | null;
 };
 
 export type ApprovalDecision = "approved" | "edit_requested" | "rejected";

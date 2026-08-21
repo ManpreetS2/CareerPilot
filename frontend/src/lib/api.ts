@@ -110,11 +110,20 @@ export const api = {
       method: "POST",
     }),
 
-  approveApplication: (jobId: string, decision: ApprovalDecision, notes?: string) =>
+  approveApplication: (
+    jobId: string,
+    decision: ApprovalDecision,
+    options?: { notes?: string; eligibilityConfirmed?: boolean; eligibilityNotes?: string },
+  ) =>
     request<ApprovalResponse>(`/api/jobs/${jobId}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision, notes: notes ?? null }),
+      body: JSON.stringify({
+        decision,
+        notes: options?.notes ?? null,
+        eligibility_confirmed: options?.eligibilityConfirmed ?? false,
+        eligibility_notes: options?.eligibilityNotes ?? null,
+      }),
     }),
 
   prepareInterview: (jobId: string) =>
