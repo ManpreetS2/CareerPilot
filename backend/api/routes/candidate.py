@@ -9,7 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from backend.db.database import get_db
-from backend.db.models import TargetPreference
+from backend.db.models import Candidate, TargetPreference
 from backend.schemas.schemas import ParseResumeResponse, TargetPreferences
 from backend.services.candidate_profile_agent import (
     ANNUAL_SALARY_MAX,
@@ -114,7 +114,9 @@ def save_preferences(
             detail="Minimum base salary must be an annual USD amount between 10000 and 1000000.",
         )
 
+    candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
     record = TargetPreference(
+        candidate_id=candidate.id if candidate else None,
         target_roles=preferences.target_roles,
         preferred_locations=preferences.preferred_locations,
         remote_preference=preferences.remote_preference,
@@ -122,6 +124,18 @@ def save_preferences(
         work_authorization=preferences.work_authorization,
         sponsorship_required=preferences.sponsorship_required,
         constraints=preferences.constraints,
+        legal_name=preferences.legal_name,
+        linkedin_url=preferences.linkedin_url,
+        github_url=preferences.github_url,
+        portfolio_url=preferences.portfolio_url,
+        earliest_start_date=preferences.earliest_start_date,
+        currently_enrolled_in_program=preferences.currently_enrolled_in_program,
+        expected_graduation=preferences.expected_graduation,
+        degree_pursuing=preferences.degree_pursuing,
+        gender=preferences.gender,
+        race_ethnicity=preferences.race_ethnicity,
+        veteran_status=preferences.veteran_status,
+        disability_status=preferences.disability_status,
     )
     try:
         db.add(record)

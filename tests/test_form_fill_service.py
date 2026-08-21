@@ -23,17 +23,25 @@ import pytest
 from fastapi import HTTPException
 from playwright.sync_api import sync_playwright
 
-from backend.db.models import ApplicationPackageRecord, Candidate, FormFillAttemptRecord, JobRecord
+from backend.db.models import (
+    ApplicationPackageRecord,
+    Candidate,
+    FormFillAttemptRecord,
+    JobRecord,
+    TargetPreference,
+)
 from backend.services import form_fill_service
 from backend.services.form_fill_service import (
     _build_candidate_fields,
+    _categorize_urls,
     _current_company,
     _fill_greenhouse,
     _fill_lever,
-    _first_url,
+    _load_target_preference,
     _navigation_url,
     _split_name,
     _strip_lever_apply_suffix,
+    _try_select_by_label,
     detect_ats_platform,
     find_job_by_url,
     get_autofill_data,
@@ -192,32 +200,138 @@ def test_current_company_handles_missing_company_key_gracefully() -> None:
     assert _current_company(candidate) is None
 
 
-def test_first_url_finds_http_link() -> None:
-    assert _first_url(["not a url", "https://portfolio.example.com"]) == "https://portfolio.example.com"
+def test_categorize_urls_splits_linkedin_github_portfolio() -> None:
+    linkedin, github, portfolio = _categorize_urls(
+        [
+            "not a url",
+            "https://www.linkedin.com/in/jordanquill",
+            "https://github.com/jordanquill",
+            "https://portfolio.example.com",
+        ]
+    )
+    assert linkedin == "https://www.linkedin.com/in/jordanquill"
+    assert github == "https://github.com/jordanquill"
+    assert portfolio == "https://portfolio.example.com"
 
 
-def test_first_url_none_without_any_url() -> None:
-    assert _first_url(["just some text", "github.com/no-scheme"]) is None
+def test_categorize_urls_keeps_first_match_per_category() -> None:
+    linkedin, github, portfolio = _categorize_urls(
+        [
+            "https://linkedin.com/in/first",
+            "https://linkedin.com/in/second",
+            "https://portfolio-one.example.com",
+            "https://portfolio-two.example.com",
+        ]
+    )
+    assert linkedin == "https://linkedin.com/in/first"
+    assert github is None
+    # Only the first non-linkedin/github link becomes "portfolio" — later
+    # ones are dropped rather than silently overwriting it.
+    assert portfolio == "https://portfolio-one.example.com"
 
 
-def test_first_url_none_for_empty_list() -> None:
-    assert _first_url([]) is None
+def test_categorize_urls_ignores_non_http_entries() -> None:
+    assert _categorize_urls(["just some text", "github.com/no-scheme"]) == (None, None, None)
+
+
+def test_categorize_urls_empty_list() -> None:
+    assert _categorize_urls([]) == (None, None, None)
+
+
+def test_load_target_preference_returns_most_recent_record(isolated_session) -> None:
+    candidate = _seed_candidate(isolated_session)
+    isolated_session.add(TargetPreference(candidate_id=candidate.id, preferred_locations=["Austin, TX"]))
+    isolated_session.commit()
+    isolated_session.add(TargetPreference(candidate_id=candidate.id, preferred_locations=["Remote"]))
+    isolated_session.commit()
+    pref = _load_target_preference(isolated_session, candidate)
+    assert pref is not None
+    assert pref.preferred_locations == ["Remote"]
+
+
+def test_load_target_preference_none_without_a_preference_record(isolated_session) -> None:
+    candidate = _seed_candidate(isolated_session)
+    assert _load_target_preference(isolated_session, candidate) is None
 
 
 def test_build_candidate_fields_maps_all_sources() -> None:
     candidate = _candidate(
         name="Jordan Quill",
         experience=[{"company": "Acme", "end_date": "Present"}],
-        evidence_links=["https://portfolio.example.com"],
+        evidence_links=[
+            "https://www.linkedin.com/in/jordanquill",
+            "https://github.com/jordanquill",
+            "https://portfolio.example.com",
+        ],
     )
     package = ApplicationPackageRecord(job_id=1, cover_letter_draft="Dear team,", tailored_bullets=[], source_traceability_notes=[])
-    fields = _build_candidate_fields(candidate, package)
+    preference = TargetPreference(
+        preferred_locations=["Austin, TX"],
+        legal_name="Jordan A. Quill",
+        earliest_start_date="Immediately",
+        currently_enrolled_in_program="Yes",
+        expected_graduation="May 2027",
+        degree_pursuing="Bachelor's in Computer Science",
+        work_authorization="US Citizen",
+        sponsorship_required=False,
+        gender="Non-binary",
+        race_ethnicity="No",
+        veteran_status="I am not a protected veteran",
+        disability_status="No, I do not have a disability and have not had one in the past",
+    )
+    fields = _build_candidate_fields(candidate, package, preference)
     assert fields.full_name == "Jordan Quill"
     assert fields.first_name == "Jordan"
     assert fields.last_name == "Quill"
     assert fields.current_company == "Acme"
+    assert fields.location == "Austin, TX"
+    assert fields.legal_name == "Jordan A. Quill"
+    assert fields.linkedin_url == "https://www.linkedin.com/in/jordanquill"
+    assert fields.github_url == "https://github.com/jordanquill"
     assert fields.portfolio_url == "https://portfolio.example.com"
     assert fields.cover_letter == "Dear team,"
+    assert fields.work_authorization == "US Citizen"
+    assert fields.sponsorship_required is False
+    assert fields.earliest_start_date == "Immediately"
+    assert fields.currently_enrolled_in_program == "Yes"
+    assert fields.expected_graduation == "May 2027"
+    assert fields.degree_pursuing == "Bachelor's in Computer Science"
+    assert fields.gender == "Non-binary"
+    assert fields.race_ethnicity == "No"
+    assert fields.veteran_status == "I am not a protected veteran"
+    assert fields.disability_status == "No, I do not have a disability and have not had one in the past"
+
+
+def test_build_candidate_fields_manual_linkedin_overrides_resume_grounded_link() -> None:
+    """A manually-saved linkedin_url is more deliberate than whatever
+    resume-grounding happened to find (and is the only way to get a
+    correct value at all when the resume's link is a PDF hyperlink rather
+    than printed text, which grounding can never see) — it must win."""
+    candidate = _candidate(
+        name="Jordan Quill", evidence_links=["https://www.linkedin.com/in/from-resume"]
+    )
+    package = ApplicationPackageRecord(job_id=1, tailored_bullets=[], source_traceability_notes=[])
+    preference = TargetPreference(linkedin_url="https://www.linkedin.com/in/manually-saved")
+    fields = _build_candidate_fields(candidate, package, preference)
+    assert fields.linkedin_url == "https://www.linkedin.com/in/manually-saved"
+
+
+def test_build_candidate_fields_defaults_to_none_without_a_preference() -> None:
+    candidate = _candidate(name="Jordan Quill")
+    package = ApplicationPackageRecord(job_id=1, tailored_bullets=[], source_traceability_notes=[])
+    fields = _build_candidate_fields(candidate, package)
+    assert fields.location is None
+    assert fields.legal_name is None
+    assert fields.work_authorization is None
+    assert fields.sponsorship_required is None
+    assert fields.earliest_start_date is None
+    assert fields.currently_enrolled_in_program is None
+    assert fields.expected_graduation is None
+    assert fields.degree_pursuing is None
+    assert fields.gender is None
+    assert fields.race_ethnicity is None
+    assert fields.veteran_status is None
+    assert fields.disability_status is None
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +469,25 @@ def page(browser):
     p.close()
 
 
+_PREFERENCE_OVERRIDE_KEYS = (
+    "location",
+    "legal_name",
+    "linkedin_url",
+    "github_url",
+    "portfolio_url",
+    "earliest_start_date",
+    "currently_enrolled_in_program",
+    "expected_graduation",
+    "degree_pursuing",
+    "work_authorization",
+    "sponsorship_required",
+    "gender",
+    "race_ethnicity",
+    "veteran_status",
+    "disability_status",
+)
+
+
 def _fields(**overrides):
     candidate = _candidate(**{k: v for k, v in overrides.items() if k in ("name", "email", "phone", "experience", "evidence_links")})
     package = ApplicationPackageRecord(
@@ -363,7 +496,11 @@ def _fields(**overrides):
         tailored_bullets=[],
         source_traceability_notes=[],
     )
-    return _build_candidate_fields(candidate, package)
+    preference = TargetPreference(
+        preferred_locations=[overrides["location"]] if overrides.get("location") else [],
+        **{k: v for k, v in overrides.items() if k in _PREFERENCE_OVERRIDE_KEYS and k != "location"},
+    )
+    return _build_candidate_fields(candidate, package, preference)
 
 
 def test_fill_greenhouse_standard_fills_mappable_fields(page) -> None:
@@ -457,29 +594,189 @@ def test_fill_greenhouse_missing_candidate_email_is_flagged_not_left_blank(page)
     assert "no email on file" in email_flags[0].reason.lower()
 
 
+def test_fill_greenhouse_fills_location_linkedin_github_via_label_match(page) -> None:
+    """Location, LinkedIn, and GitHub are modeled as per-posting custom
+    questions on Greenhouse (confirmed live against a real Cloudflare
+    posting) — no stable id/name, so this only works via label-text
+    matching, unlike the fixed-selector fields above."""
+    page.goto(_fixture_url("greenhouse_standard.html"))
+    fields = _fields(
+        name="Jordan Quill",
+        location="Austin, TX",
+        evidence_links=["https://www.linkedin.com/in/jordanquill", "https://github.com/jordanquill"],
+    )
+    filled, _flagged = _fill_greenhouse(page, fields)
+
+    assert _value_of(filled, "location") == "Austin, TX"
+    assert _value_of(filled, "linkedin_url") == "https://www.linkedin.com/in/jordanquill"
+    assert _value_of(filled, "github_url") == "https://github.com/jordanquill"
+    assert page.locator("#question_1").input_value() == "Austin, TX"
+    assert page.locator("#question_2").input_value() == "https://www.linkedin.com/in/jordanquill"
+    assert page.locator("#question_3").input_value() == "https://github.com/jordanquill"
+
+
+def test_try_select_by_label_exact_match(page) -> None:
+    page.goto(_fixture_url("greenhouse_standard.html"))
+    assert _try_select_by_label(page, [r"sponsorship"], "Yes") is True
+    assert page.locator("#question_5").input_value() == "Yes"
+
+
+def test_try_select_by_label_fuzzy_fallback_when_wording_differs(page) -> None:
+    """A saved answer won't always match a posting's exact option text —
+    e.g. "Yes" should still match an option literally worded "Yes, I will
+    need sponsorship" via substring matching."""
+    page.goto(_fixture_url("greenhouse_label_only.html"))
+    page.evaluate(
+        """() => {
+            const select = document.createElement('select');
+            select.id = 'sponsorship_select';
+            select.innerHTML = '<option value="">Select...</option>'
+                + '<option value="need_sponsorship">Yes, I will need sponsorship</option>'
+                + '<option value="no_sponsorship">No, I will not need sponsorship</option>';
+            const label = document.createElement('label');
+            label.htmlFor = 'sponsorship_select';
+            label.textContent = 'Sponsorship required';
+            document.querySelector('form').append(label, select);
+        }"""
+    )
+    assert _try_select_by_label(page, [r"sponsorship"], "Yes") is True
+    assert page.locator("#sponsorship_select").input_value() == "need_sponsorship"
+
+
+def test_try_select_by_label_returns_false_when_nothing_matches(page) -> None:
+    page.goto(_fixture_url("greenhouse_standard.html"))
+    assert _try_select_by_label(page, [r"sponsorship"], "Maybe eventually") is False
+    assert page.locator("#question_5").input_value() == ""
+
+
+def test_try_select_by_label_matches_when_saved_value_is_more_specific_than_the_option(page) -> None:
+    """Regression test: the fuzzy fallback originally only checked whether
+    the OPTION text contained the saved value, missing the equally common
+    reverse case — a saved answer more specific than the posting's option
+    (e.g. "Bachelor's in Computer Science" saved, but the posting only
+    offers a plain "Bachelor's" option)."""
+    page.goto(_fixture_url("greenhouse_label_only.html"))
+    page.evaluate(
+        """() => {
+            const select = document.createElement('select');
+            select.id = 'degree_select';
+            select.innerHTML = '<option value="">Select...</option>'
+                + '<option value="bachelors">Bachelor\\'s</option>'
+                + '<option value="masters">Master\\'s</option>';
+            const label = document.createElement('label');
+            label.htmlFor = 'degree_select';
+            label.textContent = 'Degree currently pursuing';
+            document.querySelector('form').append(label, select);
+        }"""
+    )
+    assert _try_select_by_label(page, [r"degree"], "Bachelor's in Computer Science") is True
+    assert page.locator("#degree_select").input_value() == "bachelors"
+
+
+def test_fill_greenhouse_fills_new_reusable_select_and_text_fields(page) -> None:
+    page.goto(_fixture_url("greenhouse_standard.html"))
+    fields = _fields(
+        name="Jordan Quill",
+        legal_name="Jordan A. Quill",
+        work_authorization="US Citizen",
+        sponsorship_required=False,
+        currently_enrolled_in_program="Yes",
+    )
+    filled, _flagged = _fill_greenhouse(page, fields)
+
+    assert _value_of(filled, "legal_name") == "Jordan A. Quill"
+    assert page.locator("#question_4").input_value() == "Jordan A. Quill"
+    assert _value_of(filled, "sponsorship_required") == "No"
+    assert page.locator("#question_5").input_value() == "No"
+    assert _value_of(filled, "currently_enrolled_in_program") == "Yes"
+    assert page.locator("#question_6").input_value() == "Yes"
+
+
+def test_fill_greenhouse_never_touches_the_privacy_policy_checkbox(page) -> None:
+    """Accepting a company's privacy policy/terms is a consent action that
+    must always stay a deliberate human click, never something this agent
+    answers on the candidate's behalf — regardless of how much of the rest
+    of the profile is filled in."""
+    page.goto(_fixture_url("greenhouse_standard.html"))
+    fields = _fields(
+        name="Jordan Quill",
+        legal_name="Jordan A. Quill",
+        sponsorship_required=True,
+        currently_enrolled_in_program="Yes",
+        gender="Non-binary",
+        veteran_status="I am not a protected veteran",
+        disability_status="No, I do not have a disability and have not had one in the past",
+    )
+    filled, flagged = _fill_greenhouse(page, fields)
+
+    assert page.locator("#privacy_ack").is_checked() is False
+    assert not any("privacy" in f.field.lower() or "acknowledge" in f.field.lower() for f in filled)
+    assert any(f.field == "job_application[answers][7][boolean_value]" for f in flagged)
+
+
 def test_fill_lever_standard_fills_mappable_fields(page) -> None:
     page.goto(_fixture_url("lever_standard.html"))
     fields = _fields(
         name="Jordan Quill",
         experience=[{"company": "Acme", "end_date": ""}],
-        evidence_links=["https://portfolio.example.com"],
+        location="Austin, TX",
+        evidence_links=[
+            "https://www.linkedin.com/in/jordanquill",
+            "https://github.com/jordanquill",
+            "https://portfolio.example.com",
+        ],
     )
 
     filled, flagged = _fill_lever(page, fields)
 
     names = _names(filled)
-    assert {"full_name", "email", "phone", "current_company", "portfolio_url", "cover_letter"} <= names
+    assert {
+        "full_name",
+        "email",
+        "phone",
+        "current_company",
+        "location",
+        "linkedin_url",
+        "github_url",
+        "portfolio_url",
+        "cover_letter",
+    } <= names
     assert _value_of(filled, "full_name") == "Jordan Quill"
     assert _value_of(filled, "current_company") == "Acme"
+    assert _value_of(filled, "location") == "Austin, TX"
+    assert _value_of(filled, "linkedin_url") == "https://www.linkedin.com/in/jordanquill"
+    assert _value_of(filled, "github_url") == "https://github.com/jordanquill"
     assert _value_of(filled, "portfolio_url") == "https://portfolio.example.com"
     assert page.locator("input[name='name']").input_value() == "Jordan Quill"
     assert page.locator("input[name='org']").input_value() == "Acme"
+    assert page.locator("input[name='location']").input_value() == "Austin, TX"
+    assert page.locator("input[name='urls[LinkedIn]']").input_value() == "https://www.linkedin.com/in/jordanquill"
+    assert page.locator("input[name='urls[GitHub]']").input_value() == "https://github.com/jordanquill"
     assert page.locator("input[name='urls[Portfolio]']").input_value() == "https://portfolio.example.com"
     # Regression: the fixture's #name field is `required`. This agent
     # fills it under the semantic label "full_name", whose raw HTML `name`
     # attribute is "name" — the two labels must not cause it to also show
     # up in `flagged` as if it were never filled.
     assert not any(f.field == "name" for f in flagged)
+
+
+def test_fill_lever_does_not_cross_fill_linkedin_github_and_portfolio(page) -> None:
+    """Regression test for a real bug: the old code tried the single
+    portfolio_url value against Portfolio, then LinkedIn, then GitHub
+    selectors in a loop, so a candidate with only a portfolio link (no
+    LinkedIn/GitHub) would get it stuffed into whichever field selector
+    happened to still be empty — e.g. into the LinkedIn field. Each URL
+    category must only ever land in its own field."""
+    page.goto(_fixture_url("lever_standard.html"))
+    fields = _fields(name="Jordan Quill", evidence_links=["https://portfolio.example.com"])
+
+    filled, _flagged = _fill_lever(page, fields)
+
+    assert _value_of(filled, "portfolio_url") == "https://portfolio.example.com"
+    assert not any(f.field in ("linkedin_url", "github_url") for f in filled)
+    assert page.locator("input[name='urls[Portfolio]']").input_value() == "https://portfolio.example.com"
+    assert page.locator("input[name='urls[LinkedIn]']").input_value() == ""
+    assert page.locator("input[name='urls[GitHub]']").input_value() == ""
 
 
 def test_fill_lever_does_not_reflag_a_required_field_it_already_filled(page) -> None:
