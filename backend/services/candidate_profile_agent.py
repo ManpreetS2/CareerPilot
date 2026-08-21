@@ -273,7 +273,9 @@ _PHONE_SPAN_RE = re.compile(
     r"""
     (?<!\d)
     (?P<span>
-        (?:\+[ \t]*(?P<cc>\d{1,3})[ \t.\-]*)?
+        \+\d{10,15}
+        |
+        (?:\+[ \t]*(?P<cc>\d{1,3})[ \t.\-]+)?
         (?:
             \([ \t]*\d{3}[ \t]*\)[ \t.\-]*\d{3}[ \t.\-]*\d{4}
             | \d{3}[ \t.\-]\d{3}[ \t.\-]\d{4}
@@ -335,6 +337,14 @@ _TITLE_ALIASES = {
     "sr.": "senior",
     "jr": "junior",
     "jr.": "junior",
+}
+_TITLE_MODIFIERS = _ROLE_QUALIFIERS | {
+    "executive",
+    "assistant",
+    "vice",
+    "deputy",
+    "acting",
+    "interim",
 }
 
 
@@ -436,21 +446,29 @@ def _email_supported(claim: str, source_text: str) -> bool:
 def _phone_identity(value: str) -> tuple[str | None, str] | None:
     """Return (country_code, national_digits) for one phone span."""
     stripped = value.strip()
-    cc: str | None = None
-    rest = stripped
-    cc_match = re.match(r"\+[ \t]*(\d{1,3})[ \t.\-]*", stripped)
-    if cc_match:
-        cc = cc_match.group(1).lstrip("0") or "0"
-        rest = stripped[cc_match.end() :]
-    national = re.sub(r"\D", "", rest)
-    if cc is None and len(national) == 11 and national.startswith("1"):
-        cc = "1"
-        national = national[1:]
-    if cc == "1" and len(national) == 11 and national.startswith("1"):
-        national = national[1:]
-    if len(national) < 7:
+    plus = stripped.startswith("+")
+    digits = re.sub(r"\D", "", stripped)
+    if len(digits) < 7:
         return None
-    return cc, national
+    if plus:
+        # Compact/separated US E.164: +1 plus exactly 10 NANP digits.
+        if digits.startswith("1") and len(digits) == 11:
+            return "1", digits[1:]
+        if digits.startswith("1") and len(digits) == 8:
+            return "1", digits[1:]
+        # Non-US: country code must not greedily eat the national number.
+        for cc_len in (2, 3):
+            national = digits[cc_len:]
+            if len(national) < 7:
+                continue
+            cc = digits[:cc_len].lstrip("0") or digits[:cc_len]
+            if cc == "1":
+                continue
+            return cc, national
+        return None
+    if len(digits) == 11 and digits.startswith("1"):
+        return "1", digits[1:]
+    return None, digits
 
 
 def _phone_countries_compatible(left: str | None, right: str | None) -> bool:
@@ -500,13 +518,38 @@ def _title_parts(tokens: list[str]) -> tuple[set[str], list[str], set[str]]:
     body: list[str] = []
     for token in tokens:
         canon = _canonicalize_title_token(token)
-        if canon in _ROLE_QUALIFIERS:
+        if canon in _TITLE_MODIFIERS:
             quals.add(canon)
         elif canon in _TITLE_LEVELS:
             levels.add(_TITLE_LEVEL_NORM.get(canon, canon))
         else:
             body.append(canon)
     return quals, body, levels
+
+
+def _collect_contiguous_modifiers(
+    before: list[str], after: list[str]
+) -> tuple[set[str], set[str]]:
+    """Walk every adjacent modifier/level on the title phrase, not a single token."""
+    quals: set[str] = set()
+    levels: set[str] = set()
+    for token in reversed(before):
+        canon = _canonicalize_title_token(token)
+        if canon in _TITLE_LEVELS:
+            levels.add(_TITLE_LEVEL_NORM.get(canon, canon))
+        elif canon in _TITLE_MODIFIERS:
+            quals.add(canon)
+        else:
+            break
+    for token in after:
+        canon = _canonicalize_title_token(token)
+        if canon in _TITLE_LEVELS:
+            levels.add(_TITLE_LEVEL_NORM.get(canon, canon))
+        elif canon in _TITLE_MODIFIERS:
+            quals.add(canon)
+        else:
+            break
+    return quals, levels
 
 
 def _looks_like_job_title(claim_n: str) -> bool:
@@ -518,7 +561,7 @@ def _looks_like_job_title(claim_n: str) -> bool:
 
 
 def _title_anchor_supported(claim: str, source_text: str) -> bool:
-    """Title cores require matching role qualifiers and levels; Sr./Jr. aliases only."""
+    """Title cores require matching contiguous modifiers and levels; Sr./Jr. aliases only."""
     claim_n = _normalize_for_match(claim)
     source_n = _normalize_for_match(source_text)
     if not claim_n or not source_n:
@@ -527,15 +570,19 @@ def _title_anchor_supported(claim: str, source_text: str) -> bool:
     claim_q, body, claim_levels = _title_parts(claim_tokens)
     if not body:
         return False
-    body_pattern = r"[\s]+".join(re.escape(token) for token in body)
-    pattern = rf"(?<![a-z0-9]){body_pattern}(?![a-z0-9])"
-    for match in re.finditer(pattern, source_n):
-        prefix = source_n[: match.start()].split()[-1:]
-        suffix = source_n[match.end() :].split()[:1]
-        window_q, _window_body, window_levels = _title_parts(
-            [*prefix, *match.group(0).split(), *suffix]
+    source_tokens = [token for token in source_n.split() if token]
+    body_len = len(body)
+    for idx in range(0, len(source_tokens) - body_len + 1):
+        window = [
+            _canonicalize_title_token(token)
+            for token in source_tokens[idx : idx + body_len]
+        ]
+        if window != body:
+            continue
+        adj_q, adj_levels = _collect_contiguous_modifiers(
+            source_tokens[:idx], source_tokens[idx + body_len :]
         )
-        if window_q == claim_q and window_levels == claim_levels:
+        if adj_q == claim_q and adj_levels == claim_levels:
             return True
     return False
 

@@ -1147,6 +1147,28 @@ def test_us_plus_one_equivalence_retained() -> None:
     assert profile.phone == "555-123-4567"
 
 
+def test_us_e164_compact_equivalence_retained() -> None:
+    source = "Alex Rivera\n+15551234567"
+    profile, _report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="555-123-4567"), source
+    )
+    assert profile.phone == "555-123-4567"
+    source = "Alex Rivera\n555-123-4567"
+    profile, _report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="+15551234567"), source
+    )
+    assert profile.phone == "+15551234567"
+
+
+def test_non_us_compact_e164_rejected_for_us_claim() -> None:
+    source = "Alex Rivera\n+445551234567"
+    profile, report = validate_and_ground_profile(
+        _contact_only_payload(email=None, phone="555-123-4567"), source
+    )
+    assert profile.phone is None
+    assert report.as_counts().get("removed_phones") == 1
+
+
 def _experience_resume(title: str, extra: str = "2025-05\n- Built APIs.") -> str:
     return f"Alex Rivera\n{title}\nAcme\n{extra}"
 
@@ -1191,6 +1213,46 @@ def test_pipeline_rejects_invented_experience_qualifiers() -> None:
         )
         assert profile.experience == []
         assert report.as_counts().get("removed_experience") == 1
+
+
+def test_pipeline_rejects_removed_multi_modifier_titles() -> None:
+    cases = [
+        ("Senior Staff Software Engineer", "Staff Software Engineer"),
+        ("Senior Principal Software Engineer", "Principal Software Engineer"),
+        ("Executive Vice President", "Vice President"),
+        ("Assistant Vice President", "Vice President"),
+    ]
+    for source_title, claimed_title in cases:
+        profile, report = validate_and_ground_profile(
+            _experience_payload(claimed_title), _experience_resume(source_title)
+        )
+        assert profile.experience == []
+        assert report.as_counts().get("removed_experience") == 1
+
+
+def test_pipeline_rejects_invented_multi_modifier_titles() -> None:
+    cases = [
+        ("Staff Software Engineer", "Senior Staff Software Engineer"),
+        ("Principal Software Engineer", "Senior Principal Software Engineer"),
+        ("Vice President", "Executive Vice President"),
+        ("Vice President", "Assistant Vice President"),
+    ]
+    for source_title, claimed_title in cases:
+        profile, report = validate_and_ground_profile(
+            _experience_payload(claimed_title), _experience_resume(source_title)
+        )
+        assert profile.experience == []
+        assert report.as_counts().get("removed_experience") == 1
+
+
+def test_pipeline_preserves_exact_multi_modifier_titles() -> None:
+    profile, report = validate_and_ground_profile(
+        _experience_payload("Senior Staff Software Engineer"),
+        _experience_resume("Senior Staff Software Engineer"),
+    )
+    assert len(profile.experience) == 1
+    assert profile.experience[0].title == "Senior Staff Software Engineer"
+    assert report.as_counts().get("removed_experience") is None
 
 
 def test_pipeline_rejects_roman_or_numeric_title_level_removal() -> None:
