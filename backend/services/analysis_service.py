@@ -108,6 +108,12 @@ _PREFERRED_SIGNALS = (
     "bonus",
     "plus",
 )
+_STRONG_REQUIRED_SIGNALS = (
+    "required",
+    "must have",
+    "must-have",
+    "minimum",
+)
 
 _DEGREE_ALIASES = {
     "b.s.": "bachelor",
@@ -341,9 +347,7 @@ def _source_skill_kind(
     source: str,
     known_classifications: dict[str, str],
 ) -> str | None:
-    key = _canonical_skill_key(label)
-    if key in known_classifications:
-        return known_classifications[key]
+    del known_classifications
     heading: str | None = None
     best: str | None = None
     priority = {"stack": 0, "preferred": 1, "required": 2}
@@ -352,18 +356,73 @@ def _source_skill_kind(
         if not stripped:
             heading = None
             continue
+        section_kind = _source_section_heading_kind(stripped)
         if stripped.endswith(":") or re.match(
             r"^(?:requirements?|qualifications?|preferred|nice[- ]to[- ]have|bonus)\s*:",
             stripped,
             flags=re.I,
         ):
             heading = line
-        if not _skill_in_text(label, line):
-            continue
-        kind = _classify_line(line, heading)
-        if best is None or priority[kind] > priority[best]:
-            best = kind
+        elif section_kind == "technical":
+            heading = line
+        elif section_kind == "other":
+            heading = None
+        clauses = re.split(
+            r"\s*(?:;|\|)\s*|(?<=[.!?])\s+",
+            stripped,
+        )
+        for clause in clauses:
+            if not _skill_in_text(label, clause):
+                continue
+            kind = _classify_line(clause, heading)
+            if best is None or priority[kind] > priority[best]:
+                best = kind
     return best
+
+
+def _source_section_heading_kind(text: str) -> str | None:
+    normalized = re.sub(r"[^a-z]+", " ", text.lower()).strip()
+    if normalized in {
+        "requirements",
+        "qualifications",
+        "preferred qualifications",
+        "skills",
+        "technical skills",
+        "technology",
+        "technology stack",
+        "tools",
+    } or re.fullmatch(
+        r"(?:(?:key|minimum|preferred|required|technical)\s+)?"
+        r"(?:qualifications|requirements|skills)",
+        normalized,
+    ):
+        return "technical"
+    if normalized in {
+        "about",
+        "about us",
+        "benefits",
+        "company",
+        "company overview",
+        "compensation",
+        "culture",
+        "equal opportunity",
+        "interview focus",
+        "interview topics",
+        "responsibilities",
+        "the role",
+        "what you will do",
+    } or (
+        normalized.startswith("about ")
+        or normalized.startswith("why ")
+        or "benefit" in normalized
+        or "perk" in normalized
+        or normalized.endswith(" culture")
+        or normalized.endswith(" company")
+        or normalized.startswith("our culture")
+        or normalized.startswith("who we are")
+    ):
+        return "other"
+    return None
 
 
 def _ground_intelligence(
@@ -445,16 +504,34 @@ def _has_signal(text: str, signals: tuple[str, ...]) -> bool:
 
 
 def _classify_line(line: str, heading: str | None) -> str:
+    line_preferred = _has_signal(line, _PREFERRED_SIGNALS)
+    if line_preferred and not _has_signal(line, _STRONG_REQUIRED_SIGNALS):
+        return "preferred"
     if _has_signal(line, _REQUIRED_SIGNALS):
         return "required"
-    if _has_signal(line, _PREFERRED_SIGNALS):
+    if line_preferred:
         return "preferred"
     if heading:
+        heading_preferred = _has_signal(heading, _PREFERRED_SIGNALS)
+        if heading_preferred and not _has_signal(heading, _STRONG_REQUIRED_SIGNALS):
+            return "preferred"
         if _has_signal(heading, _REQUIRED_SIGNALS):
             return "required"
-        if _has_signal(heading, _PREFERRED_SIGNALS):
+        if heading_preferred:
             return "preferred"
     return "stack"
+
+
+def _clause_at_position(line: str, position: int) -> str:
+    start = 0
+    for separator in re.finditer(
+        r"\s*(?:;|\|)\s*|(?<=[.!?])\s+",
+        line,
+    ):
+        if position < separator.start():
+            return line[start : separator.start()]
+        start = separator.end()
+    return line[start:]
 
 
 def extract_explicit_skills_from_description(description: str) -> GroundedRequirements:
@@ -470,13 +547,17 @@ def extract_explicit_skills_from_description(description: str) -> GroundedRequir
         if not stripped:
             heading = None
             continue
+        section_kind = _source_section_heading_kind(stripped)
         if stripped.endswith(":") or re.match(
             r"^(?:requirements?|qualifications?|preferred|nice[- ]to[- ]have|bonus)\s*:",
             stripped,
             flags=re.I,
         ):
             heading = line
-        kind = _classify_line(line, heading)
+        elif section_kind == "technical":
+            heading = line
+        elif section_kind == "other":
+            heading = None
         lowered = line.lower()
         for alias, canonical in aliases:
             for match in _alias_pattern(alias).finditer(lowered):
@@ -485,6 +566,10 @@ def extract_explicit_skills_from_description(description: str) -> GroundedRequir
                     continue
                 for pos in range(start, end):
                     occupied[line_idx][pos] = True
+                kind = _classify_line(
+                    _clause_at_position(line, match.start()),
+                    heading,
+                )
                 if canonical not in found:
                     found[canonical] = (line_idx, match.start(), canonical, kind)
                 elif kind_priority[kind] > kind_priority[found[canonical][3]]:
@@ -989,7 +1074,8 @@ def load_requirements(db: Session, job: JobRecord) -> GroundedRequirements:
             or grounded.education_requirements
         ):
             return grounded
-        # Intelligence existed but nothing grounded; do not invent from it.
+        # Intelligence existed but nothing scoreable; do not invent from the posting.
+        raise RequirementsUnavailableError()
     fallback = extract_explicit_skills_from_description(f"{job.title}\n{job.description}")
     logger.info(
         "scoring requirement_source=description skills=%s job_pk=%s",

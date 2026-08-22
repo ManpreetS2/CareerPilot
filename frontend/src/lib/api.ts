@@ -7,6 +7,7 @@ import type {
   HealthResponse,
   InterviewPrep,
   Job,
+  JobIntelligence,
   JobVerificationResponse,
   MatchScore,
   ParseResumeResponse,
@@ -91,6 +92,14 @@ export const api = {
 
   verifyJob: (jobId: string) =>
     request<Job>(`/api/jobs/${jobId}/verify`, { method: "POST" }),
+
+  getJobIntelligence: (jobId: string) =>
+    request<JobIntelligence>(`/api/jobs/${jobId}/intelligence`),
+
+  extractJobIntelligence: (jobId: string) =>
+    request<JobIntelligence>(`/api/jobs/${jobId}/intelligence`, {
+      method: "POST",
+    }),
 
   scoreJob: (jobId: string) =>
     request<MatchScore>(`/api/jobs/${jobId}/score`, {

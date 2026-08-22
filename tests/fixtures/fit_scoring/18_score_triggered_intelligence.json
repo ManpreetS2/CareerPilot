@@ -1,5 +1,5 @@
 {
-  "scenario_id": "provisional-description-fallback",
+  "scenario_id": "score-triggered-intelligence-extraction",
   "job": {
     "public_id": "fit-matrix-018",
     "title": "Backend Engineer",
@@ -23,6 +23,18 @@
   },
   "preferences": null,
   "intelligence": null,
+  "extraction_response": {
+    "job_id": null,
+    "required_skills": ["Python"],
+    "preferred_skills": ["Docker"],
+    "years_experience": null,
+    "education_requirements": [],
+    "tech_stack": [],
+    "seniority": null,
+    "responsibilities": [],
+    "likely_interview_focus": []
+  },
+  "expected_provider_calls": 1,
   "expected": {
     "available_components": ["skill"],
     "null_components": ["experience", "education", "location", "preference"],

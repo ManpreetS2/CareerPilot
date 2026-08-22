@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -185,7 +185,13 @@ def test_missing_requirements_return_409_without_persistence(isolated_client) ->
         _candidate(db)
         _job(db, description="Join a collaborative team working on interesting problems.")
         assert db.query(MatchScoreRecord).count() == 0
-    response = client.post("/api/jobs/job-fit-001/score")
+    fake_client = Mock()
+    fake_client.generate.side_effect = ["{}", "{}"]
+    with patch(
+        "backend.services.job_intelligence_service.get_llm_client",
+        return_value=fake_client,
+    ):
+        response = client.post("/api/jobs/job-fit-001/score")
     assert response.status_code == 409
     assert "requirements" in response.json()["detail"].lower()
     with SessionLocal() as db:
@@ -569,7 +575,16 @@ def test_route_uses_request_scoped_database_session(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
         _candidate(db)
-        _job(db, description="Requirements: Python.")
+        job = _job(db, description="Requirements: Python.")
+        _intelligence(
+            db,
+            job,
+            required=["Python"],
+            preferred=[],
+            tech=[],
+            years=None,
+            education=[],
+        )
     with patch("backend.db.database.SessionLocal") as forbidden:
         response = client.post("/api/jobs/job-fit-001/score")
     assert response.status_code == 200
@@ -1032,7 +1047,16 @@ def test_api_commit_failure_is_sanitized_and_rolls_back(
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
         _candidate(db, skills=["Python"])
-        _job(db, description="Requirements: Python.")
+        job = _job(db, description="Requirements: Python.")
+        _intelligence(
+            db,
+            job,
+            required=["Python"],
+            preferred=[],
+            tech=[],
+            years=None,
+            education=[],
+        )
 
     secret_failure = "sqlite raw payload SELECT candidates.email"
     with caplog.at_level(logging.ERROR):
