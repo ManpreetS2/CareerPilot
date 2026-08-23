@@ -21,8 +21,9 @@ router = APIRouter(prefix="/api", tags=["applications"])
 
 @router.post("/jobs/{job_id}/generate-materials", response_model=ApplicationPackage)
 def generate_materials(job_id: str, db: Session = Depends(get_db)) -> ApplicationPackage:
-    """Return this job's persisted application package, generating one (still
-    mocked pending the real Application Material Agent) if none exists yet."""
+    """Return this job's persisted application package, generating the isolated
+    legacy placeholder if none exists yet. The unfinished grounded generator
+    in application_materials_agent is not wired into this route."""
     return get_or_generate_application_package(db, job_id)
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -79,3 +80,25 @@ def isolated_client(isolated_engine) -> Generator[tuple[TestClient, sessionmaker
         app.router.lifespan_context = previous_lifespan
         assert get_db not in app.dependency_overrides
         assert app.router.lifespan_context is previous_lifespan
+
+
+_PRODUCTION_DB = Path(__file__).resolve().parents[1] / "data" / "careerpilot.db"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _never_touch_production_database() -> Generator[None, None, None]:
+    existed = _PRODUCTION_DB.exists()
+    before = _PRODUCTION_DB.stat().st_mtime if existed else None
+    yield
+    if not existed and _PRODUCTION_DB.exists():
+        raise AssertionError("tests created data/careerpilot.db")
+    if existed and _PRODUCTION_DB.exists() and _PRODUCTION_DB.stat().st_mtime != before:
+        raise AssertionError("tests mutated data/careerpilot.db")
+
+
+@pytest.fixture(autouse=True)
+def _block_llm_generate_during_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _blocked(*_args, **_kwargs):
+        raise AssertionError("LLMClient.generate must not be called during automated tests")
+
+    monkeypatch.setattr("backend.services.llm_client.LLMClient.generate", _blocked)

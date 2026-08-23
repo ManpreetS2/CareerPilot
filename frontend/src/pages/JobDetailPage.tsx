@@ -3,12 +3,13 @@ import { Link, useParams } from "react-router-dom";
 import { ExternalLink, ShieldCheck } from "lucide-react";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { FitScorePanel } from "../components/FitScorePanel";
+import { InterviewPrepPanel } from "../components/InterviewPrepPanel";
 import { JobIntelligencePanel } from "../components/JobIntelligencePanel";
 import { LoadingState } from "../components/LoadingState";
 import { StatusBadge } from "../components/StatusBadge";
 import { api, ApiClientError } from "../lib/api";
 import { saveSelectedJobId } from "../lib/session";
-import type { Job, JobIntelligence, MatchScore } from "../lib/types";
+import type { InterviewPrep, Job, JobIntelligence, MatchScore } from "../lib/types";
 
 export function JobDetailPage() {
   const { jobId = "" } = useParams();
@@ -18,6 +19,10 @@ export function JobDetailPage() {
   const [extracting, setExtracting] = useState(false);
   const [intelligenceError, setIntelligenceError] = useState<unknown>(null);
   const [match, setMatch] = useState<MatchScore | null>(null);
+  const [interviewPrep, setInterviewPrep] = useState<InterviewPrep | null>(null);
+  const [interviewLoading, setInterviewLoading] = useState(true);
+  const [interviewGenerating, setInterviewGenerating] = useState(false);
+  const [interviewError, setInterviewError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [scoring, setScoring] = useState(false);
   const [scoreError, setScoreError] = useState<unknown>(null);
@@ -46,6 +51,9 @@ export function JobDetailPage() {
       setIntelligenceError(null);
       setMatch(null);
       setScoreError(null);
+      setInterviewPrep(null);
+      setInterviewError(null);
+      setInterviewLoading(true);
       try {
         const nextJob = await api.getJob(jobId);
         if (cancelled) return;
@@ -64,10 +72,25 @@ export function JobDetailPage() {
         } finally {
           if (!cancelled) setIntelligenceLoading(false);
         }
+        try {
+          const storedPrep = await api.getInterviewPrep(jobId);
+          if (!cancelled) setInterviewPrep(storedPrep);
+        } catch (err) {
+          if (!cancelled) {
+            if (err instanceof ApiClientError && err.status === 404) {
+              setInterviewPrep(null);
+            } else {
+              setInterviewError(err);
+            }
+          }
+        } finally {
+          if (!cancelled) setInterviewLoading(false);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err);
           setIntelligenceLoading(false);
+          setInterviewLoading(false);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -163,6 +186,20 @@ export function JobDetailPage() {
     }
   }
 
+  async function handlePrepareInterview() {
+    if (!jobId || interviewGenerating) return;
+    setInterviewGenerating(true);
+    setInterviewError(null);
+    try {
+      const next = await api.prepareInterview(jobId);
+      setInterviewPrep(next);
+    } catch (err) {
+      setInterviewError(err);
+    } finally {
+      setInterviewGenerating(false);
+    }
+  }
+
   if (loading) return <LoadingState label="Loading job…" />;
   if (error) return <ErrorBanner error={error} />;
   if (!job) return <p className="text-sm text-ink-500">Job not found.</p>;
@@ -254,6 +291,14 @@ export function JobDetailPage() {
         disabled={extracting}
         error={scoreError}
         onCalculate={() => void handleCalculateFit()}
+      />
+
+      <InterviewPrepPanel
+        prep={interviewPrep?.job_id === jobId ? interviewPrep : null}
+        loading={interviewLoading}
+        generating={interviewGenerating}
+        error={interviewError}
+        onPrepare={() => void handlePrepareInterview()}
       />
     </div>
   );

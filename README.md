@@ -2,7 +2,7 @@
 
 AI-assisted job search and application copilot.
 
-CareerPilot helps a candidate move from a resume to ranked, verified jobs and human-approved application materials.
+CareerPilot helps a candidate move from a resume to ranked, verified jobs and human-approved application materials. These are logical modules inside **one application**, not separately deployed microservices or autonomous agents.
 
 ## MVP workflow
 
@@ -21,25 +21,26 @@ Resume
 → Interview Preparation
 ```
 
-These are logical modules inside **one application**, not separately deployed microservices or autonomous agents.
-
 ## Architecture
 
 | Layer | Stack |
 | --- | --- |
 | Backend API | FastAPI + Uvicorn |
 | Frontend | React + TypeScript + Vite + Tailwind CSS |
-| Database | SQLite via SQLAlchemy (`data/careerpilot.db`) |
+| Database | SQLite via SQLAlchemy (`data/careerpilot.db`, gitignored) |
 | Schemas | Shared Pydantic models |
 | LLM | Thin `LLMClient` for Gemini, Anthropic, and OpenAI |
+| Browser extension | Unpacked Chrome extension for Greenhouse/Lever autofill |
 
 ```
 CareerPilot_Ai/
-├── backend/          # FastAPI app, DB, schemas, services
-├── frontend/         # React + Vite UI
-├── tests/            # pytest (backend)
-├── data/             # SQLite file (gitignored)
-├── logs/             # runtime + prompt-harness logs (gitignored)
+├── backend/              # FastAPI app, DB, schemas, services
+├── frontend/             # React + Vite UI
+├── browser-extension/    # Local Chrome extension (never submits)
+├── tests/                # pytest (isolated in-memory SQLite)
+├── scripts/              # Privacy-safe matrix runners and audits
+├── data/                 # SQLite file (gitignored)
+├── logs/                 # runtime logs (gitignored)
 ├── .env.example
 ├── requirements.txt
 └── README.md
@@ -47,26 +48,50 @@ CareerPilot_Ai/
 
 ## Current status
 
-**Done**
+**Completed and merged**
 
-- FastAPI scaffold with mock agent routes
-- SQLite tables + shared Pydantic schemas
-- LLM provider wrapper + Gemini smoke path
-- React product UI (Dashboard, Profile, Jobs, Job Detail, Applications)
-- Light/dark theme, responsive shell, typed API client
+- Candidate Profile Agent (grounded resume parse, no invented experience)
+- Job Scout (Adzuna/RemoteOK/manual URL + persistence)
+- Job Verification (still-open and suspicious-posting checks)
+- Job Intelligence extraction (grounded structured requirements)
+- Fit & Gap scoring (deterministic, explainable, no LLM)
+- Approval Agent (human-in-the-loop review, eligibility confirmation)
+- Greenhouse/Lever assisted form fill (server-side preview, never submits)
+- Browser extension autofill for the live tab (never submits)
+- Candidate reusable application answers / preferences
 
-**Day 2 human work (not finished by scaffolding)**
+**Foundation in this repo (runnable, not fully generated)**
 
-- Developer A: Candidate Profile Agent (real resume parse + grounding)
-- Developer B: Job Scout (Adzuna/RemoteOK/manual URL + persistence)
+- Application Tracker with explicit status updates and real dashboard metrics
+- Deterministic Interview Preparation baseline from stored Job Intelligence, Fit & Gap, and candidate evidence
+- Application Materials Agent **contract and tests**, with one unfinished student-owned function
+
+**Student-owned next implementation**
+
+Complete grounded materials generation in:
+
+`backend.services.application_materials_agent.generate_grounded_application_materials`
+
+That function currently fails closed: it loads stored context, performs no persistence, calls no provider, and raises a sanitized not-implemented error. Production `POST /api/jobs/{job_id}/generate-materials` still uses the isolated legacy placeholder in `application_service._mock_materials` until the student function is implemented and connected with one small integration change.
+
+Do not describe application-materials LLM generation as complete.
 
 **Still out of scope**
 
-- Fit & Gap scoring (Day 3+)
-- Job Intelligence (Day 3+)
-- Application tailoring (Day 4+)
-- Playwright assisted apply
-- Auth / deployment
+- Auth / accounts / multi-user access
+- Deployment / production hosting
+- Automatic job application submission
+- Live LLM interview-question generation (injectable boundary only)
+
+## Privacy and safety
+
+- Automated tests use isolated in-memory SQLite. They must never create or mutate `data/careerpilot.db`.
+- Logs use IDs and counts, not resume text, prompt contents, or raw provider output.
+- No candidate skill, employer, metric, or education claim may be invented without stored evidence.
+- Assisted apply and the browser extension **never click submit**. The human reviews and submits.
+- Page load for Fit Score and Interview Prep is read-only. Generation runs only on an explicit user action.
+- Tracker GET endpoints are read-only and do not create rows.
+- There is no authentication and no deployment yet.
 
 ## Setup
 
@@ -92,10 +117,11 @@ Windows:
 
 ```bash
 pip install -r requirements.txt
+python -m playwright install chromium
 cp .env.example .env
 ```
 
-Add `GEMINI_API_KEY` (and optional Anthropic/OpenAI keys) to `.env`. Never commit `.env`.
+Add `GEMINI_API_KEY` (and optional Anthropic/OpenAI keys) to `.env` for live resume parse / Job Intelligence extraction. Never commit `.env`.
 
 Database tables are created on API startup, or manually:
 
@@ -112,6 +138,17 @@ npm install
 ```
 
 `VITE_API_BASE_URL` defaults to `http://localhost:8000`.
+
+### Browser extension
+
+The extension is not published. Load it unpacked:
+
+1. Start the backend (`uvicorn backend.main:app --reload`) and approve at least one Greenhouse or Lever application.
+2. Open `chrome://extensions`, enable Developer mode, and **Load unpacked** on `browser-extension/`.
+3. Open the real posting (or Lever `/apply` page) and click **Fill this page**.
+4. Review flagged fields yourself. The extension never submits.
+
+See `browser-extension/README.md` for selector and CSP details.
 
 ## Run
 
@@ -137,10 +174,14 @@ npm run dev
 
 ## Tests
 
-Backend:
+Backend (isolated SQLite, fake/blocked providers, no `data/careerpilot.db`):
 
 ```bash
-pytest
+python -m pytest -q
+python scripts/test_fit_scoring_matrix.py
+python scripts/test_candidate_profile_matrix.py --synthetic
+python -m pytest tests/test_job_intelligence.py tests/test_job_intelligence_pipeline.py -q
+python scripts/check_tracked_secrets.py
 ```
 
 Frontend:
@@ -151,7 +192,9 @@ npm run typecheck
 npm run build
 ```
 
-## LLM smoke test (optional)
+CI (`.github/workflows/ci.yml`) runs pytest, frontend typecheck and production build, `git diff --check`, and the tracked-secret audit on Python 3.11 and Node.js 20. Playwright Chromium is installed for Form Fill fixture tests.
+
+Optional live LLM smoke test (not part of CI):
 
 ```bash
 python -m backend.utils.prompt_harness --provider gemini --prompt "Reply with one sentence confirming CareerPilot can reach the LLM."
@@ -161,73 +204,25 @@ python -m backend.utils.prompt_harness --provider gemini --prompt "Reply with on
 
 Do **not** commit directly to `main`. Work on feature branches and merge through pull requests.
 
-```
-main
-├── feature/candidate-profile-agent   # Developer A
-└── feature/job-scout                 # Developer B
-```
+Developer B ownership remains: Job Scout, Job Verification, Form Fill, browser-extension, ATS fixtures, and existing approval / assisted-apply behavior. Do not rewrite those implementations while completing Application Materials.
 
-### Day 2 task split
+## Useful API routes
 
-**Developer A — Candidate Profile Agent**
-
-Starting files:
-
-- `backend/services/candidate_profile_agent.py`
-- `backend/services/candidate_service.py`
-- `backend/api/routes/candidate.py`
-- `backend/db/models.py`
-- `backend/schemas/schemas.py`
-
-TODOs:
-
-1. Resume text extraction with `pdfplumber`
-2. OCR fallback only when extracted text is nearly empty
-3. CandidateProfile Gemini prompt
-4. Strict structured JSON output
-5. CandidateProfile Pydantic validation
-6. Evidence / grounding validation
-7. Save profile to SQLite
-8. Wire real `POST /api/parse-resume`
-9. Test with at least 3 resumes
-
-Critical invariant: **never invent** candidate experience, skills, projects, education, or certifications.
-
-**Developer B — Job Scout**
-
-Starting files:
-
-- `backend/services/job_scout_service.py`
-- `backend/services/job_service.py`
-- `backend/api/routes/jobs.py`
-- `backend/db/models.py`
-- `frontend/src/pages/JobsPage.tsx`
-
-TODOs:
-
-1. Configure Adzuna (or another stable free source)
-2. Add RemoteOK if useful
-3. Normalize into `Job` records
-4. Manual job URL ingestion
-5. Deduplicate jobs
-6. Save jobs to SQLite
-7. Wire real `POST /api/scout-jobs`
-8. Confirm jobs render in the React Jobs page
-
-## Placeholder API routes
-
-Several endpoints still return mock data until Day 2+ services are wired:
-
-| Method | Path |
-| --- | --- |
-| `GET` | `/` |
-| `GET` | `/health` |
-| `POST` | `/api/parse-resume` |
-| `POST` | `/api/preferences` |
-| `GET` | `/api/jobs` |
-| `POST` | `/api/scout-jobs` |
-| `GET` | `/api/jobs/{job_id}` |
-| `POST` | `/api/jobs/{job_id}/score` |
-| `POST` | `/api/jobs/{job_id}/generate-materials` |
-| `POST` | `/api/jobs/{job_id}/approve` |
-| `POST` | `/api/jobs/{job_id}/prepare-interview` |
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/api/parse-resume` | Grounded candidate profile |
+| `POST` | `/api/preferences` | Reusable application answers |
+| `POST` | `/api/scout-jobs` | Live job discovery |
+| `POST` | `/api/jobs/ingest-url` | Manual posting URL |
+| `POST` | `/api/jobs/verify` | Verification sweep |
+| `GET`/`POST` | `/api/jobs/{job_id}/intelligence` | Stored / extract Job Intelligence |
+| `POST` | `/api/jobs/{job_id}/score` | Fit & Gap (explicit) |
+| `POST` | `/api/jobs/{job_id}/generate-materials` | Legacy placeholder until student function lands |
+| `POST` | `/api/jobs/{job_id}/approve` | Approval Agent |
+| `POST` | `/api/jobs/{job_id}/fill-application` | Assisted apply preview (never submits) |
+| `GET` | `/api/extension/autofill` | Browser extension field values |
+| `GET` | `/api/applications` | Tracker list (read-only) |
+| `GET`/`PATCH` | `/api/applications/{job_id}/tracking` | Explicit tracker updates |
+| `GET` | `/api/dashboard/summary` | Real stored metrics |
+| `GET` | `/api/jobs/{job_id}/interview-prep` | Read-only stored prep |
+| `POST` | `/api/jobs/{job_id}/prepare-interview` | Deterministic baseline (explicit) |
