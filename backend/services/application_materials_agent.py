@@ -1,14 +1,11 @@
 """Application Materials Agent foundation.
 
-This module is the student-owned implementation seam for grounded resume
-bullets, cover-letter drafts, recruiter messages, and source-traceability
-notes. It is intentionally not wired into the production generate-materials
-route.
+This module is the student-owned grounded generator for resume bullets,
+cover-letter drafts, recruiter messages, and source-traceability notes.
 
-Production still uses the isolated legacy placeholder
-``backend.services.application_service._mock_materials`` until
-``generate_grounded_application_materials`` is implemented and a single
-small integration change replaces that placeholder.
+Production `POST /api/jobs/{job_id}/generate-materials` calls
+`generate_grounded_application_materials`. GET routes never generate.
+Placeholder `_mock_materials` is not on the production path.
 
 Critical invariant
 ------------------
@@ -54,8 +51,20 @@ from backend.schemas.schemas import (
     TargetPreferences,
 )
 from backend.services.analysis_service import _ALIAS_TO_CANONICAL, _skill_in_text
-from backend.services.job_intelligence_service import get_stored_job_intelligence
+from sqlalchemy.exc import IntegrityError
+
+from backend.services.job_intelligence_service import (
+    _has_usable_intelligence,
+    get_stored_job_intelligence,
+)
+
 from backend.services.job_service import record_to_job
+from backend.services.llm_client import (
+    LLMConfigurationError,
+    LLMEmptyResponseError,
+    LLMProviderError,
+    get_llm_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +261,13 @@ class ApplicationMaterialsGroundingError(ApplicationMaterialsError):
     def __init__(self) -> None:
         super().__init__(
             "Application materials contained claims that are not supported by stored evidence."
+        )
+
+
+class ApplicationMaterialsConflictError(ApplicationMaterialsError):
+    def __init__(self) -> None:
+        super().__init__(
+            "Existing application materials are approved or awaiting edits and were not replaced."
         )
 
 
@@ -1118,43 +1134,188 @@ def draft_to_application_package(draft: ApplicationMaterialsDraft) -> Applicatio
     )
 
 
+_PLACEHOLDER_MARKERS = ("placeholder bullet", "placeholder draft")
+
+
+def _looks_like_placeholder(record: ApplicationPackageRecord) -> bool:
+    notes = " ".join(record.source_traceability_notes or []).lower()
+    cover = (record.cover_letter_draft or "").lower()
+    return any(marker in notes or marker in cover for marker in _PLACEHOLDER_MARKERS)
+
+
+def is_grounded_package_record(record: ApplicationPackageRecord | None) -> bool:
+    if record is None:
+        return False
+    if _looks_like_placeholder(record):
+        return False
+    if getattr(record, "grounded", False):
+        return True
+    return False
+
+
+_PROTECTED_APPROVAL_STATUSES = frozenset({"approved", "edit_requested"})
+
+
+def _draft_from_record(record: ApplicationPackageRecord, job_id: str) -> ApplicationMaterialsDraft:
+    return ApplicationMaterialsDraft(
+        job_id=job_id,
+        tailored_bullets=list(record.tailored_bullets or []),
+        cover_letter_draft=record.cover_letter_draft or "",
+        recruiter_message=record.recruiter_message or "",
+        source_traceability_notes=list(record.source_traceability_notes or []),
+        grounding=MaterialsGroundingReport(),
+    )
+
+
+def _default_materials_generator(prompt: str, system_prompt: str | None = None) -> str:
+    return get_llm_client().generate(prompt, system_prompt=system_prompt)
+
+
+def _invoke_materials_generator(
+    generator: ApplicationMaterialsGenerateFn | ApplicationMaterialsGenerator,
+    prompt: str,
+    system_prompt: str,
+) -> str:
+    try:
+        return generator(prompt, system_prompt)
+    except TypeError:
+        return generator(prompt)  # type: ignore[misc, call-arg]
+
+
+def _persist_grounded_draft(
+    db: Session,
+    context: ApplicationMaterialsContext,
+    draft: ApplicationMaterialsDraft,
+    existing: ApplicationPackageRecord | None = None,
+) -> ApplicationPackageRecord:
+    payload = draft_to_persistence_payload(draft)
+    if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
+        raise ApplicationMaterialsConflictError()
+    if existing is not None and is_grounded_package_record(existing):
+        return existing
+    if existing is not None:
+        existing.candidate_id = context.candidate_pk
+        existing.tailored_bullets = list(payload["tailored_bullets"])
+        existing.cover_letter_draft = payload["cover_letter_draft"]
+        existing.recruiter_message = payload["recruiter_message"]
+        existing.source_traceability_notes = list(payload["source_traceability_notes"])
+        existing.approval_status = "pending_review"
+        existing.grounded = True
+        record = existing
+    else:
+        record = ApplicationPackageRecord(
+            job_id=context.job_pk,
+            candidate_id=context.candidate_pk,
+            tailored_bullets=list(payload["tailored_bullets"]),
+            cover_letter_draft=payload["cover_letter_draft"],
+            recruiter_message=payload["recruiter_message"],
+            source_traceability_notes=list(payload["source_traceability_notes"]),
+            approval_status="pending_review",
+            grounded=True,
+        )
+        db.add(record)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        winner = (
+            db.query(ApplicationPackageRecord)
+            .filter(ApplicationPackageRecord.job_id == context.job_pk)
+            .first()
+        )
+        if winner is None:
+            raise
+        logger.info(
+            "application_materials persist recovered unique_conflict job_pk=%s",
+            context.job_pk,
+        )
+        return winner
+    except Exception:
+        db.rollback()
+        raise
+    logger.info("application_materials persisted job_pk=%s", context.job_pk)
+    return record
+
+
 def generate_grounded_application_materials(
     db: Session,
     job_id: str,
     *,
     generator: ApplicationMaterialsGenerateFn | ApplicationMaterialsGenerator | None = None,
 ) -> ApplicationMaterialsDraft:
-    """STUDENT-OWNED TODO: implement grounded application-materials generation.
-
-    Complete this function later. The expected finished flow is:
-
-    1. ``load_application_materials_context``
-    2. ``build_application_materials_prompt``
-    3. call the injectable ``generator`` (or default LLM client)
-    4. ``parse_application_materials_json``
-    5. ``ground_application_materials`` and reject ungounded claims
-    6. return a draft (persistence stays a separate, one-line integration)
-
-    Until implemented this function:
-    - loads stored context so missing inputs fail with sanitized errors
-    - does not call ``generator`` or any provider
-    - does not persist application packages
-    - raises ``ApplicationMaterialsNotImplementedError`` without prompt or
-      provider details
-    """
+    """Generate grounded application materials from stored candidate, job, and score evidence."""
 
     context = load_application_materials_context(db, job_id)
-    existing_packages = (
+    if not _has_usable_intelligence(context.intelligence):
+        raise MissingJobIntelligenceError()
+
+    existing = (
         db.query(ApplicationPackageRecord)
         .filter(ApplicationPackageRecord.job_id == context.job_pk)
-        .count()
+        .first()
     )
-    # Deliberately ignore generator so an unfinished path cannot leak prompts
-    # or silently emit fabricated provider output.
-    _ = generator
+    if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
+        if is_grounded_package_record(existing):
+            logger.info("application_materials reused protected_package job_pk=%s", context.job_pk)
+            return _draft_from_record(existing, job_id)
+        raise ApplicationMaterialsConflictError()
+    if is_grounded_package_record(existing):
+        logger.info("application_materials reused stored_package job_pk=%s", context.job_pk)
+        assert existing is not None
+        return _draft_from_record(existing, job_id)
+
+    system_prompt, user_prompt = build_application_materials_prompt(context)
+    invoke = generator if generator is not None else _default_materials_generator
+
+    parsed: ApplicationMaterialsStructuredOutput | None = None
+    last_parse_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            raw = _invoke_materials_generator(invoke, user_prompt, system_prompt)
+        except LLMEmptyResponseError:
+            last_parse_error = ApplicationMaterialsParseError()
+            logger.info(
+                "application_materials structured_attempt=%s outcome=empty job_pk=%s",
+                attempt + 1,
+                context.job_pk,
+            )
+            continue
+        except LLMProviderError:
+            logger.info(
+                "application_materials structured_attempt=%s outcome=provider_exhausted job_pk=%s",
+                attempt + 1,
+                context.job_pk,
+            )
+            raise
+        except LLMConfigurationError:
+            raise
+        try:
+            parsed = parse_application_materials_json(raw)
+            break
+        except ApplicationMaterialsParseError as exc:
+            last_parse_error = exc
+            logger.info(
+                "application_materials structured_attempt=%s outcome=invalid_structured_output job_pk=%s",
+                attempt + 1,
+                context.job_pk,
+            )
+            continue
+    if parsed is None:
+        raise last_parse_error or ApplicationMaterialsParseError()
+
+    report = ground_application_materials(parsed, context)
     logger.info(
-        "application_materials generation skipped reason=not_implemented job_pk=%s existing_packages=%s",
+        "application_materials grounding accepted=%s rejected=%s invented_candidate=%s invented_job=%s numeric=%s job_pk=%s",
+        report.accepted_claim_count,
+        report.rejected_claim_count,
+        report.invented_candidate_claims,
+        report.invented_job_requirements,
+        report.numeric_literals_rejected,
         context.job_pk,
-        existing_packages,
     )
-    raise ApplicationMaterialsNotImplementedError()
+    if not report.grounded:
+        raise ApplicationMaterialsGroundingError()
+
+    draft = draft_from_structured_output(parsed, context, report)
+    record = _persist_grounded_draft(db, context, draft, existing=existing)
+    return _draft_from_record(record, job_id)

@@ -12,7 +12,8 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.db.models import ApplicationPackageRecord, Candidate, JobRecord
 from backend.schemas.schemas import ApprovalRequest
-from backend.services.application_service import apply_approval, get_or_generate_application_package
+from backend.services.application_service import apply_approval, get_or_generate_application_package, get_stored_application_package
+from tests.mvp_helpers import fake_grounded_generator, insert_grounded_package, seed_materials_prerequisites
 
 
 def _job(session, *, public_id: str = "manual-abc123", title: str = "Software Engineer Intern") -> JobRecord:
@@ -56,8 +57,8 @@ def _candidate(session, *, name: str = "Jordan Avery Quill") -> Candidate:
 
 
 def test_generate_materials_creates_and_persists_a_package(isolated_session) -> None:
-    _job(isolated_session)
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    seed_materials_prerequisites(isolated_session)
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", generator=fake_grounded_generator)
     assert package.job_id == "manual-abc123"
     assert package.approval_status == "pending_review"
     assert len(package.tailored_bullets) > 0
@@ -67,9 +68,9 @@ def test_generate_materials_creates_and_persists_a_package(isolated_session) -> 
 
 
 def test_generate_materials_is_idempotent_not_regenerated(isolated_session) -> None:
-    _job(isolated_session)
-    first = get_or_generate_application_package(isolated_session, "manual-abc123")
-    second = get_or_generate_application_package(isolated_session, "manual-abc123")
+    seed_materials_prerequisites(isolated_session)
+    first = get_or_generate_application_package(isolated_session, "manual-abc123", generator=fake_grounded_generator)
+    second = get_or_generate_application_package(isolated_session, "manual-abc123", generator=fake_grounded_generator)
     assert first.tailored_bullets == second.tailored_bullets
     assert first.cover_letter_draft == second.cover_letter_draft
     assert isolated_session.query(ApplicationPackageRecord).count() == 1
@@ -82,26 +83,25 @@ def test_generate_materials_missing_job_404s(isolated_session) -> None:
 
 
 def test_generate_materials_independent_across_jobs(isolated_session) -> None:
-    _job(isolated_session, public_id="job-a", title="Backend Intern")
-    _job(isolated_session, public_id="job-b", title="Frontend Intern")
-    a = get_or_generate_application_package(isolated_session, "job-a")
-    b = get_or_generate_application_package(isolated_session, "job-b")
+    seed_materials_prerequisites(isolated_session, public_id="job-a", title="Backend Intern")
+    seed_materials_prerequisites(isolated_session, public_id="job-b", title="Frontend Intern")
+    a = get_or_generate_application_package(isolated_session, "job-a", generator=fake_grounded_generator)
+    b = get_or_generate_application_package(isolated_session, "job-b", generator=fake_grounded_generator)
     assert a.job_id != b.job_id
     assert "Backend" not in "".join(b.tailored_bullets + [b.cover_letter_draft or ""])
     assert isolated_session.query(ApplicationPackageRecord).count() == 2
 
 
 def test_generate_materials_associates_current_candidate(isolated_session) -> None:
-    candidate = _candidate(isolated_session)
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    get_or_generate_application_package(isolated_session, "manual-abc123", generator=fake_grounded_generator)
     record = isolated_session.query(ApplicationPackageRecord).first()
     assert record.candidate_id == candidate.id
 
 
 def test_generate_materials_candidate_id_none_without_a_candidate(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     record = isolated_session.query(ApplicationPackageRecord).first()
     assert record.candidate_id is None
 
@@ -131,7 +131,7 @@ def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolat
     committed yet from its point of view), but a winner row is already
     committed by the time this session's insert runs — it must recover the
     winner's data instead of raising or creating a duplicate row."""
-    job = _job(isolated_session)
+    job, _candidate = seed_materials_prerequisites(isolated_session)
     winner = ApplicationPackageRecord(
         job_id=job.id,
         tailored_bullets=["winner bullet"],
@@ -162,7 +162,9 @@ def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolat
 
     monkeypatch.setattr(isolated_session, "query", query_that_misses_once)
 
-    result = get_or_generate_application_package(isolated_session, "manual-abc123")
+    result = get_or_generate_application_package(
+        isolated_session, "manual-abc123", generator=fake_grounded_generator
+    )
     assert result.tailored_bullets == ["winner bullet"]
     assert result.cover_letter_draft == "winner letter"
     monkeypatch.undo()
@@ -218,16 +220,16 @@ def test_source_traceability_notes_in_place_mutation_persists(isolated_session, 
 
 
 def test_approve_without_eligibility_confirmation_is_rejected(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     with pytest.raises(HTTPException) as exc_info:
         apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved"))
     assert exc_info.value.status_code == 422
 
 
 def test_approve_with_eligibility_confirmation_succeeds(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     result = apply_approval(
         isolated_session,
         "manual-abc123",
@@ -235,22 +237,22 @@ def test_approve_with_eligibility_confirmation_succeeds(isolated_session) -> Non
     )
     assert result.approval_status == "approved"
 
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.approval_status == "approved"
     assert package.eligibility_confirmed is True
     assert package.eligibility_notes == "all good"
 
 
 def test_reject_does_not_require_eligibility_confirmation(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     result = apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected"))
     assert result.approval_status == "rejected"
 
 
 def test_edit_requested_does_not_require_eligibility_confirmation(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     result = apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested"))
     assert result.approval_status == "edit_requested"
 
@@ -269,14 +271,14 @@ def test_approve_missing_job_404s(isolated_session) -> None:
 
 
 def test_reapproving_stays_confirmed(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True))
     result = apply_approval(
         isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True)
     )
     assert result.approval_status == "approved"
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.eligibility_confirmed is True
 
 
@@ -286,26 +288,26 @@ def test_reapproving_stays_confirmed(isolated_session) -> None:
 
 
 def test_edit_request_after_approval_does_not_clear_eligibility_confirmed(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True))
 
     # Edit request with the schema's default eligibility_confirmed=False —
     # this must not downgrade the confirmation that was already recorded.
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested"))
 
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.approval_status == "edit_requested"
     assert package.eligibility_confirmed is True
 
 
 def test_reject_after_approval_does_not_clear_eligibility_confirmed(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True))
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected"))
 
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.approval_status == "rejected"
     assert package.eligibility_confirmed is True
 
@@ -314,8 +316,8 @@ def test_omitting_notes_fields_does_not_clear_previously_set_values(isolated_ses
     """A decision that never mentions eligibility_notes/notes at all must
     leave whatever was already stored alone — omitted and explicitly-empty
     are different things, even though Pydantic defaults both to None/""."""
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     apply_approval(
         isolated_session,
         "manual-abc123",
@@ -333,7 +335,7 @@ def test_omitting_notes_fields_does_not_clear_previously_set_values(isolated_ses
     # them).
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested"))
 
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.approval_status == "edit_requested"
     assert package.eligibility_notes == "needs sponsorship"
     assert package.decision_notes == "initial review"
@@ -343,12 +345,12 @@ def test_edit_request_never_sets_eligibility_confirmed_true(isolated_session) ->
     """edit_requested/rejected can't set eligibility_confirmed at all —
     only an approval (which requires it) can, so a caller can't sneak a
     confirmation through a decision type that doesn't require one."""
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     apply_approval(
         isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", eligibility_confirmed=True)
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.eligibility_confirmed is False
 
 
@@ -358,14 +360,14 @@ def test_edit_request_never_sets_eligibility_confirmed_true(isolated_session) ->
 
 
 def test_eligibility_notes_can_be_set_then_cleared(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     apply_approval(
         isolated_session,
         "manual-abc123",
         ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes="needs sponsorship"),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.eligibility_notes == "needs sponsorship"
 
     # Clearing: an empty string must actually clear it, not be ignored.
@@ -374,64 +376,64 @@ def test_eligibility_notes_can_be_set_then_cleared(isolated_session) -> None:
         "manual-abc123",
         ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes=""),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.eligibility_notes is None
 
 
 def test_eligibility_notes_can_be_updated_on_a_non_approve_decision(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     apply_approval(
         isolated_session,
         "manual-abc123",
         ApprovalRequest(decision="edit_requested", eligibility_notes="flag for legal review"),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.eligibility_notes == "flag for legal review"
 
 
 def test_decision_notes_persisted_for_each_decision_type(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
 
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", notes="rewrite bullet 2"))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.decision_notes == "rewrite bullet 2"
 
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected", notes="not a fit"))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.decision_notes == "not a fit"
 
 
 def test_decision_notes_can_be_cleared(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", notes="fix typo"))
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", notes=""))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.decision_notes is None
 
 
 def test_notes_round_trip_unicode_and_special_characters(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
     tricky = "Needs H-1B sponsorship — café résumé 日本語 <script>alert(1)</script> \"quoted\""
     apply_approval(
         isolated_session,
         "manual-abc123",
         ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes=tricky, notes=tricky),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.eligibility_notes == tricky
     assert package.decision_notes == tricky
 
 
 def test_full_decision_lifecycle_preserves_expected_state(isolated_session) -> None:
-    _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    job = _job(isolated_session)
+    insert_grounded_package(isolated_session, job)
 
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", notes="fix intro"))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.approval_status == "edit_requested"
     assert package.eligibility_confirmed is False
 
@@ -440,7 +442,7 @@ def test_full_decision_lifecycle_preserves_expected_state(isolated_session) -> N
         "manual-abc123",
         ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes="confirmed"),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.approval_status == "approved"
     assert package.eligibility_confirmed is True
     assert package.eligibility_notes == "confirmed"
@@ -451,7 +453,7 @@ def test_full_decision_lifecycle_preserves_expected_state(isolated_session) -> N
     assert package.decision_notes == "fix intro"
 
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected", notes="changed mind"))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_stored_application_package(isolated_session, "manual-abc123")
     assert package.approval_status == "rejected"
     assert package.eligibility_confirmed is True
     assert package.decision_notes == "changed mind"
@@ -471,7 +473,8 @@ def test_generate_materials_route_404s_for_unknown_job(isolated_client) -> None:
 def test_generate_materials_route_returns_persisted_shape(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _job(db)
+        seed_materials_prerequisites(db)
+    client.app.state.application_materials_generator = fake_grounded_generator
     response = client.post("/api/jobs/manual-abc123/generate-materials")
     assert response.status_code == 200
     body = response.json()
@@ -484,7 +487,8 @@ def test_generate_materials_route_returns_persisted_shape(isolated_client) -> No
 def test_generate_materials_route_is_idempotent(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _job(db)
+        seed_materials_prerequisites(db)
+    client.app.state.application_materials_generator = fake_grounded_generator
     first = client.post("/api/jobs/manual-abc123/generate-materials").json()
     second = client.post("/api/jobs/manual-abc123/generate-materials").json()
     assert first["tailored_bullets"] == second["tailored_bullets"]
@@ -503,7 +507,8 @@ def test_approve_route_without_materials_returns_409(isolated_client) -> None:
 def test_approve_route_without_eligibility_confirmed_returns_422(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _job(db)
+        seed_materials_prerequisites(db)
+    client.app.state.application_materials_generator = fake_grounded_generator
     client.post("/api/jobs/manual-abc123/generate-materials")
     response = client.post("/api/jobs/manual-abc123/approve", json={"decision": "approved"})
     assert response.status_code == 422
@@ -513,7 +518,8 @@ def test_approve_route_without_eligibility_confirmed_returns_422(isolated_client
 def test_approve_route_with_eligibility_confirmed_returns_200(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _job(db)
+        seed_materials_prerequisites(db)
+    client.app.state.application_materials_generator = fake_grounded_generator
     client.post("/api/jobs/manual-abc123/generate-materials")
     response = client.post(
         "/api/jobs/manual-abc123/approve",
@@ -527,7 +533,8 @@ def test_approve_route_with_eligibility_confirmed_returns_200(isolated_client) -
 def test_approve_route_rejects_invalid_decision_value(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _job(db)
+        seed_materials_prerequisites(db)
+    client.app.state.application_materials_generator = fake_grounded_generator
     client.post("/api/jobs/manual-abc123/generate-materials")
     response = client.post("/api/jobs/manual-abc123/approve", json={"decision": "maybe"})
     assert response.status_code == 422
@@ -536,7 +543,8 @@ def test_approve_route_rejects_invalid_decision_value(isolated_client) -> None:
 def test_approve_route_requires_decision_field(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _job(db)
+        seed_materials_prerequisites(db)
+    client.app.state.application_materials_generator = fake_grounded_generator
     client.post("/api/jobs/manual-abc123/generate-materials")
     response = client.post("/api/jobs/manual-abc123/approve", json={})
     assert response.status_code == 422
@@ -551,7 +559,8 @@ def test_approve_route_missing_job_returns_404(isolated_client) -> None:
 def test_full_route_flow_generate_then_approve_then_regenerate_reflects_state(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _job(db)
+        seed_materials_prerequisites(db)
+    client.app.state.application_materials_generator = fake_grounded_generator
 
     generated = client.post("/api/jobs/manual-abc123/generate-materials").json()
     assert generated["approval_status"] == "pending_review"
@@ -581,7 +590,8 @@ def test_route_omitting_notes_keys_entirely_does_not_clear_them(isolated_client)
     wipe out values a prior approve request already set."""
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _job(db)
+        seed_materials_prerequisites(db)
+    client.app.state.application_materials_generator = fake_grounded_generator
     client.post("/api/jobs/manual-abc123/generate-materials")
     client.post(
         "/api/jobs/manual-abc123/approve",

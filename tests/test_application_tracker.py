@@ -26,6 +26,7 @@ from backend.services.application_tracker_service import (
     update_tracking,
 )
 from backend.services.application_service import apply_approval, get_or_generate_application_package
+from tests.mvp_helpers import insert_grounded_package
 from backend.services.interview_service import generate_and_store_interview_prep
 from backend.schemas.schemas import ApprovalRequest
 import pytest
@@ -148,8 +149,7 @@ def test_invalid_status_transition(isolated_session) -> None:
 
 def test_tracker_status_change_does_not_mutate_approval_or_form_fill(isolated_session) -> None:
     job = _job(isolated_session)
-    package = get_or_generate_application_package(isolated_session, job.public_id)
-    assert package.approval_status == "pending_review"
+    insert_grounded_package(isolated_session, job)
     apply_approval(
         isolated_session,
         job.public_id,
@@ -226,7 +226,7 @@ def test_dashboard_real_aggregation(isolated_session) -> None:
         )
     )
     isolated_session.commit()
-    get_or_generate_application_package(isolated_session, verified.public_id)
+    insert_grounded_package(isolated_session, verified, candidate=candidate)
     apply_approval(
         isolated_session,
         verified.public_id,

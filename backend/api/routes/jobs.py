@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
+from backend.db.database import get_db
 from backend.schemas.schemas import (
     IngestJobUrlRequest,
     Job,
     JobVerificationResponse,
+    MatchScore,
     ScoutJobsResponse,
 )
+from backend.services.analysis_service import list_stored_match_scores
 from backend.services.job_scout_service import JobScoutError, ingest_job_url, normalize_job, persist_jobs
 from backend.services.job_service import get_job, list_jobs, scout_jobs
 from backend.services.job_verification_service import verify_all, verify_and_store
@@ -22,6 +26,12 @@ DEFAULT_SCOUT_QUERY = "software engineer intern"
 @router.get("/jobs", response_model=list[Job])
 def get_jobs() -> list[Job]:
     return list_jobs()
+
+
+@router.get("/jobs/scores", response_model=list[MatchScore])
+def list_job_scores(db: Session = Depends(get_db)) -> list[MatchScore]:
+    """Return stored fit scores for every job that already has one. Never scores."""
+    return list_stored_match_scores(db)
 
 
 @router.post("/scout-jobs", response_model=ScoutJobsResponse, status_code=status.HTTP_202_ACCEPTED)

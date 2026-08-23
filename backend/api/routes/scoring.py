@@ -14,6 +14,8 @@ from backend.services.analysis_service import (
     JobNotFoundError,
     RequirementsUnavailableError,
     ScoringError,
+    StoredScoreNotFoundError,
+    get_stored_match_score,
 )
 from backend.services.job_intelligence_service import (
     EmptyGroundedIntelligenceError,
@@ -102,6 +104,17 @@ def extract_job_intelligence_route(
         return extract_job_intelligence(db, job_id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_intelligence_error(exc) from exc
+
+
+@router.get("/jobs/{job_id}/score", response_model=MatchScore)
+def get_stored_score_route(job_id: str, db: Session = Depends(get_db)) -> MatchScore:
+    """Return the latest stored fit score. Never scores, writes, or calls a provider."""
+    try:
+        return get_stored_match_score(db, job_id)
+    except StoredScoreNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
+        raise _http_for_scoring_error(exc) from exc
 
 
 @router.post("/jobs/{job_id}/score", response_model=MatchScore)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from backend.db.database import get_db
@@ -13,18 +13,33 @@ from backend.schemas.schemas import (
     AutofillResponse,
     FormFillResult,
 )
-from backend.services.application_service import apply_approval, get_or_generate_application_package
+from backend.services.application_service import (
+    StoredMaterialsNotFoundError,
+    apply_approval,
+    get_or_generate_application_package,
+    get_stored_application_package,
+)
 from backend.services.form_fill_service import get_autofill_data, run_assisted_apply
 
 router = APIRouter(prefix="/api", tags=["applications"])
 
 
+@router.get("/jobs/{job_id}/materials", response_model=ApplicationPackage)
+def get_materials(job_id: str, db: Session = Depends(get_db)) -> ApplicationPackage:
+    """Return stored grounded materials. Never generates, writes, or calls a provider."""
+    try:
+        return get_stored_application_package(db, job_id)
+    except StoredMaterialsNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 @router.post("/jobs/{job_id}/generate-materials", response_model=ApplicationPackage)
-def generate_materials(job_id: str, db: Session = Depends(get_db)) -> ApplicationPackage:
-    """Return this job's persisted application package, generating the isolated
-    legacy placeholder if none exists yet. The unfinished grounded generator
-    in application_materials_agent is not wired into this route."""
-    return get_or_generate_application_package(db, job_id)
+def generate_materials(
+    job_id: str, request: Request, db: Session = Depends(get_db)
+) -> ApplicationPackage:
+    """Generate grounded application materials after an explicit user action."""
+    generator = getattr(request.app.state, "application_materials_generator", None)
+    return get_or_generate_application_package(db, job_id, generator=generator)
 
 
 @router.post("/jobs/{job_id}/approve", response_model=ApprovalResponse)

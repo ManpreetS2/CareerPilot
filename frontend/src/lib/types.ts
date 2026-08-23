@@ -122,6 +122,7 @@ export type ApplicationPackage = {
   eligibility_confirmed: boolean;
   eligibility_notes?: string | null;
   decision_notes?: string | null;
+  grounded?: boolean;
 };
 
 export type ApprovalDecision = "approved" | "edit_requested" | "rejected";

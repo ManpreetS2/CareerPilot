@@ -225,6 +225,7 @@ def run_browser_workflow() -> dict[str, int]:
         backend_env["OPENAI_API_KEY"] = ""
         backend_env["ADZUNA_APP_ID"] = ""
         backend_env["ADZUNA_APP_KEY"] = ""
+        backend_env["CAREERPILOT_BROWSER_FAKE_MATERIALS"] = "1"
         frontend_env = os.environ.copy()
         frontend_env["VITE_API_BASE_URL"] = f"http://127.0.0.1:{backend_port}"
         backend_log_handle = backend_log.open("w", encoding="utf-8")
@@ -266,6 +267,9 @@ def run_browser_workflow() -> dict[str, int]:
         patch_calls: list[str] = []
         interview_posts: list[str] = []
         interview_gets: list[str] = []
+        score_posts: list[str] = []
+        intelligence_posts: list[str] = []
+        materials_posts: list[str] = []
         blocked_external: list[str] = []
         try:
             _wait_for_url(
@@ -307,12 +311,19 @@ def run_browser_workflow() -> dict[str, int]:
                 def _track(request: Any) -> None:
                     url = request.url
                     method = request.method
+                    path = url.split("?", 1)[0].rstrip("/")
                     if method == "PATCH" and "/tracking" in url:
                         patch_calls.append(url)
-                    if method == "POST" and url.rstrip("/").endswith("/prepare-interview"):
+                    if method == "POST" and path.endswith("/prepare-interview"):
                         interview_posts.append(url)
-                    if method == "GET" and url.rstrip("/").endswith("/interview-prep"):
+                    if method == "GET" and path.endswith("/interview-prep"):
                         interview_gets.append(url)
+                    if method == "POST" and path.endswith("/score"):
+                        score_posts.append(url)
+                    if method == "POST" and path.endswith("/intelligence"):
+                        intelligence_posts.append(url)
+                    if method == "POST" and path.endswith("/generate-materials"):
+                        materials_posts.append(url)
 
                 page.on("request", _track)
                 base = f"http://127.0.0.1:{frontend_port}"
@@ -330,6 +341,68 @@ def run_browser_workflow() -> dict[str, int]:
                 expect(_metric(page, "Discovered")).to_have_text("1")
                 expect(_metric(page, "Verified")).to_have_text("1")
                 expect(_metric(page, "Interviews")).to_have_text("0")
+                checks += 1
+
+                before_score_posts = len(score_posts)
+                before_intelligence_posts = len(intelligence_posts)
+                before_materials_posts = len(materials_posts)
+                page.goto(f"{base}/jobs")
+                expect(page.get_by_role("heading", name="Jobs", exact=True)).to_be_visible()
+                expect(page.get_by_text(JOB_TITLE, exact=True)).to_be_visible()
+                expect(page.get_by_text("Not scored", exact=True)).to_be_visible()
+                if len(score_posts) != before_score_posts:
+                    raise AssertionError("Jobs page load issued a scoring POST.")
+                if len(intelligence_posts) != before_intelligence_posts:
+                    raise AssertionError("Jobs page load issued an intelligence POST.")
+                if len(materials_posts) != before_materials_posts:
+                    raise AssertionError("Jobs page load issued a materials POST.")
+                checks += 1
+
+                page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
+                expect(page.get_by_role("heading", name="Application", exact=True)).to_be_visible()
+                expect(page.get_by_text("No grounded materials stored yet.")).to_be_visible()
+                if len(score_posts) != before_score_posts:
+                    raise AssertionError("Application page load issued a scoring POST.")
+                if len(intelligence_posts) != before_intelligence_posts:
+                    raise AssertionError("Application page load issued an intelligence POST.")
+                if len(materials_posts) != before_materials_posts:
+                    raise AssertionError("Application page load issued a materials POST.")
+                checks += 1
+
+                page.get_by_test_id("calculate-fit").click()
+                expect(page.get_by_text("Not scored yet. Calculate fit to store a score.")).to_have_count(0)
+                if len(score_posts) != before_score_posts + 1:
+                    raise AssertionError("Calculate fit did not issue exactly one scoring POST.")
+                checks += 1
+
+                page.get_by_test_id("generate-materials").click()
+                expect(page.get_by_text("Python is listed in the stored candidate skill evidence.")).to_be_visible()
+                if len(materials_posts) != before_materials_posts + 1:
+                    raise AssertionError("Generate materials did not issue exactly one materials POST.")
+                checks += 1
+
+                page.reload()
+                expect(page.get_by_text("Python is listed in the stored candidate skill evidence.")).to_be_visible()
+                if len(materials_posts) != before_materials_posts + 1:
+                    raise AssertionError("Application refresh issued another materials POST.")
+                checks += 1
+
+                page.goto(f"{base}/jobs")
+                page.get_by_test_id("recommendation-filter").select_option("unscored")
+                expect(page.get_by_text(JOB_TITLE, exact=True)).to_have_count(0)
+                page.get_by_test_id("recommendation-filter").select_option("all")
+                expect(page.get_by_text(JOB_TITLE, exact=True)).to_be_visible()
+                checks += 1
+
+                page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
+                approve = page.get_by_role("button", name="Approve")
+                expect(approve).to_be_disabled()
+                page.get_by_role("checkbox").check()
+                expect(approve).to_be_enabled()
+                approve.click()
+                expect(page.get_by_text("approved", exact=False)).to_be_visible()
+                expect(page.get_by_role("heading", name="Assisted apply")).to_be_visible()
+                expect(page.get_by_role("button", name="Fill Application Form")).to_be_visible()
                 checks += 1
 
                 before_patches = len(patch_calls)
@@ -420,6 +493,9 @@ def run_browser_workflow() -> dict[str, int]:
                 "tracker_patches": len(patch_calls),
                 "interview_posts": len(interview_posts),
                 "interview_gets": len(interview_gets),
+                "score_posts": len(score_posts),
+                "intelligence_posts": len(intelligence_posts),
+                "materials_posts": len(materials_posts),
                 "external_requests": len(blocked_external),
             }
         finally:
@@ -436,7 +512,9 @@ def main() -> int:
     print(
         "mvp_browser_checks={checks} tracker_patches={tracker_patches} "
         "interview_posts={interview_posts} interview_gets={interview_gets} "
-        "external_requests={external_requests} result=pass".format(**result)
+        "score_posts={score_posts} intelligence_posts={intelligence_posts} "
+        "materials_posts={materials_posts} external_requests={external_requests} "
+        "result=pass".format(**result)
     )
     return 0
 

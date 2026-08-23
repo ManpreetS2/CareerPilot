@@ -20,6 +20,9 @@ export function JobsPage() {
   const [location, setLocation] = useState("all");
   const [status, setStatus] = useState("all");
   const [sort, setSort] = useState<"match" | "title">("match");
+  const [recommendation, setRecommendation] = useState<
+    "all" | "apply" | "consider" | "skip" | "unscored"
+  >("all");
   const [manualUrl, setManualUrl] = useState("");
 
   async function loadJobs(fromScout = false) {
@@ -29,17 +32,11 @@ export function JobsPage() {
     try {
       const nextJobs = fromScout ? (await api.scoutJobs()).jobs : await api.getJobs();
       setJobs(nextJobs);
+      const stored = await api.getStoredScores();
       const nextScores: Record<string, MatchScore> = {};
-      await Promise.all(
-        nextJobs.map(async (job) => {
-          if (!job.id) return;
-          try {
-            nextScores[job.id] = await api.scoreJob(job.id);
-          } catch {
-            // Scores are optional until Day 3.
-          }
-        }),
-      );
+      for (const score of stored) {
+        if (score.job_id) nextScores[score.job_id] = score;
+      }
       setScores(nextScores);
     } catch (err) {
       setError(err);
@@ -114,6 +111,14 @@ export function JobsPage() {
       list = list.filter((job) => job.status === status);
     }
     list = list.filter((job) => {
+      const score = job.id ? scores[job.id] : undefined;
+      if (recommendation === "unscored") return score == null;
+      if (recommendation === "apply" || recommendation === "consider" || recommendation === "skip") {
+        return score?.recommendation === recommendation;
+      }
+      return true;
+    });
+    list = list.filter((job) => {
       const score = job.id ? scores[job.id]?.overall_score : undefined;
       return score == null ? min === 0 : score >= min;
     });
@@ -124,7 +129,7 @@ export function JobsPage() {
       return bs - as;
     });
     return list;
-  }, [jobs, scores, query, minMatch, location, status, sort]);
+  }, [jobs, scores, query, minMatch, location, status, sort, recommendation]);
 
   return (
     <div className="space-y-8">
@@ -203,7 +208,24 @@ export function JobsPage() {
             <option value="stale">Stale</option>
           </select>
         </label>
-        <label className="lg:col-span-5">
+        <label>
+          <span className="sr-only">Recommendation</span>
+          <select
+            className="input"
+            data-testid="recommendation-filter"
+            value={recommendation}
+            onChange={(event) =>
+              setRecommendation(event.target.value as "all" | "apply" | "consider" | "skip" | "unscored")
+            }
+          >
+            <option value="all">All recommendations</option>
+            <option value="apply">Apply</option>
+            <option value="consider">Consider</option>
+            <option value="skip">Skip</option>
+            <option value="unscored">Unscored</option>
+          </select>
+        </label>
+        <label className="lg:col-span-6">
           <span className="sr-only">Sort</span>
           <select className="input max-w-xs" value={sort} onChange={(event) => setSort(event.target.value as "match" | "title")}>
             <option value="match">Sort by match</option>

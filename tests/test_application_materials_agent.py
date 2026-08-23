@@ -21,7 +21,6 @@ from backend.db.models import (
 from backend.services import application_service
 from backend.services.application_materials_agent import (
     ApplicationMaterialsDraft,
-    ApplicationMaterialsNotImplementedError,
     ApplicationMaterialsParseError,
     ApplicationMaterialsStructuredOutput,
     MaterialsClaimEvidence,
@@ -183,26 +182,25 @@ def test_missing_fit_score_fails_sanitized(isolated_session) -> None:
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
 
 
-def test_unfinished_generator_fails_without_persistence_or_provider_leak(isolated_session) -> None:
+def test_grounded_generator_persists_valid_output_and_reuses_it(isolated_session) -> None:
+    from tests.mvp_helpers import VALID_MATERIALS_JSON, fake_grounded_generator
+
     _full_context(isolated_session)
+    first = generate_grounded_application_materials(
+        isolated_session, "job-materials", generator=fake_grounded_generator
+    )
+    assert isolated_session.query(ApplicationPackageRecord).count() == 1
     called = {"n": 0}
 
-    def boom(prompt: str, system_prompt: str | None = None) -> str:
+    def counting(prompt: str, system_prompt: str | None = None) -> str:
         called["n"] += 1
-        return f"SECRET_PROMPT_TOKEN {prompt} {system_prompt} gemini"
+        return VALID_MATERIALS_JSON
 
-    before = isolated_session.query(ApplicationPackageRecord).count()
-    with pytest.raises(ApplicationMaterialsNotImplementedError) as exc_info:
-        generate_grounded_application_materials(
-            isolated_session, "job-materials", generator=boom
-        )
-    message = str(exc_info.value).lower()
+    second = generate_grounded_application_materials(
+        isolated_session, "job-materials", generator=counting
+    )
     assert called["n"] == 0
-    assert isolated_session.query(ApplicationPackageRecord).count() == before
-    assert "secret_prompt_token" not in message
-    assert "gemini" not in message
-    assert "prompt" not in message
-    assert "not implemented" in message
+    assert first.tailored_bullets == second.tailored_bullets
 
 
 def test_context_loading_uses_stored_grounded_records(isolated_session) -> None:
@@ -405,25 +403,20 @@ def test_grounding_is_deterministic_and_logs_are_count_only(isolated_session, ca
     assert "rejected=" in blob
 
 
-def test_unfinished_generator_still_calls_no_provider_and_persists_nothing(isolated_session) -> None:
+def test_structured_output_is_attempted_at_most_twice(isolated_session) -> None:
     _full_context(isolated_session)
-    called = {"n": 0}
+    calls = {"n": 0}
 
-    class Provider:
-        def __call__(self, prompt: str, system_prompt: str | None = None) -> str:
-            called["n"] += 1
-            raise AssertionError("provider must not run")
+    def bad(_prompt: str, _system_prompt: str | None = None) -> str:
+        calls["n"] += 1
+        return "not-json"
 
-    before = isolated_session.query(ApplicationPackageRecord).count()
-    with pytest.raises(ApplicationMaterialsNotImplementedError):
+    with pytest.raises(ApplicationMaterialsParseError):
         generate_grounded_application_materials(
-            isolated_session, "job-materials", generator=Provider()
+            isolated_session, "job-materials", generator=bad
         )
-    assert called["n"] == 0
-    assert isolated_session.query(ApplicationPackageRecord).count() == before
-    source = inspect.getsource(generate_grounded_application_materials)
-    assert "TODO" in source
-    assert "generator(" not in source.replace("_ = generator", "")
+    assert calls["n"] == 2
+    assert isolated_session.query(ApplicationPackageRecord).count() == 0
 
 
 def test_provider_claim_evidence_refs_are_verified_not_trusted(isolated_session) -> None:
@@ -514,20 +507,18 @@ def test_prompt_json_and_persistence_conversion_do_not_write(isolated_session) -
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
 
 
-def test_legacy_placeholder_is_not_wired_to_new_service() -> None:
-    source = inspect.getsource(application_service.get_or_generate_application_package)
-    mock_source = inspect.getsource(application_service._mock_materials)
-    assert "generate_grounded_application_materials(" not in source
-    assert "placeholder" in mock_source.lower()
-    assert "next replacement target" in mock_source.lower()
+def test_production_generate_materials_uses_grounded_generator(isolated_client) -> None:
+    from tests.mvp_helpers import fake_grounded_generator, seed_materials_prerequisites
 
-
-def test_production_generate_materials_still_uses_placeholder(isolated_client) -> None:
     client, SessionLocal = isolated_client
+    client.app.state.application_materials_generator = fake_grounded_generator
     with SessionLocal() as db:
-        _job(db, public_id="manual-abc123")
+        seed_materials_prerequisites(db, public_id="manual-abc123")
     response = client.post("/api/jobs/manual-abc123/generate-materials")
     assert response.status_code == 200
     body = response.json()
-    assert "Placeholder bullet" in " ".join(body["source_traceability_notes"])
-    assert body["approval_status"] == "pending_review"
+    assert "placeholder" not in " ".join(body["source_traceability_notes"]).lower()
+    assert body["grounded"] is True
+    source = inspect.getsource(application_service.get_or_generate_application_package)
+    assert "generate_grounded_application_materials(" in source
+    assert not hasattr(application_service, "_mock_materials")

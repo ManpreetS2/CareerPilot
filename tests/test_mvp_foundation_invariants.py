@@ -60,8 +60,13 @@ def test_approval_and_form_fill_routes_unchanged(isolated_client) -> None:
             )
         )
         db.commit()
+        from tests.mvp_helpers import insert_grounded_package, seed_materials_prerequisites
 
-    generated = client.post("/api/jobs/gate-job/generate-materials")
+        job = db.query(JobRecord).filter_by(public_id="gate-job").one()
+        seed_materials_prerequisites(db, public_id="gate-job")
+        insert_grounded_package(db, job)
+
+    generated = client.get("/api/jobs/gate-job/materials")
     assert generated.status_code == 200
     assert generated.json()["approval_status"] == "pending_review"
 

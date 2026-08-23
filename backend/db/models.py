@@ -151,6 +151,7 @@ class ApplicationPackageRecord(Base):
     eligibility_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     eligibility_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     decision_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    grounded: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

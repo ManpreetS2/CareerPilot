@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -19,10 +21,25 @@ from backend.db.init_db import init_db
 logger = logging.getLogger(__name__)
 
 
+def _browser_fake_materials(_prompt: str, _system_prompt: str | None = None) -> str:
+    """Deterministic grounded JSON for the privacy-safe browser workflow only."""
+    return json.dumps(
+        {
+            "tailored_bullets": ["Python is listed in the stored candidate skill evidence."],
+            "cover_letter_draft": "Thank you for considering my application.",
+            "recruiter_message": "I would welcome the chance to discuss this role.",
+            "source_traceability_notes": ["Python <- candidate skills"],
+        }
+    )
+
+
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(settings.log_level)
     init_db()
+    if os.environ.get("CAREERPILOT_BROWSER_FAKE_MATERIALS") == "1":
+        app.state.application_materials_generator = _browser_fake_materials
+        logger.info("browser_fake_materials enabled=1")
     logger.info("CareerPilot API started")
     yield
 

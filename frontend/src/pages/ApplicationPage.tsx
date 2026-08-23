@@ -6,7 +6,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
 import { MatchBadge } from "../components/MatchBadge";
 import { StatusBadge } from "../components/StatusBadge";
-import { api } from "../lib/api";
+import { api, ApiClientError } from "../lib/api";
 import { getSelectedJobId, saveSelectedJobId } from "../lib/session";
 import type { ApplicationPackage, ApprovalDecision, FormFillResult, Job, MatchScore } from "../lib/types";
 
@@ -28,6 +28,8 @@ export function ApplicationPage() {
   const [fillResult, setFillResult] = useState<FormFillResult | null>(null);
   const [fillError, setFillError] = useState<unknown>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [scoring, setScoring] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     if (!jobId) {
@@ -44,22 +46,30 @@ export function ApplicationPage() {
       // job and materials, so it's handled separately from the other two.
       const [jobResult, materialsResult, scoreResult] = await Promise.allSettled([
         api.getJob(id),
-        api.generateMaterials(id),
-        api.scoreJob(id),
+        api.getStoredMaterials(id),
+        api.getStoredScore(id),
       ]);
       if (cancelled) return;
 
-      if (jobResult.status === "rejected" || materialsResult.status === "rejected") {
-        setError(jobResult.status === "rejected" ? jobResult.reason : (materialsResult as PromiseRejectedResult).reason);
+      if (jobResult.status === "rejected") {
+        setError(jobResult.reason);
         setLoading(false);
         return;
       }
 
       setJob(jobResult.value);
-      setMaterials(materialsResult.value);
-      setEligibilityConfirmed(materialsResult.value.eligibility_confirmed);
-      setEligibilityNotes(materialsResult.value.eligibility_notes || "");
-      setDecisionNotes(materialsResult.value.decision_notes || "");
+      if (materialsResult.status === "fulfilled") {
+        setMaterials(materialsResult.value);
+        setEligibilityConfirmed(materialsResult.value.eligibility_confirmed);
+        setEligibilityNotes(materialsResult.value.eligibility_notes || "");
+        setDecisionNotes(materialsResult.value.decision_notes || "");
+      } else {
+        setMaterials(null);
+        const reason = (materialsResult as PromiseRejectedResult).reason;
+        if (!(reason instanceof ApiClientError && reason.status === 404)) {
+          setError(reason);
+        }
+      }
       setMatch(scoreResult.status === "fulfilled" ? scoreResult.value : null);
       saveSelectedJobId(id);
       setLoading(false);
@@ -69,6 +79,36 @@ export function ApplicationPage() {
       cancelled = true;
     };
   }, [jobId]);
+
+  async function calculateFit() {
+    if (!jobId) return;
+    setScoring(true);
+    setError(null);
+    try {
+      setMatch(await api.scoreJob(jobId));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setScoring(false);
+    }
+  }
+
+  async function generateMaterials() {
+    if (!jobId) return;
+    setGenerating(true);
+    setError(null);
+    try {
+      const next = await api.generateMaterials(jobId);
+      setMaterials(next);
+      setEligibilityConfirmed(next.eligibility_confirmed);
+      setEligibilityNotes(next.eligibility_notes || "");
+      setDecisionNotes(next.decision_notes || "");
+    } catch (err) {
+      setError(err);
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   async function decide(decision: ApprovalDecision) {
     if (!jobId) return;
@@ -144,7 +184,7 @@ export function ApplicationPage() {
 
   if (loading) return <LoadingState label="Loading application package…" />;
   if (error && !job) return <ErrorBanner error={error} />;
-  if (!job || !materials) {
+  if (!job) {
     return (
       <EmptyState
         title="No application selected"
@@ -163,9 +203,7 @@ export function ApplicationPage() {
       <div>
         <h1 className="font-display text-4xl font-semibold">Application</h1>
         <p className="mt-2 text-ink-600 dark:text-ink-300">
-          Human approval for tailored materials. Material generation is still a placeholder
-          until the Application Material Agent lands — approval, editing, and eligibility
-          confirmation below are real.
+          Review stored fit and grounded materials. Scoring and generation run only when you ask.
         </p>
       </div>
 
@@ -183,7 +221,7 @@ export function ApplicationPage() {
           {job.company} · {job.location || "Location n/a"}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <StatusBadge status={materials.approval_status} />
+          {materials ? <StatusBadge status={materials.approval_status} /> : null}
           <Link to={`/jobs/${job.id}`} className="btn-ghost px-2 py-1.5">
             View job detail
           </Link>
@@ -191,19 +229,48 @@ export function ApplicationPage() {
       </section>
 
       <section className="card p-6">
-        <h2 className="font-display text-2xl font-semibold">Match summary</h2>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h2 className="font-display text-2xl font-semibold">Match summary</h2>
+          <button
+            type="button"
+            className="btn-secondary"
+            data-testid="calculate-fit"
+            disabled={scoring}
+            onClick={() => void calculateFit()}
+          >
+            {scoring ? "Calculating…" : "Calculate fit"}
+          </button>
+        </div>
         {match ? (
           <div className="mt-3 space-y-2">
             <MatchBadge score={match.overall_score} recommendation={match.recommendation} />
             <p className="text-sm text-ink-600 dark:text-ink-300">{match.rationale}</p>
           </div>
         ) : (
-          <p className="mt-3 text-sm text-ink-500">Analysis available after processing</p>
+          <p className="mt-3 text-sm text-ink-500">Not scored yet. Calculate fit to store a score.</p>
         )}
       </section>
 
       <section className="card p-6">
-        <h2 className="font-display text-2xl font-semibold">Tailored materials</h2>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h2 className="font-display text-2xl font-semibold">Tailored materials</h2>
+          <button
+            type="button"
+            className="btn-primary"
+            data-testid="generate-materials"
+            disabled={generating}
+            onClick={() => void generateMaterials()}
+          >
+            <Wand2 className={`h-4 w-4 ${generating ? "animate-pulse" : ""}`} aria-hidden />
+            {generating ? "Generating…" : materials ? "Regenerate materials" : "Generate materials"}
+          </button>
+        </div>
+        {!materials ? (
+          <p className="mt-3 text-sm text-ink-500">
+            No grounded materials stored yet. Generate materials after a fit score exists.
+          </p>
+        ) : (
+          <>
         <h3 className="mt-4 text-sm font-semibold uppercase tracking-wide text-ink-500">
           Resume bullets
         </h3>
@@ -242,8 +309,12 @@ export function ApplicationPage() {
             </ul>
           </div>
         ) : null}
+          </>
+        )}
       </section>
 
+      {materials ? (
+      <>
       <section className="card p-6">
         <h2 className="font-display text-2xl font-semibold">Approval</h2>
         <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
@@ -414,6 +485,8 @@ export function ApplicationPage() {
           </>
         )}
       </section>
+      </>
+      ) : null}
     </div>
   );
 }

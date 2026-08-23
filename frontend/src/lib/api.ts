@@ -105,10 +105,17 @@ export const api = {
       method: "POST",
     }),
 
+  getStoredScore: (jobId: string) => request<MatchScore>(`/api/jobs/${jobId}/score`),
+
+  getStoredScores: () => request<MatchScore[]>("/api/jobs/scores"),
+
   scoreJob: (jobId: string) =>
     request<MatchScore>(`/api/jobs/${jobId}/score`, {
       method: "POST",
     }),
+
+  getStoredMaterials: (jobId: string) =>
+    request<ApplicationPackage>(`/api/jobs/${jobId}/materials`),
 
   generateMaterials: (jobId: string) =>
     request<ApplicationPackage>(`/api/jobs/${jobId}/generate-materials`, {

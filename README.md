@@ -60,25 +60,18 @@ CareerPilot_Ai/
 - Browser extension autofill for the live tab (never submits)
 - Candidate reusable application answers / preferences
 
-**Foundation in this repo (runnable, not fully generated)**
+**Foundation in this repo**
 
 - Application Tracker with explicit status updates and real dashboard metrics
 - Deterministic Interview Preparation baseline from stored Job Intelligence, Fit & Gap, and candidate evidence
-- Application Materials Agent **contract and tests**, with one unfinished student-owned function
+- Grounded Application Materials generation, loaded from storage on page load and created only when you click Generate materials
 
-**Student-owned next implementation**
-
-Complete grounded materials generation in:
-
-`backend.services.application_materials_agent.generate_grounded_application_materials`
-
-That function currently fails closed: it loads stored context, performs no persistence, calls no provider, and raises a sanitized not-implemented error. Production `POST /api/jobs/{job_id}/generate-materials` still uses the isolated legacy placeholder in `application_service._mock_materials` until the student function is implemented and connected with one small integration change.
-
-Do not describe application-materials LLM generation as complete.
+Opening Jobs, Job Detail, Applications, or Application Detail never scores a job, extracts requirements, or generates materials by itself.
 
 **Still out of scope**
 
 - Auth / accounts / multi-user access
+- Coordinated Form Fill / browser-extension authentication
 - Deployment / production hosting
 - Automatic job application submission
 - Live LLM interview-question generation (injectable boundary only)
@@ -89,9 +82,8 @@ Do not describe application-materials LLM generation as complete.
 - Logs use IDs and counts, not resume text, prompt contents, or raw provider output.
 - No candidate skill, employer, metric, or education claim may be invented without stored evidence.
 - Assisted apply and the browser extension **never click submit**. The human reviews and submits.
-- Page load for Fit Score and Interview Prep is read-only. Generation runs only on an explicit user action.
-- Tracker GET endpoints are read-only and do not create rows.
-- There is no authentication and no deployment yet.
+- Page load for Jobs, Job Detail, Applications, Application Detail, Fit Score, and Interview Prep is read-only. Scoring and generation run only on an explicit user action.
+- This MVP is single-user and intended for local development. There is no authentication and no deployment yet.
 
 ## Setup
 
@@ -216,8 +208,11 @@ Developer B ownership remains: Job Scout, Job Verification, Form Fill, browser-e
 | `POST` | `/api/jobs/ingest-url` | Manual posting URL |
 | `POST` | `/api/jobs/verify` | Verification sweep |
 | `GET`/`POST` | `/api/jobs/{job_id}/intelligence` | Stored / extract Job Intelligence |
+| `GET` | `/api/jobs/{job_id}/score` | Stored fit score (read-only; 404 if missing) |
+| `GET` | `/api/jobs/scores` | Stored scores for the Jobs page (read-only) |
 | `POST` | `/api/jobs/{job_id}/score` | Fit & Gap (explicit) |
-| `POST` | `/api/jobs/{job_id}/generate-materials` | Legacy placeholder until student function lands |
+| `GET` | `/api/jobs/{job_id}/materials` | Stored grounded materials (read-only; 404 if missing) |
+| `POST` | `/api/jobs/{job_id}/generate-materials` | Grounded materials (explicit) |
 | `POST` | `/api/jobs/{job_id}/approve` | Approval Agent |
 | `POST` | `/api/jobs/{job_id}/fill-application` | Assisted apply preview (never submits) |
 | `GET` | `/api/extension/autofill` | Browser extension field values |

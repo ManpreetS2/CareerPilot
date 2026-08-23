@@ -1202,3 +1202,76 @@ def score_job(db: Session, job_public_id: str, *, as_of: date | None = None) -> 
     requirements = load_requirements(db, job)
     breakdown = compute_breakdown(job, candidate, preferences, requirements, as_of=as_of)
     return persist_score(db, job, candidate, breakdown)
+
+
+class StoredScoreNotFoundError(Exception):
+    def __init__(self) -> None:
+        super().__init__("Stored fit score not found.")
+
+
+def _record_to_match_score(record: MatchScoreRecord, job_public_id: str) -> MatchScore:
+    return MatchScore(
+        job_id=job_public_id,
+        overall_score=record.overall_score,
+        skill_score=record.skill_score,
+        experience_score=record.experience_score,
+        education_score=record.education_score,
+        location_score=record.location_score,
+        preference_score=record.preference_score,
+        matched_skills=list(record.matched_skills or []),
+        partial_matches=list(record.partial_matches or []),
+        missing_skills=list(record.missing_skills or []),
+        recommendation=record.recommendation,  # type: ignore[arg-type]
+        rationale=record.rationale,
+    )
+
+
+def get_stored_match_score(db: Session, job_public_id: str) -> MatchScore:
+    """Return the latest stored score for the current candidate. Never writes."""
+    job = db.query(JobRecord).filter(JobRecord.public_id == job_public_id).first()
+    if job is None:
+        raise JobNotFoundError()
+    candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    if candidate is None:
+        raise StoredScoreNotFoundError()
+    record = (
+        db.query(MatchScoreRecord)
+        .filter(
+            MatchScoreRecord.job_id == job.id,
+            MatchScoreRecord.candidate_id == candidate.id,
+        )
+        .order_by(MatchScoreRecord.id.desc())
+        .first()
+    )
+    if record is None:
+        raise StoredScoreNotFoundError()
+    logger.info("stored_score read job_pk=%s candidate_pk=%s", job.id, candidate.id)
+    return _record_to_match_score(record, job_public_id)
+
+
+def list_stored_match_scores(db: Session) -> list[MatchScore]:
+    """Latest stored score per job for the current candidate. Never writes."""
+    candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    if candidate is None:
+        logger.info("stored_scores listed count=0 reason=no_candidate")
+        return []
+    from sqlalchemy import func
+
+    latest = (
+        db.query(
+            MatchScoreRecord.job_id.label("job_id"),
+            func.max(MatchScoreRecord.id).label("max_id"),
+        )
+        .filter(MatchScoreRecord.candidate_id == candidate.id)
+        .group_by(MatchScoreRecord.job_id)
+        .subquery()
+    )
+    rows = (
+        db.query(MatchScoreRecord, JobRecord)
+        .join(latest, MatchScoreRecord.id == latest.c.max_id)
+        .join(JobRecord, JobRecord.id == MatchScoreRecord.job_id)
+        .all()
+    )
+    scores = [_record_to_match_score(record, job.public_id) for record, job in rows]
+    logger.info("stored_scores listed count=%s candidate_pk=%s", len(scores), candidate.id)
+    return scores
