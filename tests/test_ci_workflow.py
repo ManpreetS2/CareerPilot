@@ -43,6 +43,18 @@ def test_malformed_workflow_yaml_fails_parse() -> None:
         load_github_actions_yaml("jobs:\n  verify: [\n")
 
 
+def test_ci_installs_frontend_before_pytest_and_browser() -> None:
+    raw = WORKFLOW.read_text(encoding="utf-8")
+    npm_ci = raw.find("npm ci")
+    pytest_step = raw.find("python -m pytest -q")
+    browser_step = raw.find("scripts/test_mvp_foundation_browser.py")
+    assert npm_ci != -1
+    assert pytest_step != -1
+    assert browser_step != -1
+    assert npm_ci < pytest_step
+    assert npm_ci < browser_step
+
+
 def test_committed_range_whitespace_check_against_main() -> None:
     result = subprocess.run(
         ["git", "diff", "--check", "origin/main...HEAD"],

@@ -58,16 +58,36 @@ def _free_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _wait_for_url(url: str, timeout: float = 45.0) -> None:
+def _log_snippet(path: Path | None, limit: int = 1200) -> str:
+    if path is None or not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return text[-limit:]
+
+
+def _wait_for_url(
+    url: str,
+    timeout: float = 60.0,
+    *,
+    process: subprocess.Popen[Any] | None = None,
+    log_path: Path | None = None,
+) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if process is not None and process.poll() is not None:
+            raise RuntimeError(
+                f"Local test service exited early code={process.returncode} "
+                f"url={url} log={_log_snippet(log_path)}"
+            )
         try:
             with urllib.request.urlopen(url, timeout=1) as response:
                 if response.status == 200:
                     return
         except Exception:  # noqa: BLE001 - readiness retry
             time.sleep(0.2)
-    raise RuntimeError("Local test service did not become ready.")
+    raise RuntimeError(
+        f"Local test service did not become ready url={url} log={_log_snippet(log_path)}"
+    )
 
 
 def _stop_process(process: subprocess.Popen[Any]) -> None:
@@ -79,6 +99,12 @@ def _stop_process(process: subprocess.Popen[Any]) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
+
+
+def _ensure_frontend_dependencies() -> None:
+    vite = ROOT / "frontend" / "node_modules" / "vite"
+    if not vite.exists():
+        raise RuntimeError("Frontend dependencies are not installed. Run npm ci in frontend/ first.")
 
 
 def _python_bin() -> str:
@@ -178,9 +204,12 @@ def run_browser_workflow() -> dict[str, int]:
         raise RuntimeError("Python Playwright is unavailable.") from exc
 
     with tempfile.TemporaryDirectory(prefix="careerpilot-mvp-browser-") as temp_dir:
+        _ensure_frontend_dependencies()
         database_path = assert_safe_database_path(Path(temp_dir) / "mvp-browser.sqlite")
         backend_port = _free_port()
         frontend_port = _free_port()
+        backend_log = Path(temp_dir) / "backend.log"
+        frontend_log = Path(temp_dir) / "frontend.log"
         engine = create_engine(
             f"sqlite:///{database_path}",
             connect_args={"check_same_thread": False},
@@ -198,6 +227,8 @@ def run_browser_workflow() -> dict[str, int]:
         backend_env["ADZUNA_APP_KEY"] = ""
         frontend_env = os.environ.copy()
         frontend_env["VITE_API_BASE_URL"] = f"http://127.0.0.1:{backend_port}"
+        backend_log_handle = backend_log.open("w", encoding="utf-8")
+        frontend_log_handle = frontend_log.open("w", encoding="utf-8")
         backend = subprocess.Popen(
             [
                 _python_bin(),
@@ -211,8 +242,8 @@ def run_browser_workflow() -> dict[str, int]:
             ],
             cwd=ROOT,
             env=backend_env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=backend_log_handle,
+            stderr=subprocess.STDOUT,
         )
         frontend = subprocess.Popen(
             [
@@ -228,8 +259,8 @@ def run_browser_workflow() -> dict[str, int]:
             ],
             cwd=ROOT / "frontend",
             env=frontend_env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=frontend_log_handle,
+            stderr=subprocess.STDOUT,
         )
         checks = 0
         patch_calls: list[str] = []
@@ -237,8 +268,16 @@ def run_browser_workflow() -> dict[str, int]:
         interview_gets: list[str] = []
         blocked_external: list[str] = []
         try:
-            _wait_for_url(f"http://127.0.0.1:{backend_port}/health")
-            _wait_for_url(f"http://127.0.0.1:{frontend_port}/")
+            _wait_for_url(
+                f"http://127.0.0.1:{backend_port}/health",
+                process=backend,
+                log_path=backend_log,
+            )
+            _wait_for_url(
+                f"http://127.0.0.1:{frontend_port}/",
+                process=frontend,
+                log_path=frontend_log,
+            )
             with sync_playwright() as playwright:
                 executable = (
                     Path("/usr/bin/google-chrome")
@@ -386,6 +425,8 @@ def run_browser_workflow() -> dict[str, int]:
         finally:
             _stop_process(frontend)
             _stop_process(backend)
+            backend_log_handle.close()
+            frontend_log_handle.close()
             engine.dispose()
             database_path.unlink(missing_ok=True)
 
