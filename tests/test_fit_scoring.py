@@ -144,9 +144,11 @@ def _prefs(
     locations: list[str] | None = None,
     remote: str | None = "remote",
     salary_min: int | None = 100000,
+    user_id: int | None = TEST_USER_ID,
 ) -> TargetPreference:
     record = TargetPreference(
         candidate_id=candidate.id if candidate else None,
+        user_id=user_id,
         target_roles=["Software Engineer"] if roles is None else roles,
         preferred_locations=["Remote"] if locations is None else locations,
         remote_preference=remote,
@@ -607,7 +609,15 @@ def test_unlinked_preference_is_never_used_as_a_fallback(isolated_session) -> No
     scoring once there are multiple real accounts — the fallback was
     removed entirely, and an unlinked preference must never be picked up."""
     _candidate(isolated_session, skills=["Python"], experience=[], education=[], projects=[], certifications=[])
-    _prefs(isolated_session, None, roles=["Software Engineer"], locations=["Remote"], remote="remote", salary_min=None)
+    _prefs(
+        isolated_session,
+        None,
+        roles=["Software Engineer"],
+        locations=["Remote"],
+        remote="remote",
+        salary_min=None,
+        user_id=None,
+    )
     job = _job(isolated_session, description="Requirements: Python.", location="Remote")
     result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert result.location_score is None

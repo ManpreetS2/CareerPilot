@@ -40,11 +40,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) {
     const current = await api.login(email, password);
+    // A previous user's cached candidate/preferences data can still be sitting
+    // in localStorage from an earlier session on this browser — clear it before
+    // the new user's own data loads, so it's never briefly visible to them.
+    clearCandidateSession();
     setUser(current);
   }
 
   async function signup(email: string, password: string) {
     const current = await api.signup(email, password);
+    clearCandidateSession();
     setUser(current);
   }
 

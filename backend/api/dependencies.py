@@ -12,7 +12,13 @@ from backend.services.auth_service import get_user_by_token
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    token = request.cookies.get(settings.session_cookie_name)
+    # The cookie is how the web app authenticates (set by /api/auth/login,
+    # sent automatically by the browser on same-site requests). The header
+    # is how the browser extension authenticates instead — see
+    # settings.session_header_name for why the cookie alone doesn't reach it.
+    token = request.cookies.get(settings.session_cookie_name) or request.headers.get(
+        settings.session_header_name
+    )
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not logged in.")
     user = get_user_by_token(db, token)

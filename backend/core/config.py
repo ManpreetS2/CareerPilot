@@ -48,6 +48,15 @@ class Settings(BaseSettings):
 
     # --- Auth ---
     session_cookie_name: str = "careerpilot_session"
+    # Fallback carrier for the same session token, read by get_current_user
+    # when the cookie isn't present. The browser extension's popup is a
+    # chrome-extension:// origin calling a different-site http://localhost:8000
+    # — a cross-site fetch, which a SameSite=Lax cookie is never attached to
+    # (Lax only rides along on top-level navigations, not subresource
+    # requests). The extension reads the cookie's value itself via the
+    # privileged chrome.cookies API (which isn't subject to that restriction)
+    # and sends it back as this header instead.
+    session_header_name: str = "X-CareerPilot-Session"
     session_ttl_days: int = 30
     # False for local http dev. Deployments serving over https MUST set
     # COOKIE_SECURE=true — a session cookie sent over plain http can be

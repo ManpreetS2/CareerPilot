@@ -1503,6 +1503,47 @@ def test_persistence_rollback_on_failure(isolated_session: Session) -> None:
     assert db.query(Candidate).count() == before
 
 
+def test_persist_recovers_from_a_lost_race_instead_of_erroring(isolated_session: Session) -> None:
+    """Simulates two concurrent resume uploads from the same user (a
+    double-submit, or two tabs): this call's own existence check misses (as
+    if a concurrent upload hadn't committed yet from its point of view), but
+    a winner row is already committed by the time this call's insert runs.
+    Must update the winner's row with this call's data instead of raising or
+    creating a second Candidate for the same user — the DB-level unique
+    index on Candidate.user_id is what makes the insert fail in the first
+    place."""
+    db = isolated_session
+    winner = Candidate(user_id=TEST_USER_ID, name="Winner Of The Race", skills=[])
+    db.add(winner)
+    db.commit()
+
+    real_query = db.query
+    call_count = {"n": 0}
+
+    class _EmptyQuery:
+        def filter(self, *_a, **_k):
+            return self
+
+        def first(self):
+            return None
+
+    def query_that_misses_once(model):
+        if model is Candidate:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return _EmptyQuery()
+        return real_query(model)
+
+    with patch.object(db, "query", side_effect=query_that_misses_once):
+        profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
+        stored = persist_candidate_profile(profile, db, TEST_USER_ID)
+
+    assert stored.id == f"cand-{winner.id:03d}"
+    assert db.query(Candidate).count() == 1
+    row = db.query(Candidate).filter(Candidate.user_id == TEST_USER_ID).first()
+    assert row.name == "Alex Rivera"  # this call's data won, not left as "Winner Of The Race"
+
+
 def test_grounded_profile_persists_with_stored_id(isolated_session: Session) -> None:
     db = isolated_session
     stored, _extraction, report = build_candidate_profile_from_upload(

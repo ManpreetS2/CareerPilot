@@ -1039,15 +1039,23 @@ def load_latest_candidate(db: Session, user_id: int) -> Candidate:
 
 
 def load_preferences(db: Session, candidate: Candidate) -> TargetPreference | None:
-    """Scoped strictly to this candidate's own linked preferences — no
-    fallback to an unattributed row. That fallback used to exist for a
-    single-tenant app where "no linked preferences" and "no preferences at
-    all" were indistinguishable; with real accounts, falling back to *any*
-    unowned preferences row would leak one user's answers into another
-    user's scoring."""
+    """Scoped to this user's own preferences — no fallback to an
+    unattributed row. That fallback used to exist for a single-tenant app
+    where "no linked preferences" and "no preferences at all" were
+    indistinguishable; with real accounts, falling back to *any* unowned
+    preferences row would leak one user's answers into another user's
+    scoring.
+
+    Filters on TargetPreference.user_id, not candidate_id: a user can save
+    preferences before ever uploading a resume (no Candidate row yet), so
+    candidate_id is null on that row even though user_id is always set —
+    filtering on candidate_id alone would silently orphan those answers
+    forever once the Candidate is created later, since nothing backfills
+    candidate_id onto the earlier row.
+    """
     return (
         db.query(TargetPreference)
-        .filter(TargetPreference.candidate_id == candidate.id)
+        .filter(TargetPreference.user_id == candidate.user_id)
         .order_by(TargetPreference.id.desc())
         .first()
     )

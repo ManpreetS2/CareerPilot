@@ -45,9 +45,14 @@ class UserSession(Base):
 
 class Candidate(Base):
     __tablename__ = "candidates"
+    # A User has at most one Candidate — enforced here (not just in
+    # application code) so a race between two concurrent resume uploads
+    # from the same user can't create two rows for one person, which would
+    # make every downstream "get my candidate" lookup nondeterministic.
+    __table_args__ = (Index("ux_candidates_user_id", "user_id", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(64), nullable=True)

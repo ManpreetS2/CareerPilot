@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.core.config import settings
@@ -34,17 +35,38 @@ def signup(db: Session, email: str, password: str) -> User:
 
     user = User(email=normalized_email, hashed_password=hash_password(password))
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two concurrent signups for the same email both pass the
+        # check above and race to insert — the unique index on
+        # User.email is what actually enforces uniqueness. The loser
+        # lands here instead of a 500: same 409 the check above would
+        # have given it if it had lost the race a moment earlier.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        ) from None
     db.refresh(user)
     return user
 
 
+# Precomputed so `authenticate` always pays the same argon2-verify cost,
+# whether or not the email exists — otherwise a nonexistent email returns
+# right after the SELECT while a wrong password additionally waits on a
+# real hash verify, and that latency gap lets an attacker enumerate which
+# emails have accounts just by timing login attempts.
+_DUMMY_HASH = hash_password(generate_session_token())
+
+
 def authenticate(db: Session, email: str, password: str) -> User | None:
     """None for either a nonexistent email or a wrong password — the two
-    cases are handled identically so a login failure can't be used to probe
-    which emails have accounts."""
+    cases are handled identically (same response, same latency) so a login
+    failure can't be used to probe which emails have accounts."""
     user = db.query(User).filter(User.email == _normalize_email(email)).first()
     if user is None:
+        verify_password(password, _DUMMY_HASH)
         return None
     if not verify_password(password, user.hashed_password):
         return None

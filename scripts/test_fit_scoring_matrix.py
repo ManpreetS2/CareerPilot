@@ -119,6 +119,7 @@ def _seed(session: Session, manifest: dict[str, Any]) -> tuple[JobRecord | None,
         session.add(
             TargetPreference(
                 candidate_id=candidate.id if candidate is not None else None,
+                user_id=MATRIX_USER_ID,
                 **preference_data,
             )
         )

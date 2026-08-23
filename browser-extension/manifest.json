@@ -7,6 +7,6 @@
     "default_popup": "popup.html",
     "default_title": "CareerPilot Assisted Apply"
   },
-  "permissions": ["activeTab", "scripting"],
+  "permissions": ["activeTab", "scripting", "cookies"],
   "host_permissions": ["http://localhost:8000/*"]
 }

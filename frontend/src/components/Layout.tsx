@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import {
   BriefcaseBusiness,
   FileText,
@@ -28,15 +28,16 @@ const nav: NavItem[] = [
 export function Layout() {
   const { theme, toggle } = useTheme();
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
 
   async function onLogout() {
     setLoggingOut(true);
     try {
+      // No explicit navigate() here: logout() clears the auth user, and
+      // Layout only ever renders inside ProtectedRoute (see App.tsx) — that
+      // re-render is what redirects to /login once `user` goes null.
       await logout();
-      navigate("/login", { replace: true });
     } finally {
       setLoggingOut(false);
     }

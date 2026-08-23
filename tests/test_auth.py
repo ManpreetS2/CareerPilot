@@ -6,6 +6,7 @@ fixtures (tests/conftest.py) — never touches data/careerpilot.db.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -79,6 +80,40 @@ def test_signup_rejects_a_too_short_password(isolated_session) -> None:
         auth_service.signup(isolated_session, "jordan@example.com", "short")
     assert exc_info.value.status_code == 422
     assert isolated_session.query(User).count() == 0
+
+
+def test_signup_recovers_from_a_lost_race_with_409_not_500(isolated_session) -> None:
+    """Simulates two concurrent signups for the same email: this call's own
+    duplicate-email check misses (as if a concurrent signup hadn't committed
+    yet from its point of view), but a winner row is already committed by
+    the time this call's insert runs. Must surface the same 409 the
+    duplicate-email check would have given it, not an unhandled 500 — the
+    unique index on User.email is what actually enforces uniqueness here."""
+    auth_service.signup(isolated_session, "jordan@example.com", "winner-password")
+
+    real_query = isolated_session.query
+    call_count = {"n": 0}
+
+    class _EmptyQuery:
+        def filter(self, *_a, **_k):
+            return self
+
+        def first(self):
+            return None
+
+    def query_that_misses_once(model):
+        if model is User:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return _EmptyQuery()
+        return real_query(model)
+
+    with patch.object(isolated_session, "query", side_effect=query_that_misses_once):
+        with pytest.raises(HTTPException) as exc_info:
+            auth_service.signup(isolated_session, "jordan@example.com", "a-different-password")
+
+    assert exc_info.value.status_code == 409
+    assert isolated_session.query(User).count() == 1
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +274,32 @@ def test_logout_route_clears_the_cookie_and_invalidates_the_session(isolated_cli
     # stolen/copied cookie keep working after "logout".
     replayed = client.get("/api/auth/me", cookies={"careerpilot_session": session_token})
     assert replayed.status_code == 401
+
+
+def test_session_header_authenticates_when_no_cookie_is_sent(isolated_client) -> None:
+    """The browser extension can't rely on the cookie: a fetch from
+    chrome-extension://<id> to the backend is cross-site, and SameSite=Lax
+    cookies are never attached to a cross-site subresource request (only a
+    top-level navigation). The extension instead reads the same token via
+    chrome.cookies and sends it as X-CareerPilot-Session — this is the
+    server-side half of that path."""
+    client, _SessionLocal = isolated_client
+    session_token = client.cookies.get("careerpilot_session")
+    client.cookies.clear()
+
+    response = client.get("/api/auth/me", headers={"X-CareerPilot-Session": session_token})
+    assert response.status_code == 200
+    assert response.json()["email"]
+
+
+def test_session_header_is_ignored_once_invalidated_by_logout(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    session_token = client.cookies.get("careerpilot_session")
+    logout = client.post("/api/auth/logout")
+    assert logout.status_code == 204
+
+    response = client.get("/api/auth/me", headers={"X-CareerPilot-Session": session_token})
+    assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------
