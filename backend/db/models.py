@@ -12,10 +12,42 @@ from sqlalchemy.types import JSON
 from backend.db.database import Base
 
 
+class User(Base):
+    """A real login identity. One User has at most one Candidate (see
+    Candidate.user_id) — everything else (jobs, match scores, application
+    packages, form-fill attempts) is scoped through that Candidate."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class UserSession(Base):
+    """A server-side-revocable login session. `token` is the opaque,
+    high-entropy value stored in the session cookie — validating a request
+    means looking this row up, not decoding/verifying a signed value, so
+    logout (deleting the row) immediately invalidates it everywhere."""
+
+    __tablename__ = "user_sessions"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class Candidate(Base):
     __tablename__ = "candidates"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -38,6 +70,10 @@ class TargetPreference(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     candidate_id: Mapped[int | None] = mapped_column(ForeignKey("candidates.id"), nullable=True)
+    # Set directly (not just derived through candidate_id) because
+    # preferences can legitimately be saved before a Candidate row exists —
+    # a user can fill in "Job preferences" before ever uploading a resume.
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     target_roles: Mapped[list] = mapped_column(JSON, default=list)
     preferred_locations: Mapped[list] = mapped_column(JSON, default=list)
     remote_preference: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -132,10 +168,15 @@ class MatchScoreRecord(Base):
 
 class ApplicationPackageRecord(Base):
     __tablename__ = "application_packages"
-    __table_args__ = (Index("ux_application_packages_job_id", "job_id", unique=True),)
+    # Composite on (job_id, user_id), not job_id alone — two different users
+    # must each be able to have their own package for the same shared job.
+    __table_args__ = (
+        Index("ux_application_packages_job_user", "job_id", "user_id", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     candidate_id: Mapped[int | None] = mapped_column(ForeignKey("candidates.id"), nullable=True)
     tailored_bullets: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     cover_letter_draft: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -162,6 +203,7 @@ class FormFillAttemptRecord(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     ats_platform: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     filled_fields: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)

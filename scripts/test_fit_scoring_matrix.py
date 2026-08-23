@@ -34,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from backend.api.dependencies import get_current_user
 from backend.api.routes.scoring import router as scoring_router
 from backend.db.database import Base, get_db
 from backend.db.models import (
@@ -42,10 +43,16 @@ from backend.db.models import (
     JobRecord,
     MatchScoreRecord,
     TargetPreference,
+    User,
 )
 
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "fit_scoring"
 PRODUCTION_DATABASE = (ROOT / "data" / "careerpilot.db").resolve()
+# Every manifest's seeded Candidate (when one exists) belongs to this fixed
+# synthetic user — get_current_user is overridden below to return it
+# directly, so the matrix never needs a real signup/login round trip just
+# to exercise scoring behavior, which is what this harness actually tests.
+MATRIX_USER_ID = 1
 COMPONENT_RESPONSE_FIELDS = {
     "skill": "skill_score",
     "experience": "experience_score",
@@ -92,7 +99,11 @@ def load_manifests() -> list[dict[str, Any]]:
 
 def _seed(session: Session, manifest: dict[str, Any]) -> tuple[JobRecord | None, Candidate | None]:
     candidate_data = manifest.get("candidate")
-    candidate = Candidate(**candidate_data) if isinstance(candidate_data, dict) else None
+    candidate = (
+        Candidate(user_id=MATRIX_USER_ID, **candidate_data)
+        if isinstance(candidate_data, dict)
+        else None
+    )
     if candidate is not None:
         session.add(candidate)
         session.flush()
@@ -231,9 +242,12 @@ def run_scenario(manifest: dict[str, Any], database_path: Path) -> MatrixResult:
             finally:
                 db.close()
 
+        matrix_user = User(id=MATRIX_USER_ID, email="matrix@example.com", hashed_password="unused")
+
         app = FastAPI()
         app.include_router(scoring_router)
         app.dependency_overrides[get_db] = _override_get_db
+        app.dependency_overrides[get_current_user] = lambda: matrix_user
         endpoint_job_id = str(
             manifest.get("request_job_id")
             or (manifest.get("job") or {}).get("public_id")

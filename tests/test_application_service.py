@@ -31,8 +31,12 @@ def _job(session, *, public_id: str = "manual-abc123", title: str = "Software En
     return record
 
 
-def _candidate(session, *, name: str = "Jordan Avery Quill") -> Candidate:
+TEST_USER_ID = 1
+
+
+def _candidate(session, *, name: str = "Jordan Avery Quill", user_id: int = TEST_USER_ID) -> Candidate:
     record = Candidate(
+        user_id=user_id,
         name=name,
         email="jordan@example.com",
         phone="+1-555-0101",
@@ -57,7 +61,7 @@ def _candidate(session, *, name: str = "Jordan Avery Quill") -> Candidate:
 
 def test_generate_materials_creates_and_persists_a_package(isolated_session) -> None:
     _job(isolated_session)
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.job_id == "manual-abc123"
     assert package.approval_status == "pending_review"
     assert len(package.tailored_bullets) > 0
@@ -68,8 +72,8 @@ def test_generate_materials_creates_and_persists_a_package(isolated_session) -> 
 
 def test_generate_materials_is_idempotent_not_regenerated(isolated_session) -> None:
     _job(isolated_session)
-    first = get_or_generate_application_package(isolated_session, "manual-abc123")
-    second = get_or_generate_application_package(isolated_session, "manual-abc123")
+    first = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    second = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert first.tailored_bullets == second.tailored_bullets
     assert first.cover_letter_draft == second.cover_letter_draft
     assert isolated_session.query(ApplicationPackageRecord).count() == 1
@@ -77,15 +81,15 @@ def test_generate_materials_is_idempotent_not_regenerated(isolated_session) -> N
 
 def test_generate_materials_missing_job_404s(isolated_session) -> None:
     with pytest.raises(HTTPException) as exc_info:
-        get_or_generate_application_package(isolated_session, "does-not-exist")
+        get_or_generate_application_package(isolated_session, "does-not-exist", TEST_USER_ID)
     assert exc_info.value.status_code == 404
 
 
 def test_generate_materials_independent_across_jobs(isolated_session) -> None:
     _job(isolated_session, public_id="job-a", title="Backend Intern")
     _job(isolated_session, public_id="job-b", title="Frontend Intern")
-    a = get_or_generate_application_package(isolated_session, "job-a")
-    b = get_or_generate_application_package(isolated_session, "job-b")
+    a = get_or_generate_application_package(isolated_session, "job-a", TEST_USER_ID)
+    b = get_or_generate_application_package(isolated_session, "job-b", TEST_USER_ID)
     assert a.job_id != b.job_id
     assert "Backend" not in "".join(b.tailored_bullets + [b.cover_letter_draft or ""])
     assert isolated_session.query(ApplicationPackageRecord).count() == 2
@@ -94,14 +98,14 @@ def test_generate_materials_independent_across_jobs(isolated_session) -> None:
 def test_generate_materials_associates_current_candidate(isolated_session) -> None:
     candidate = _candidate(isolated_session)
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     record = isolated_session.query(ApplicationPackageRecord).first()
     assert record.candidate_id == candidate.id
 
 
 def test_generate_materials_candidate_id_none_without_a_candidate(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     record = isolated_session.query(ApplicationPackageRecord).first()
     assert record.candidate_id is None
 
@@ -112,17 +116,44 @@ def test_generate_materials_candidate_id_none_without_a_candidate(isolated_sessi
 
 
 def test_unique_index_rejects_a_direct_duplicate_insert(isolated_session) -> None:
+    """SQL UNIQUE treats NULL as distinct from every other NULL, so this
+    only actually exercises the (job_id, user_id) constraint when both rows
+    share the same real user_id — two unset (NULL) user_ids would silently
+    NOT collide, which would make this test pass for the wrong reason."""
     job = _job(isolated_session)
     isolated_session.add(
-        ApplicationPackageRecord(job_id=job.id, tailored_bullets=[], source_traceability_notes=[])
+        ApplicationPackageRecord(
+            job_id=job.id, user_id=TEST_USER_ID, tailored_bullets=[], source_traceability_notes=[]
+        )
     )
     isolated_session.commit()
     isolated_session.add(
-        ApplicationPackageRecord(job_id=job.id, tailored_bullets=[], source_traceability_notes=[])
+        ApplicationPackageRecord(
+            job_id=job.id, user_id=TEST_USER_ID, tailored_bullets=[], source_traceability_notes=[]
+        )
     )
     with pytest.raises(IntegrityError):
         isolated_session.commit()
     isolated_session.rollback()
+
+
+def test_two_different_users_can_each_have_their_own_package_for_the_same_job(isolated_session) -> None:
+    """The whole point of the (job_id, user_id) composite index: two
+    different users applying to the same shared job must not collide,
+    unlike the old job_id-alone constraint this replaced."""
+    job = _job(isolated_session)
+    isolated_session.add(
+        ApplicationPackageRecord(
+            job_id=job.id, user_id=1, tailored_bullets=["user one"], source_traceability_notes=[]
+        )
+    )
+    isolated_session.add(
+        ApplicationPackageRecord(
+            job_id=job.id, user_id=2, tailored_bullets=["user two"], source_traceability_notes=[]
+        )
+    )
+    isolated_session.commit()  # must not raise
+    assert isolated_session.query(ApplicationPackageRecord).filter_by(job_id=job.id).count() == 2
 
 
 def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolated_session, monkeypatch) -> None:
@@ -134,6 +165,7 @@ def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolat
     job = _job(isolated_session)
     winner = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=TEST_USER_ID,
         tailored_bullets=["winner bullet"],
         cover_letter_draft="winner letter",
         recruiter_message="winner message",
@@ -162,7 +194,7 @@ def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolat
 
     monkeypatch.setattr(isolated_session, "query", query_that_misses_once)
 
-    result = get_or_generate_application_package(isolated_session, "manual-abc123")
+    result = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert result.tailored_bullets == ["winner bullet"]
     assert result.cover_letter_draft == "winner letter"
     monkeypatch.undo()
@@ -219,23 +251,20 @@ def test_source_traceability_notes_in_place_mutation_persists(isolated_session, 
 
 def test_approve_without_eligibility_confirmation_is_rejected(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     with pytest.raises(HTTPException) as exc_info:
-        apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved"))
+        apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved"))
     assert exc_info.value.status_code == 422
 
 
 def test_approve_with_eligibility_confirmation_succeeds(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    result = apply_approval(
-        isolated_session,
-        "manual-abc123",
-        ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes="all good"),
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    result = apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes="all good"),
     )
     assert result.approval_status == "approved"
 
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.approval_status == "approved"
     assert package.eligibility_confirmed is True
     assert package.eligibility_notes == "all good"
@@ -243,40 +272,39 @@ def test_approve_with_eligibility_confirmation_succeeds(isolated_session) -> Non
 
 def test_reject_does_not_require_eligibility_confirmation(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    result = apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected"))
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    result = apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="rejected"))
     assert result.approval_status == "rejected"
 
 
 def test_edit_requested_does_not_require_eligibility_confirmation(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    result = apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested"))
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    result = apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested"))
     assert result.approval_status == "edit_requested"
 
 
 def test_approve_without_generated_materials_conflicts(isolated_session) -> None:
     _job(isolated_session)
     with pytest.raises(HTTPException) as exc_info:
-        apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected"))
+        apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="rejected"))
     assert exc_info.value.status_code == 409
 
 
 def test_approve_missing_job_404s(isolated_session) -> None:
     with pytest.raises(HTTPException) as exc_info:
-        apply_approval(isolated_session, "does-not-exist", ApprovalRequest(decision="rejected"))
+        apply_approval(isolated_session, "does-not-exist", TEST_USER_ID, ApprovalRequest(decision="rejected"))
     assert exc_info.value.status_code == 404
 
 
 def test_reapproving_stays_confirmed(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True))
-    result = apply_approval(
-        isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True)
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True))
+    result = apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True)
     )
     assert result.approval_status == "approved"
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.eligibility_confirmed is True
 
 
@@ -287,25 +315,25 @@ def test_reapproving_stays_confirmed(isolated_session) -> None:
 
 def test_edit_request_after_approval_does_not_clear_eligibility_confirmed(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True))
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True))
 
     # Edit request with the schema's default eligibility_confirmed=False —
     # this must not downgrade the confirmation that was already recorded.
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested"))
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested"))
 
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.approval_status == "edit_requested"
     assert package.eligibility_confirmed is True
 
 
 def test_reject_after_approval_does_not_clear_eligibility_confirmed(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True))
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected"))
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True))
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="rejected"))
 
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.approval_status == "rejected"
     assert package.eligibility_confirmed is True
 
@@ -315,11 +343,8 @@ def test_omitting_notes_fields_does_not_clear_previously_set_values(isolated_ses
     leave whatever was already stored alone — omitted and explicitly-empty
     are different things, even though Pydantic defaults both to None/""."""
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    apply_approval(
-        isolated_session,
-        "manual-abc123",
-        ApprovalRequest(
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(
             decision="approved",
             eligibility_confirmed=True,
             eligibility_notes="needs sponsorship",
@@ -331,9 +356,9 @@ def test_omitting_notes_fields_does_not_clear_previously_set_values(isolated_ses
     # constructed the same way FastAPI would from a JSON body missing those
     # keys (Pydantic defaults kick in, model_fields_set does not include
     # them).
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested"))
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested"))
 
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.approval_status == "edit_requested"
     assert package.eligibility_notes == "needs sponsorship"
     assert package.decision_notes == "initial review"
@@ -344,11 +369,10 @@ def test_edit_request_never_sets_eligibility_confirmed_true(isolated_session) ->
     only an approval (which requires it) can, so a caller can't sneak a
     confirmation through a decision type that doesn't require one."""
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    apply_approval(
-        isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", eligibility_confirmed=True)
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", eligibility_confirmed=True)
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.eligibility_confirmed is False
 
 
@@ -359,88 +383,73 @@ def test_edit_request_never_sets_eligibility_confirmed_true(isolated_session) ->
 
 def test_eligibility_notes_can_be_set_then_cleared(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    apply_approval(
-        isolated_session,
-        "manual-abc123",
-        ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes="needs sponsorship"),
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes="needs sponsorship"),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.eligibility_notes == "needs sponsorship"
 
     # Clearing: an empty string must actually clear it, not be ignored.
-    apply_approval(
-        isolated_session,
-        "manual-abc123",
-        ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes=""),
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes=""),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.eligibility_notes is None
 
 
 def test_eligibility_notes_can_be_updated_on_a_non_approve_decision(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    apply_approval(
-        isolated_session,
-        "manual-abc123",
-        ApprovalRequest(decision="edit_requested", eligibility_notes="flag for legal review"),
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", eligibility_notes="flag for legal review"),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.eligibility_notes == "flag for legal review"
 
 
 def test_decision_notes_persisted_for_each_decision_type(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
 
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", notes="rewrite bullet 2"))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes="rewrite bullet 2"))
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.decision_notes == "rewrite bullet 2"
 
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected", notes="not a fit"))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="rejected", notes="not a fit"))
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.decision_notes == "not a fit"
 
 
 def test_decision_notes_can_be_cleared(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", notes="fix typo"))
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", notes=""))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes="fix typo"))
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes=""))
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.decision_notes is None
 
 
 def test_notes_round_trip_unicode_and_special_characters(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     tricky = "Needs H-1B sponsorship — café résumé 日本語 <script>alert(1)</script> \"quoted\""
-    apply_approval(
-        isolated_session,
-        "manual-abc123",
-        ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes=tricky, notes=tricky),
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes=tricky, notes=tricky),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.eligibility_notes == tricky
     assert package.decision_notes == tricky
 
 
 def test_full_decision_lifecycle_preserves_expected_state(isolated_session) -> None:
     _job(isolated_session)
-    get_or_generate_application_package(isolated_session, "manual-abc123")
+    get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
 
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", notes="fix intro"))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes="fix intro"))
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.approval_status == "edit_requested"
     assert package.eligibility_confirmed is False
 
-    apply_approval(
-        isolated_session,
-        "manual-abc123",
-        ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes="confirmed"),
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True, eligibility_notes="confirmed"),
     )
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.approval_status == "approved"
     assert package.eligibility_confirmed is True
     assert package.eligibility_notes == "confirmed"
@@ -450,8 +459,8 @@ def test_full_decision_lifecycle_preserves_expected_state(isolated_session) -> N
     # sends a value for that field.
     assert package.decision_notes == "fix intro"
 
-    apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected", notes="changed mind"))
-    package = get_or_generate_application_package(isolated_session, "manual-abc123")
+    apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="rejected", notes="changed mind"))
+    package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
     assert package.approval_status == "rejected"
     assert package.eligibility_confirmed is True
     assert package.decision_notes == "changed mind"

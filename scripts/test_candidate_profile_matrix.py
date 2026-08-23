@@ -171,6 +171,11 @@ def _run_inprocess(pdf_path: Path, layout_id: str, generate_fn) -> tuple[int, di
             side_effect=lambda *args, **kwargs: generate_fn(*args, **kwargs),
         ):
             with TestClient(app) as client:
+                signup = client.post(
+                    "/api/auth/signup",
+                    json={"email": "matrix@example.com", "password": "matrix-password-123"},
+                )
+                signup.raise_for_status()
                 response = client.post(
                     "/api/parse-resume",
                     files={"file": (pdf_path.name, pdf_path.read_bytes(), "application/pdf")},

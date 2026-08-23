@@ -24,9 +24,13 @@ from backend.services.analysis_service import (
 )
 
 
+TEST_USER_ID = 1
+
+
 def _candidate(
     session,
     *,
+    user_id: int = TEST_USER_ID,
     skills: list[str] | None = None,
     experience: list | None = None,
     education: list | None = None,
@@ -34,6 +38,7 @@ def _candidate(
     certifications: list | None = None,
 ) -> Candidate:
     record = Candidate(
+        user_id=user_id,
         name="Jordan Avery Quill",
         email="jordan.quill@example.com",
         phone="+1-555-0101",
@@ -203,7 +208,7 @@ def test_existing_job_intelligence_is_used(isolated_session) -> None:
     job = _job(isolated_session, description="Python FastAPI Docker SQL Bachelor's in Computer Science")
     _intelligence(isolated_session, job)
     _prefs(isolated_session, candidate)
-    result = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
     assert "Python" in result.matched_skills
     assert "FastAPI" in result.matched_skills
     assert result.rationale.lower().startswith("full job intelligence")
@@ -223,7 +228,7 @@ def test_unsupported_intelligence_items_dropped_before_scoring(isolated_session,
         education=[],
     )
     with caplog.at_level(logging.INFO, logger="backend.services.analysis_service"):
-        result = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
+        result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
     assert "Python" in result.matched_skills
     assert "Quantum Teleportation" not in result.matched_skills
     assert "Quantum Teleportation" not in result.missing_skills
@@ -238,7 +243,7 @@ def test_description_only_fallback_is_marked_provisional(isolated_session) -> No
         isolated_session,
         description="Requirements: Python.\nPreferred: Docker.\nWe also use Git.",
     )
-    result = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
     assert "provisional" in result.rationale.lower()
     assert result.recommendation != "apply"
 
@@ -258,7 +263,7 @@ def test_provisional_scoring_never_returns_apply(isolated_session) -> None:
         ],
     )
     job = _job(isolated_session, description="Requirements: Python, FastAPI, SQL, Docker, React.")
-    result = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
     assert result.recommendation != "apply"
     assert result.overall_score >= 60
     assert result.recommendation == "consider"
@@ -277,7 +282,7 @@ def test_explicit_required_preferred_classification() -> None:
 def test_exact_skill_match(isolated_session) -> None:
     _candidate(isolated_session, skills=["Python"])
     job = _job(isolated_session, description="Requirements: Python.")
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert result.matched_skills == ["Python"]
     assert result.missing_skills == []
 
@@ -311,7 +316,7 @@ def test_postgres_and_js_aliases() -> None:
 def test_no_unsupported_fuzzy_match(isolated_session) -> None:
     _candidate(isolated_session, skills=["Python"])
     job = _job(isolated_session, description="Requirements: Python.\nBonus: Kubernetes.")
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert "Kubernetes" not in result.matched_skills
     assert "Kubernetes" in result.missing_skills
 
@@ -319,7 +324,7 @@ def test_no_unsupported_fuzzy_match(isolated_session) -> None:
 def test_no_invented_missing_skill(isolated_session) -> None:
     _candidate(isolated_session, skills=["Python"])
     job = _job(isolated_session, description="Requirements: Python.")
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert result.missing_skills == []
     assert "Kubernetes" not in result.missing_skills
 
@@ -343,14 +348,14 @@ def test_required_skills_weighted_more_than_preferred(isolated_session) -> None:
     )
     required_only = _candidate(isolated_session, skills=["Python"], experience=[], education=[], projects=[], certifications=[])
     _prefs(isolated_session, required_only, roles=[], locations=[], remote=None, salary_min=None)
-    high = score_job(isolated_session, job.public_id)
+    high = score_job(isolated_session, job.public_id, TEST_USER_ID)
     isolated_session.query(MatchScoreRecord).delete()
     isolated_session.query(TargetPreference).delete()
     isolated_session.query(Candidate).delete()
     isolated_session.commit()
     preferred_only = _candidate(isolated_session, skills=["Docker"], experience=[], education=[], projects=[], certifications=[])
     _prefs(isolated_session, preferred_only, roles=[], locations=[], remote=None, salary_min=None)
-    low = score_job(isolated_session, job.public_id)
+    low = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert high.skill_score is not None and low.skill_score is not None
     assert high.skill_score > low.skill_score
 
@@ -358,7 +363,7 @@ def test_required_skills_weighted_more_than_preferred(isolated_session) -> None:
 def test_unavailable_components_remain_null(isolated_session) -> None:
     _candidate(isolated_session, skills=["Python"], experience=[], education=[], projects=[], certifications=[])
     job = _job(isolated_session, location="", salary=None, description="Requirements: Python.")
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert result.experience_score is None
     assert result.education_score is None
 
@@ -366,7 +371,7 @@ def test_unavailable_components_remain_null(isolated_session) -> None:
 def test_available_component_weights_are_renormalized(isolated_session) -> None:
     _candidate(isolated_session, skills=["Python"], experience=[], education=[], projects=[], certifications=[])
     job = _job(isolated_session, location="", salary=None, description="Requirements: Python.")
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert result.skill_score is not None
     assert result.overall_score == result.skill_score
 
@@ -411,7 +416,7 @@ def test_overlapping_experience_ranges_are_not_double_counted(isolated_session) 
         years=2,
         education=[],
     )
-    result = score_job(isolated_session, job.public_id, as_of=date(2026, 1, 1))
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 1, 1))
     assert result.experience_score is not None
     # Merged span is ~17 months, not 24. Double-counting would reach 100.
     assert 60.0 <= result.experience_score <= 80.0
@@ -428,7 +433,7 @@ def test_unknown_dates_do_not_become_zero_experience(isolated_session) -> None:
     )
     job = _job(isolated_session, description="Python")
     _intelligence(isolated_session, job, required=["Python"], preferred=[], tech=[], years=3, education=[])
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert result.experience_score is None
 
 
@@ -444,7 +449,7 @@ def test_education_requirement_match_and_mismatch(isolated_session) -> None:
         years=None,
         education=["Bachelor's in Computer Science"],
     )
-    match = score_job(isolated_session, job.public_id)
+    match = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert match.education_score == 100.0
     isolated_session.query(MatchScoreRecord).delete()
     isolated_session.query(Candidate).delete()
@@ -457,14 +462,14 @@ def test_education_requirement_match_and_mismatch(isolated_session) -> None:
         projects=[],
         certifications=[],
     )
-    mismatch = score_job(isolated_session, job.public_id)
+    mismatch = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert mismatch.education_score == 0.0
 
 
 def test_missing_preferences_do_not_penalize(isolated_session) -> None:
     _candidate(isolated_session, skills=["Python"], experience=[], education=[], projects=[], certifications=[])
     job = _job(isolated_session, location="", salary=None, description="Requirements: Python.")
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert result.preference_score is None
     assert result.location_score is None
     assert result.overall_score == result.skill_score
@@ -474,17 +479,17 @@ def test_annual_salary_comparison_only_when_parseable(isolated_session) -> None:
     candidate = _candidate(isolated_session, skills=["Python"], experience=[], education=[], projects=[], certifications=[])
     _prefs(isolated_session, candidate, roles=[], locations=[], remote=None, salary_min=100000)
     hourly = _job(isolated_session, public_id="job-hourly", salary="$50/hour", location="", description="Requirements: Python.")
-    hourly_score = score_job(isolated_session, hourly.public_id)
+    hourly_score = score_job(isolated_session, hourly.public_id, TEST_USER_ID)
     assert hourly_score.preference_score is None
     annual = _job(isolated_session, public_id="job-annual", salary="$150,000/year", location="", description="Requirements: Python.")
-    annual_score = score_job(isolated_session, annual.public_id)
+    annual_score = score_job(isolated_session, annual.public_id, TEST_USER_ID)
     assert annual_score.preference_score == 100.0
 
 
 def test_score_clamped_to_0_100(isolated_session) -> None:
     _candidate(isolated_session, skills=["Python"])
     job = _job(isolated_session, description="Requirements: Python.")
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert 0 <= result.overall_score <= 100
     assert result.skill_score is None or 0 <= result.skill_score <= 100
 
@@ -494,8 +499,8 @@ def test_deterministic_repeated_results(isolated_session) -> None:
     job = _job(isolated_session, description="Python FastAPI Docker SQL Bachelor's in Computer Science")
     _intelligence(isolated_session, job)
     _prefs(isolated_session, candidate)
-    first = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
-    second = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
+    first = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
+    second = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
     assert first.overall_score == second.overall_score
     assert first.recommendation == second.recommendation
     assert first.matched_skills == second.matched_skills
@@ -506,7 +511,7 @@ def test_recommendation_thresholds(isolated_session) -> None:
     job = _job(isolated_session, description="Python FastAPI Docker SQL Bachelor's in Computer Science")
     _intelligence(isolated_session, job, required=["Python", "FastAPI"], preferred=["Docker"], tech=["SQL"], years=1)
     _prefs(isolated_session, candidate)
-    result = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
     if result.overall_score >= 80:
         assert result.recommendation == "apply"
     elif result.overall_score >= 60:
@@ -518,7 +523,7 @@ def test_recommendation_thresholds(isolated_session) -> None:
 def test_persisted_foreign_keys_are_correct(isolated_session) -> None:
     candidate = _candidate(isolated_session)
     job = _job(isolated_session, description="Requirements: Python.")
-    score_job(isolated_session, job.public_id)
+    score_job(isolated_session, job.public_id, TEST_USER_ID)
     row = isolated_session.query(MatchScoreRecord).one()
     assert row.job_id == job.id
     assert row.candidate_id == candidate.id
@@ -527,8 +532,8 @@ def test_persisted_foreign_keys_are_correct(isolated_session) -> None:
 def test_second_score_updates_instead_of_duplicating(isolated_session) -> None:
     _candidate(isolated_session, skills=["Python"])
     job = _job(isolated_session, description="Requirements: Python.")
-    score_job(isolated_session, job.public_id)
-    score_job(isolated_session, job.public_id)
+    score_job(isolated_session, job.public_id, TEST_USER_ID)
+    score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert isolated_session.query(MatchScoreRecord).count() == 1
 
 
@@ -537,7 +542,7 @@ def test_rollback_on_commit_failure(isolated_session) -> None:
     job = _job(isolated_session, description="Requirements: Python.")
     with patch.object(isolated_session, "commit", side_effect=RuntimeError("boom")):
         with pytest.raises(RuntimeError):
-            score_job(isolated_session, job.public_id)
+            score_job(isolated_session, job.public_id, TEST_USER_ID)
     isolated_session.rollback()
     assert isolated_session.query(MatchScoreRecord).count() == 0
 
@@ -546,7 +551,7 @@ def test_no_row_after_scoring_failure(isolated_session) -> None:
     _candidate(isolated_session)
     job = _job(isolated_session, description="No known technologies here.")
     with pytest.raises(RequirementsUnavailableError):
-        score_job(isolated_session, job.public_id)
+        score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert isolated_session.query(MatchScoreRecord).count() == 0
 
 
@@ -555,7 +560,7 @@ def test_logs_contain_counts_and_ids_only(isolated_session, caplog: pytest.LogCa
     job = _job(isolated_session, description="Python FastAPI")
     _intelligence(isolated_session, job, education=[])
     with caplog.at_level(logging.INFO, logger="backend.services.analysis_service"):
-        score_job(isolated_session, job.public_id)
+        score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert "Jordan Avery Quill" not in caplog.text
     assert "jordan.quill@example.com" not in caplog.text
     assert "+1-555-0101" not in caplog.text
@@ -594,13 +599,19 @@ def test_route_uses_request_scoped_database_session(isolated_client) -> None:
     assert "Python" in body["matched_skills"]
 
 
-def test_unlinked_preference_fallback(isolated_session) -> None:
+def test_unlinked_preference_is_never_used_as_a_fallback(isolated_session) -> None:
+    """Regression test for a real cross-user data-leak bug: this used to
+    fall back to *any* unattributed (candidate_id=None) preferences row
+    when a candidate had none of its own linked. Harmless in a single-tenant
+    app, but a real leak of one user's saved answers into another user's
+    scoring once there are multiple real accounts — the fallback was
+    removed entirely, and an unlinked preference must never be picked up."""
     _candidate(isolated_session, skills=["Python"], experience=[], education=[], projects=[], certifications=[])
     _prefs(isolated_session, None, roles=["Software Engineer"], locations=["Remote"], remote="remote", salary_min=None)
     job = _job(isolated_session, description="Requirements: Python.", location="Remote")
-    result = score_job(isolated_session, job.public_id)
-    assert result.location_score == 100.0
-    assert result.preference_score is not None
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
+    assert result.location_score is None
+    assert result.preference_score is None
 
 
 def test_intelligence_years_are_dropped_without_explicit_source_evidence(
@@ -633,7 +644,7 @@ def test_intelligence_years_are_dropped_without_explicit_source_evidence(
         education=[],
     )
 
-    result = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
 
     assert result.experience_score is None
 
@@ -665,7 +676,7 @@ def test_source_wording_reclassifies_stored_required_and_preferred_skills(
         education=[],
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.skill_score == 75.0
     assert result.matched_skills == ["Python"]
@@ -706,7 +717,7 @@ def test_alias_duplicate_requirements_are_scored_once(isolated_session) -> None:
         education=[],
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.skill_score == 100.0
     assert result.matched_skills == ["PostgreSQL"]
@@ -733,7 +744,7 @@ def test_nodejs_candidate_punctuation_variants_match_safely(
         description="Requirements: Node.js.",
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.matched_skills == ["Node.js"]
 
@@ -769,7 +780,7 @@ def test_future_employment_does_not_create_positive_experience(isolated_session)
         education=[],
     )
 
-    result = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
 
     assert result.experience_score is None
 
@@ -803,7 +814,7 @@ def test_ambiguous_degree_and_field_abbreviations_do_not_match(
         education=["BS in CS"],
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.education_score == 0.0
 
@@ -838,7 +849,7 @@ def test_education_field_does_not_match_from_institution_name(isolated_session) 
         education=["Bachelor's in Computer Science"],
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.education_score == 0.0
 
@@ -867,7 +878,7 @@ def test_ambiguous_job_location_is_omitted(isolated_session) -> None:
         description="Requirements: Python.",
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.location_score is None
 
@@ -896,7 +907,7 @@ def test_city_state_comparison_does_not_match_shared_city_token(isolated_session
         description="Requirements: Python.",
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.location_score == 0.0
 
@@ -938,7 +949,7 @@ def test_unsafe_or_nonannual_salary_text_is_omitted(
         description="Requirements: Python.",
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.preference_score is None
 
@@ -969,7 +980,7 @@ def test_annual_salary_range_uses_maximum_against_candidate_minimum(
         description="Requirements: Python.",
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.preference_score == 100.0
 
@@ -1035,7 +1046,7 @@ def test_existing_duplicate_score_rows_are_collapsed_on_recalculation(
         )
     isolated_session.commit()
 
-    score_job(isolated_session, job.public_id)
+    score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert isolated_session.query(MatchScoreRecord).count() == 1
 
@@ -1078,7 +1089,7 @@ def test_scoring_logs_do_not_include_score_or_recommendation(
     job = _job(isolated_session, description="Requirements: Python.")
 
     with caplog.at_level(logging.INFO, logger="backend.services.analysis_service"):
-        score_job(isolated_session, job.public_id)
+        score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert "overall=" not in caplog.text
     assert "recommendation=" not in caplog.text
@@ -1107,7 +1118,7 @@ def test_unsupported_intelligence_education_is_dropped_without_mutation(
     )
     before = list(intelligence.education_requirements)
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.education_score is None
     isolated_session.refresh(intelligence)
@@ -1219,7 +1230,7 @@ def test_malformed_full_dates_are_not_coerced_to_month_start(isolated_session) -
         education=[],
     )
 
-    result = score_job(isolated_session, job.public_id, as_of=date(2026, 8, 20))
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
 
     assert result.experience_score is None
 
@@ -1352,7 +1363,7 @@ def test_explicit_work_modes_only(
         description="Requirements: Python.",
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.location_score == expected
 
@@ -1384,7 +1395,7 @@ def test_grounded_custom_intelligence_skill_uses_exact_evidence_only(
         education=[],
     )
 
-    result = score_job(isolated_session, job.public_id)
+    result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert result.skill_score == 100.0
     assert result.matched_skills == ["Rust"]

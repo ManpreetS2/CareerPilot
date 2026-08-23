@@ -8,8 +8,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
+from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
-from backend.db.models import Candidate, TargetPreference
+from backend.db.models import Candidate, TargetPreference, User
 from backend.schemas.schemas import ParseResumeResponse, TargetPreferences
 from backend.services.candidate_profile_agent import (
     ANNUAL_SALARY_MAX,
@@ -66,6 +67,7 @@ def _http_for_candidate_error(exc: Exception) -> HTTPException:
 async def parse_resume(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ParseResumeResponse:
     """Parse an uploaded PDF into a grounded CandidateProfile and persist it."""
     # Read at most MAX+1 bytes so oversized uploads fail without buffering unbounded content.
@@ -81,6 +83,7 @@ async def parse_resume(
             filename,
             content,
             db=db,
+            user_id=user.id,
             content_type=content_type,
         )
         note = (
@@ -99,6 +102,7 @@ async def parse_resume(
 def save_preferences(
     preferences: TargetPreferences,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> TargetPreferences:
     """Validate preferences and persist them to SQLite."""
     if not preferences.target_roles:
@@ -114,8 +118,9 @@ def save_preferences(
             detail="Minimum base salary must be an annual USD amount between 10000 and 1000000.",
         )
 
-    candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    candidate = db.query(Candidate).filter(Candidate.user_id == user.id).first()
     record = TargetPreference(
+        user_id=user.id,
         candidate_id=candidate.id if candidate else None,
         target_roles=preferences.target_roles,
         preferred_locations=preferences.preferred_locations,

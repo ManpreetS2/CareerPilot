@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   BriefcaseBusiness,
   FileText,
   LayoutDashboard,
+  LogOut,
   Moon,
   Plane,
   Sun,
@@ -11,6 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { APP_NAME, APP_TAGLINE } from "../lib/config";
 import { useTheme } from "../lib/theme";
 
@@ -25,7 +27,20 @@ const nav: NavItem[] = [
 
 export function Layout() {
   const { theme, toggle } = useTheme();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function onLogout() {
+    setLoggingOut(true);
+    try {
+      await logout();
+      navigate("/login", { replace: true });
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +125,21 @@ export function Layout() {
                 <Moon className="h-4 w-4" aria-hidden />
               )}
             </button>
+
+            {user ? (
+              <>
+                <span className="hidden text-sm text-ink-500 lg:inline">{user.email}</span>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={onLogout}
+                  disabled={loggingOut}
+                  aria-label="Log out"
+                >
+                  <LogOut className="h-4 w-4" aria-hidden />
+                </button>
+              </>
+            ) : null}
           </nav>
         </div>
       </header>

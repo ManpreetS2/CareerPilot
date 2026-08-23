@@ -1447,10 +1447,13 @@ General Studies
     assert report.as_counts().get("removed_education_fields") == 1
 
 
+TEST_USER_ID = 1
+
+
 def test_candidate_persistence_works(isolated_session: Session) -> None:
     db = isolated_session
     profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
-    stored = persist_candidate_profile(profile, db)
+    stored = persist_candidate_profile(profile, db, TEST_USER_ID)
     assert stored.id and stored.id.startswith("cand-")
     row = db.query(Candidate).order_by(Candidate.id.desc()).first()
     assert row is not None
@@ -1466,6 +1469,7 @@ def test_failed_extraction_creates_no_candidate_row(isolated_session: Session) -
             "alex.pdf",
             build_simple_text_pdf(SAMPLE_RESUME_TEXT),
             db=db,
+            user_id=TEST_USER_ID,
             content_type="application/pdf",
             generate_fn=lambda _p, _s: "not-json",
         )
@@ -1482,6 +1486,7 @@ def test_failed_grounding_creates_no_candidate_row(isolated_session: Session) ->
             "alex.pdf",
             build_simple_text_pdf(SAMPLE_RESUME_TEXT),
             db=db,
+            user_id=TEST_USER_ID,
             content_type="application/pdf",
             generate_fn=lambda _p, _s: json.dumps(bad),
         )
@@ -1494,7 +1499,7 @@ def test_persistence_rollback_on_failure(isolated_session: Session) -> None:
     profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
     with patch.object(db, "commit", side_effect=RuntimeError("db down")):
         with pytest.raises(RuntimeError, match="db down"):
-            persist_candidate_profile(profile, db)
+            persist_candidate_profile(profile, db, TEST_USER_ID)
     assert db.query(Candidate).count() == before
 
 
@@ -1504,6 +1509,7 @@ def test_grounded_profile_persists_with_stored_id(isolated_session: Session) -> 
         "alex.pdf",
         build_simple_text_pdf(SAMPLE_RESUME_TEXT),
         db=db,
+        user_id=TEST_USER_ID,
         content_type="application/pdf",
         generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
     )
@@ -1556,6 +1562,7 @@ def test_build_from_upload_end_to_end(isolated_session: Session) -> None:
         "alex.pdf",
         content,
         db=isolated_session,
+        user_id=TEST_USER_ID,
         content_type="application/pdf",
         generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
     )
@@ -1575,6 +1582,7 @@ def test_upload_path_never_creates_named_temp_file(isolated_session: Session) ->
             "alex.pdf",
             content,
             db=isolated_session,
+            user_id=TEST_USER_ID,
             content_type="application/pdf",
             generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
         )
@@ -1645,7 +1653,7 @@ def test_preferences_associates_saved_row_with_the_current_candidate(isolated_cl
     location/LinkedIn/etc. lookups) could ever find it."""
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        candidate = Candidate(name="Jordan Quill", email="jordan@example.com", skills=[], projects=[],
+        candidate = Candidate(user_id=client.test_user_id, name="Jordan Quill", email="jordan@example.com", skills=[], projects=[],
                                experience=[], education=[], certifications=[], strengths=[], evidence_links=[])
         db.add(candidate)
         db.commit()

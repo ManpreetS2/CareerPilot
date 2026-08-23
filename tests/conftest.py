@@ -46,9 +46,21 @@ def isolated_session(isolated_engine) -> Generator[Session, None, None]:
         session.close()
 
 
+TEST_USER_EMAIL = "test-user@example.com"
+TEST_USER_PASSWORD = "test-password-123"
+
+
 @pytest.fixture
 def isolated_client(isolated_engine) -> Generator[tuple[TestClient, sessionmaker], None, None]:
-    """TestClient with isolated DB and a no-op lifespan (no production init_db)."""
+    """TestClient with isolated DB, a no-op lifespan (no production init_db),
+    and an already-authenticated session — signs up one real test user via
+    the real /api/auth/signup endpoint before yielding, so every route's now-
+    mandatory auth dependency is satisfied by default the same way a real
+    logged-in user's session would be. TestClient persists cookies across
+    requests on the same instance, so every subsequent call through `client`
+    carries that real session cookie automatically. The created user's id is
+    attached as `client.test_user_id` for tests that need to seed data
+    directly (e.g. a Candidate row) scoped to that same user."""
     SessionLocal = sessionmaker(bind=isolated_engine, autocommit=False, autoflush=False)
 
     def _override_get_db() -> Generator[Session, None, None]:
@@ -73,6 +85,12 @@ def isolated_client(isolated_engine) -> Generator[tuple[TestClient, sessionmaker
         with patch("backend.main.init_db", side_effect=_forbidden_init_db):
             with patch("backend.db.init_db.init_db", side_effect=_forbidden_init_db):
                 with TestClient(app) as client:
+                    signup = client.post(
+                        "/api/auth/signup",
+                        json={"email": TEST_USER_EMAIL, "password": TEST_USER_PASSWORD},
+                    )
+                    assert signup.status_code == 201, signup.text
+                    client.test_user_id = signup.json()["id"]
                     yield client, SessionLocal
     finally:
         app.dependency_overrides.pop(get_db, None)

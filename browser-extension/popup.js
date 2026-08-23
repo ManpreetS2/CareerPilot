@@ -17,8 +17,17 @@ async function runFill() {
       throw new Error("Could not read the current tab.");
     }
 
-    const response = await fetch(`${BACKEND_URL}/api/extension/autofill?url=${encodeURIComponent(tab.url)}`);
+    // credentials: "include" sends the session cookie set on this same
+    // localhost:8000 origin by the web app — the extension has no login UI
+    // of its own, it rides on whatever session you already have from
+    // logging in at the CareerPilot web app in a regular tab.
+    const response = await fetch(`${BACKEND_URL}/api/extension/autofill?url=${encodeURIComponent(tab.url)}`, {
+      credentials: "include",
+    });
     const body = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      throw new Error("Log in to CareerPilot in your browser first, then try again.");
+    }
     if (!response.ok) {
       throw new Error(body.detail || `Request failed (${response.status})`);
     }

@@ -154,8 +154,12 @@ def test_split_name_extra_whitespace() -> None:
     assert _split_name("  Jordan   Quill  ") == ("Jordan", "Quill")
 
 
+TEST_USER_ID = 1
+
+
 def _candidate(**overrides) -> Candidate:
     defaults = dict(
+        user_id=TEST_USER_ID,
         name="Jordan Quill",
         email="jordan@example.com",
         phone="+1-555-0100",
@@ -367,6 +371,7 @@ def _seed_candidate(session) -> Candidate:
 def _approved_package(session, job: JobRecord, candidate: Candidate | None) -> ApplicationPackageRecord:
     record = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=TEST_USER_ID,
         candidate_id=candidate.id if candidate else None,
         tailored_bullets=[],
         cover_letter_draft="Dear hiring team,",
@@ -381,14 +386,14 @@ def _approved_package(session, job: JobRecord, candidate: Candidate | None) -> A
 
 def test_run_assisted_apply_missing_job_404s(isolated_session) -> None:
     with pytest.raises(HTTPException) as exc_info:
-        run_assisted_apply(isolated_session, "does-not-exist")
+        run_assisted_apply(isolated_session, "does-not-exist", TEST_USER_ID)
     assert exc_info.value.status_code == 404
 
 
 def test_run_assisted_apply_without_package_409s(isolated_session) -> None:
     _job(isolated_session)
     with pytest.raises(HTTPException) as exc_info:
-        run_assisted_apply(isolated_session, "manual-abc123")
+        run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
     assert exc_info.value.status_code == 409
 
 
@@ -397,6 +402,7 @@ def test_run_assisted_apply_unapproved_package_409s(isolated_session) -> None:
     candidate = _seed_candidate(isolated_session)
     record = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=TEST_USER_ID,
         candidate_id=candidate.id,
         tailored_bullets=[],
         source_traceability_notes=[],
@@ -406,7 +412,7 @@ def test_run_assisted_apply_unapproved_package_409s(isolated_session) -> None:
     isolated_session.commit()
 
     with pytest.raises(HTTPException) as exc_info:
-        run_assisted_apply(isolated_session, "manual-abc123")
+        run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
     assert exc_info.value.status_code == 409
     assert "approved" in exc_info.value.detail.lower()
 
@@ -415,7 +421,7 @@ def test_run_assisted_apply_without_candidate_409s(isolated_session) -> None:
     job = _job(isolated_session)
     _approved_package(isolated_session, job, candidate=None)
     with pytest.raises(HTTPException) as exc_info:
-        run_assisted_apply(isolated_session, "manual-abc123")
+        run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
     assert exc_info.value.status_code == 409
     assert "candidate" in exc_info.value.detail.lower()
 
@@ -425,7 +431,7 @@ def test_run_assisted_apply_unsupported_platform_persists_failed_result(isolated
     candidate = _seed_candidate(isolated_session)
     _approved_package(isolated_session, job, candidate)
 
-    result = run_assisted_apply(isolated_session, "manual-abc123")
+    result = run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
 
     assert result.status == "failed"
     assert result.ats_platform == "unsupported"
@@ -438,8 +444,8 @@ def test_run_assisted_apply_multiple_attempts_are_not_upserted(isolated_session)
     candidate = _seed_candidate(isolated_session)
     _approved_package(isolated_session, job, candidate)
 
-    run_assisted_apply(isolated_session, "manual-abc123")
-    run_assisted_apply(isolated_session, "manual-abc123")
+    run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
+    run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
 
     assert isolated_session.query(FormFillAttemptRecord).count() == 2
 
@@ -825,7 +831,7 @@ def test_run_assisted_apply_full_success_path(isolated_session, monkeypatch) -> 
     isolated_session.commit()
     _approved_package(isolated_session, job, candidate)
 
-    result = run_assisted_apply(isolated_session, "manual-abc123")
+    result = run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
 
     assert result.status == "needs_review"  # resume + custom question always flagged
     assert "email" in _names(result.filled_fields)
@@ -845,7 +851,7 @@ def test_run_assisted_apply_persists_filled_and_flagged_fields(isolated_session,
     candidate = _seed_candidate(isolated_session)
     _approved_package(isolated_session, job, candidate)
 
-    run_assisted_apply(isolated_session, "manual-abc123")
+    run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
 
     record = isolated_session.query(FormFillAttemptRecord).first()
     assert record.ats_platform == "lever"
@@ -916,7 +922,7 @@ def test_get_autofill_data_returns_field_values(isolated_session) -> None:
     candidate = _seed_candidate(isolated_session)
     _approved_package(isolated_session, job, candidate)
 
-    result = get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1")
+    result = get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1", TEST_USER_ID)
 
     assert result.job_id == "manual-abc123"
     assert result.platform == "greenhouse"
@@ -926,7 +932,7 @@ def test_get_autofill_data_returns_field_values(isolated_session) -> None:
 
 def test_get_autofill_data_unknown_url_404s(isolated_session) -> None:
     with pytest.raises(HTTPException) as exc_info:
-        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/nope/jobs/1")
+        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/nope/jobs/1", TEST_USER_ID)
     assert exc_info.value.status_code == 404
 
 
@@ -935,6 +941,7 @@ def test_get_autofill_data_requires_approval(isolated_session) -> None:
     candidate = _seed_candidate(isolated_session)
     record = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=TEST_USER_ID,
         candidate_id=candidate.id,
         tailored_bullets=[],
         source_traceability_notes=[],
@@ -944,7 +951,7 @@ def test_get_autofill_data_requires_approval(isolated_session) -> None:
     isolated_session.commit()
 
     with pytest.raises(HTTPException) as exc_info:
-        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1")
+        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1", TEST_USER_ID)
     assert exc_info.value.status_code == 409
 
 

@@ -46,5 +46,13 @@ class Settings(BaseSettings):
     form_fill_headless: bool = True
     form_fill_timeout_ms: int = 20_000
 
+    # --- Auth ---
+    session_cookie_name: str = "careerpilot_session"
+    session_ttl_days: int = 30
+    # False for local http dev. Deployments serving over https MUST set
+    # COOKIE_SECURE=true — a session cookie sent over plain http can be
+    # intercepted on the network.
+    cookie_secure: bool = False
+
 
 settings = Settings()

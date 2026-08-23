@@ -1466,22 +1466,29 @@ def _url_in_resume(link: str, resume_text: str) -> bool:
     return bool(host_path) and claim_supported(host_path, resume_text, min_ratio=0.9)
 
 
-def persist_candidate_profile(profile: CandidateProfile, db: Session) -> CandidateProfile:
-    """Save grounded profile to SQLite and return profile with public id."""
-    record = Candidate(
-        name=profile.name,
-        email=profile.email,
-        phone=profile.phone,
-        skills=list(profile.skills),
-        projects=[item.model_dump() for item in profile.projects],
-        experience=[item.model_dump() for item in profile.experience],
-        education=[item.model_dump() for item in profile.education],
-        certifications=list(profile.certifications),
-        strengths=list(profile.strengths),
-        evidence_links=list(profile.evidence_links),
-    )
-    try:
+def persist_candidate_profile(profile: CandidateProfile, db: Session, user_id: int) -> CandidateProfile:
+    """Save grounded profile to SQLite and return profile with public id.
+
+    Upserts by user_id — a User has at most one Candidate, so re-uploading a
+    resume updates the existing row (and keeps its public id stable) rather
+    than piling up a fresh row on every upload."""
+    record = db.query(Candidate).filter(Candidate.user_id == user_id).first()
+    if record is None:
+        record = Candidate(user_id=user_id)
         db.add(record)
+
+    record.name = profile.name
+    record.email = profile.email
+    record.phone = profile.phone
+    record.skills = list(profile.skills)
+    record.projects = [item.model_dump() for item in profile.projects]
+    record.experience = [item.model_dump() for item in profile.experience]
+    record.education = [item.model_dump() for item in profile.education]
+    record.certifications = list(profile.certifications)
+    record.strengths = list(profile.strengths)
+    record.evidence_links = list(profile.evidence_links)
+
+    try:
         db.commit()
         db.refresh(record)
     except Exception:
@@ -1496,6 +1503,7 @@ def build_candidate_profile_from_pdf(
     pdf_path: Path,
     *,
     db: Session,
+    user_id: int,
     llm: LLMClient | None = None,
     generate_fn: Callable[[str, str | None], str] | None = None,
 ) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
@@ -1505,7 +1513,7 @@ def build_candidate_profile_from_pdf(
         extraction.text, llm=llm, generate_fn=generate_fn
     )
     profile, report = validate_and_ground_profile(raw, extraction.text)
-    stored = persist_candidate_profile(profile, db)
+    stored = persist_candidate_profile(profile, db, user_id)
     return stored, extraction, report
 
 
@@ -1514,6 +1522,7 @@ def build_candidate_profile_from_upload(
     content: bytes,
     *,
     db: Session,
+    user_id: int,
     content_type: str | None = None,
     llm: LLMClient | None = None,
     generate_fn: Callable[[str, str | None], str] | None = None,
@@ -1525,5 +1534,5 @@ def build_candidate_profile_from_upload(
         extraction.text, llm=llm, generate_fn=generate_fn
     )
     profile, report = validate_and_ground_profile(raw, extraction.text)
-    stored = persist_candidate_profile(profile, db)
+    stored = persist_candidate_profile(profile, db, user_id)
     return stored, extraction, report

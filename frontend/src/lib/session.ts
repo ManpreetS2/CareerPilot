@@ -51,6 +51,16 @@ export function saveSelectedJobId(jobId: string) {
   localStorage.setItem(SELECTED_JOB_KEY, jobId);
 }
 
+/** Called on logout — without this, a second person logging in on the same
+ * browser/device would see the previous user's cached candidate data
+ * (name, resume-derived profile, job preferences) until they happened to
+ * overwrite every key themselves. */
+export function clearCandidateSession() {
+  localStorage.removeItem(CANDIDATE_KEY);
+  localStorage.removeItem(PREFERENCES_KEY);
+  localStorage.removeItem(SELECTED_JOB_KEY);
+}
+
 export function getSelectedJobId(): string | null {
   return localStorage.getItem(SELECTED_JOB_KEY);
 }

@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import applications, candidate, health, interview, jobs, scoring
+from backend.api.routes import applications, auth, candidate, health, interview, jobs, scoring
 from backend.core.config import settings
 from backend.core.logging import setup_logging
 from backend.db.init_db import init_db
@@ -42,7 +42,11 @@ app.add_middleware(
     ],
     # Unpacked extensions get a chrome-extension:// origin whose id varies
     # per install (no fixed manifest key) — matched by regex rather than an
-    # exact origin. Local-only dev server, single machine, single user.
+    # exact origin. allow_credentials=True is required for the session
+    # cookie to ride along on cross-origin requests from the Vite dev
+    # server/extension — safe only because allow_origins is an explicit
+    # list, never "*", which browsers refuse to combine with credentials
+    # anyway. A production deployment adds its real origin(s) here too.
     allow_origin_regex=r"^chrome-extension://.*",
     allow_credentials=True,
     allow_methods=["*"],
@@ -50,6 +54,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(candidate.router)
 app.include_router(jobs.router)
 app.include_router(scoring.router)

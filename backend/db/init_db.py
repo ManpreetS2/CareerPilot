@@ -15,6 +15,8 @@ from backend.db import models as _models  # noqa: F401  — register ORM models 
 logger = logging.getLogger(__name__)
 
 REQUIRED_TABLES = (
+    "users",
+    "user_sessions",
     "candidates",
     "target_preferences",
     "jobs",
@@ -84,6 +86,27 @@ def _add_missing_indexes() -> None:
             logger.info("Added missing index %s on %s", index.name, table.name)
 
 
+def _replace_application_packages_job_index() -> None:
+    """One-time, idempotent swap: application_packages used to be unique on
+    job_id alone (one package per job, system-wide). Multi-user support needs
+    it unique on (job_id, user_id) instead, so two different users can each
+    have their own package for the same shared job. _add_missing_indexes()
+    can only ever add a missing index, never replace one, so the old index
+    has to be dropped explicitly before the new composite one (declared on
+    the model) gets picked up by the normal diffing pass. Safe to run on
+    every startup — a no-op once the old index is gone.
+    """
+    inspector = inspect(engine)
+    if "application_packages" not in inspector.get_table_names():
+        return
+    existing_index_names = {idx["name"] for idx in inspector.get_indexes("application_packages")}
+    if "ux_application_packages_job_id" not in existing_index_names:
+        return
+    with engine.begin() as conn:
+        conn.execute(text('DROP INDEX "ux_application_packages_job_id"'))
+    logger.info("Dropped superseded index ux_application_packages_job_id on application_packages")
+
+
 def init_db() -> None:
     """Create the data directory, create any missing Day 1 tables, and add
     any columns/indexes missing from tables that already existed."""
@@ -91,6 +114,7 @@ def init_db() -> None:
     Path("logs").mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
+    _replace_application_packages_job_index()
     _add_missing_indexes()
     logger.info("Database initialized with tables: %s", ", ".join(sorted(Base.metadata.tables)))
 

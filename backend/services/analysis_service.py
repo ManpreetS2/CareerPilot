@@ -1031,25 +1031,23 @@ def load_job(db: Session, public_id: str) -> JobRecord:
     return record
 
 
-def load_latest_candidate(db: Session) -> Candidate:
-    record = db.query(Candidate).order_by(Candidate.id.desc()).first()
+def load_latest_candidate(db: Session, user_id: int) -> Candidate:
+    record = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     if record is None:
         raise CandidateRequiredError()
     return record
 
 
 def load_preferences(db: Session, candidate: Candidate) -> TargetPreference | None:
-    linked = (
-        db.query(TargetPreference)
-        .filter(TargetPreference.candidate_id == candidate.id)
-        .order_by(TargetPreference.id.desc())
-        .first()
-    )
-    if linked is not None:
-        return linked
+    """Scoped strictly to this candidate's own linked preferences — no
+    fallback to an unattributed row. That fallback used to exist for a
+    single-tenant app where "no linked preferences" and "no preferences at
+    all" were indistinguishable; with real accounts, falling back to *any*
+    unowned preferences row would leak one user's answers into another
+    user's scoring."""
     return (
         db.query(TargetPreference)
-        .filter(TargetPreference.candidate_id.is_(None))
+        .filter(TargetPreference.candidate_id == candidate.id)
         .order_by(TargetPreference.id.desc())
         .first()
     )
@@ -1194,10 +1192,10 @@ def persist_score(
     )
 
 
-def score_job(db: Session, job_public_id: str, *, as_of: date | None = None) -> MatchScore:
+def score_job(db: Session, job_public_id: str, user_id: int, *, as_of: date | None = None) -> MatchScore:
     """Request-scoped scoring entrypoint. Never opens SessionLocal."""
     job = load_job(db, job_public_id)
-    candidate = load_latest_candidate(db)
+    candidate = load_latest_candidate(db, user_id)
     preferences = load_preferences(db, candidate)
     requirements = load_requirements(db, job)
     breakdown = compute_breakdown(job, candidate, preferences, requirements, as_of=as_of)

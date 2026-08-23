@@ -35,8 +35,8 @@ def _get_job_record(db: Session, job_id: str) -> JobRecord:
     return record
 
 
-def _get_current_candidate(db: Session) -> Candidate | None:
-    return db.query(Candidate).order_by(Candidate.id.desc()).first()
+def _get_current_candidate(db: Session, user_id: int) -> Candidate | None:
+    return db.query(Candidate).filter(Candidate.user_id == user_id).first()
 
 
 def _mock_materials(job: JobRecord) -> tuple[list[str], str, str, list[str]]:
@@ -75,17 +75,22 @@ def _record_to_package(record: ApplicationPackageRecord, job_public_id: str) -> 
     )
 
 
-def get_or_generate_application_package(db: Session, job_id: str) -> ApplicationPackage:
+def get_or_generate_application_package(db: Session, job_id: str, user_id: int) -> ApplicationPackage:
     job = _get_job_record(db, job_id)
 
-    existing = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.job_id == job.id).first()
+    existing = (
+        db.query(ApplicationPackageRecord)
+        .filter(ApplicationPackageRecord.job_id == job.id, ApplicationPackageRecord.user_id == user_id)
+        .first()
+    )
     if existing is not None:
         return _record_to_package(existing, job_id)
 
     bullets, cover_letter, recruiter_message, notes = _mock_materials(job)
-    candidate = _get_current_candidate(db)
+    candidate = _get_current_candidate(db, user_id)
     record = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=user_id,
         candidate_id=candidate.id if candidate else None,
         tailored_bullets=bullets,
         cover_letter_draft=cover_letter,
@@ -97,11 +102,16 @@ def get_or_generate_application_package(db: Session, job_id: str) -> Application
     try:
         db.commit()
     except IntegrityError:
-        # Lost a race with a concurrent generate call for the same job — the
-        # unique index is what actually enforces "one package per job" here;
-        # recover the winner's row instead of surfacing an error.
+        # Lost a race with a concurrent generate call for the same
+        # (job, user) pair — the unique index is what actually enforces
+        # "one package per job per user" here; recover the winner's row
+        # instead of surfacing an error.
         db.rollback()
-        existing = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.job_id == job.id).first()
+        existing = (
+            db.query(ApplicationPackageRecord)
+            .filter(ApplicationPackageRecord.job_id == job.id, ApplicationPackageRecord.user_id == user_id)
+            .first()
+        )
         if existing is not None:
             return _record_to_package(existing, job_id)
         raise
@@ -124,10 +134,14 @@ def get_or_generate_application_package(db: Session, job_id: str) -> Application
     )
 
 
-def apply_approval(db: Session, job_id: str, request: ApprovalRequest) -> ApprovalResponse:
+def apply_approval(db: Session, job_id: str, user_id: int, request: ApprovalRequest) -> ApprovalResponse:
     job = _get_job_record(db, job_id)
 
-    record = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.job_id == job.id).first()
+    record = (
+        db.query(ApplicationPackageRecord)
+        .filter(ApplicationPackageRecord.job_id == job.id, ApplicationPackageRecord.user_id == user_id)
+        .first()
+    )
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

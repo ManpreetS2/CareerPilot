@@ -597,17 +597,23 @@ def _flag_unmatched_required_fields(page: Page, filled: list[FilledField], flagg
         already.add(name)
 
 
-def _load_approved_application(db: Session, job: JobRecord) -> tuple[ApplicationPackageRecord, Candidate]:
+def _load_approved_application(
+    db: Session, job: JobRecord, user_id: int
+) -> tuple[ApplicationPackageRecord, Candidate]:
     """The same approval + candidate gate both fill paths (server-side
     Playwright preview and the extension's live autofill) require."""
-    package = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.job_id == job.id).first()
+    package = (
+        db.query(ApplicationPackageRecord)
+        .filter(ApplicationPackageRecord.job_id == job.id, ApplicationPackageRecord.user_id == user_id)
+        .first()
+    )
     if package is None or package.approval_status != "approved":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This application must be approved before assisted apply can run.",
         )
 
-    candidate = db.query(Candidate).filter(Candidate.id == package.candidate_id).first() if package.candidate_id else None
+    candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     if candidate is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -639,7 +645,7 @@ def find_job_by_url(db: Session, url: str) -> JobRecord | None:
     return None
 
 
-def get_autofill_data(db: Session, url: str) -> AutofillResponse:
+def get_autofill_data(db: Session, url: str, user_id: int) -> AutofillResponse:
     """Field values only, no server-side browser — the extension's content
     script does the actual DOM fill live, in the user's own tab."""
     job = find_job_by_url(db, url)
@@ -649,7 +655,7 @@ def get_autofill_data(db: Session, url: str) -> AutofillResponse:
             detail="No job in CareerPilot matches this URL.",
         )
 
-    package, candidate = _load_approved_application(db, job)
+    package, candidate = _load_approved_application(db, job, user_id)
     platform = detect_ats_platform(job.url)
     fields = _build_candidate_fields(candidate, package, _load_target_preference(db, candidate))
     return AutofillResponse(
@@ -682,12 +688,12 @@ def get_autofill_data(db: Session, url: str) -> AutofillResponse:
     )
 
 
-def run_assisted_apply(db: Session, job_id: str) -> FormFillResult:
+def run_assisted_apply(db: Session, job_id: str, user_id: int) -> FormFillResult:
     job = db.query(JobRecord).filter(JobRecord.public_id == job_id).first()
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' not found")
 
-    package, candidate = _load_approved_application(db, job)
+    package, candidate = _load_approved_application(db, job, user_id)
 
     platform = detect_ats_platform(job.url)
     if platform == "unsupported":
@@ -697,7 +703,7 @@ def run_assisted_apply(db: Session, job_id: str) -> FormFillResult:
             status="failed",
             error_message="Only Greenhouse and Lever postings are supported for assisted apply.",
         )
-        _persist_attempt(db, job.id, result)
+        _persist_attempt(db, job.id, user_id, result)
         return result
 
     fields = _build_candidate_fields(candidate, package, _load_target_preference(db, candidate))
@@ -747,13 +753,14 @@ def run_assisted_apply(db: Session, job_id: str) -> FormFillResult:
         flagged_fields=flagged,
         error_message=error_message,
     )
-    _persist_attempt(db, job.id, result)
+    _persist_attempt(db, job.id, user_id, result)
     return result
 
 
-def _persist_attempt(db: Session, job_internal_id: int, result: FormFillResult) -> None:
+def _persist_attempt(db: Session, job_internal_id: int, user_id: int, result: FormFillResult) -> None:
     record = FormFillAttemptRecord(
         job_id=job_internal_id,
+        user_id=user_id,
         ats_platform=result.ats_platform,
         status=result.status,
         filled_fields=[f.model_dump() for f in result.filled_fields],

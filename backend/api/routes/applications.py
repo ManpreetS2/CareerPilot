@@ -5,7 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
+from backend.db.models import User
 from backend.schemas.schemas import (
     ApplicationPackage,
     ApprovalRequest,
@@ -20,31 +22,44 @@ router = APIRouter(prefix="/api", tags=["applications"])
 
 
 @router.post("/jobs/{job_id}/generate-materials", response_model=ApplicationPackage)
-def generate_materials(job_id: str, db: Session = Depends(get_db)) -> ApplicationPackage:
+def generate_materials(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> ApplicationPackage:
     """Return this job's persisted application package, generating one (still
     mocked pending the real Application Material Agent) if none exists yet."""
-    return get_or_generate_application_package(db, job_id)
+    return get_or_generate_application_package(db, job_id, user.id)
 
 
 @router.post("/jobs/{job_id}/approve", response_model=ApprovalResponse)
 def approve_materials(
-    job_id: str, payload: ApprovalRequest, db: Session = Depends(get_db)
+    job_id: str,
+    payload: ApprovalRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ApprovalResponse:
-    return apply_approval(db, job_id, payload)
+    return apply_approval(db, job_id, user.id, payload)
 
 
 @router.post("/jobs/{job_id}/fill-application", response_model=FormFillResult)
-def fill_application(job_id: str, db: Session = Depends(get_db)) -> FormFillResult:
+def fill_application(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> FormFillResult:
     """Assisted apply: fills a real Greenhouse/Lever form with what can be
     confidently mapped from the approved application package, flags
     anything it can't map, and never submits. Requires the application to
     already be approved."""
-    return run_assisted_apply(db, job_id)
+    return run_assisted_apply(db, job_id, user.id)
 
 
 @router.get("/extension/autofill", response_model=AutofillResponse)
-def extension_autofill(url: str, db: Session = Depends(get_db)) -> AutofillResponse:
+def extension_autofill(
+    url: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> AutofillResponse:
     """Field values for the browser extension's content script to fill
     directly into the real page the user is on — matched by the tab's own
-    URL, since the extension has no other way to know which job this is."""
-    return get_autofill_data(db, url)
+    URL, since the extension has no other way to know which job this is.
+    Requires the same session cookie as the web app (the extension's fetch
+    call sends credentials to this same origin) — this used to be
+    completely unauthenticated, handing out a candidate's name, email,
+    phone, and cover letter to any caller that knew or guessed a job URL."""
+    return get_autofill_data(db, url, user.id)
