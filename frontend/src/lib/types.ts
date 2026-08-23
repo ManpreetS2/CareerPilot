@@ -170,6 +170,53 @@ export type InterviewPrep = {
   gaps_to_address: string[];
 };
 
+export type TrackerStatus =
+  | "saved"
+  | "pending_review"
+  | "approved"
+  | "ready_to_apply"
+  | "applied"
+  | "interviewing"
+  | "rejected"
+  | "offer"
+  | "withdrawn";
+
+export type ApplicationTrackerItem = {
+  job_id: string;
+  status?: TrackerStatus | null;
+  note?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  allowed_statuses?: TrackerStatus[];
+};
+
+export type ApplicationListItem = {
+  job_id: string;
+  title: string;
+  company: string;
+  match_score?: number | null;
+  recommendation?: "apply" | "consider" | "skip" | null;
+  approval_status?: ApplicationPackage["approval_status"] | null;
+  tracker_status?: TrackerStatus | null;
+  updated_at?: string | null;
+  allowed_statuses?: TrackerStatus[];
+};
+
+export type DashboardSummary = {
+  profile_completion: number;
+  skills_count: number;
+  target_roles: string[];
+  preferred_location?: string | null;
+  jobs_discovered: number;
+  jobs_verified: number;
+  high_matches: number;
+  ready_to_apply: number;
+  applications_saved: number;
+  applications_ready: number;
+  applications_applied: number;
+  interviews: number;
+};
+
 export type HealthResponse = {
   status: string;
   database: string;

@@ -10,6 +10,12 @@ content. "One package per job" is enforced by a DB-level unique index
 check-then-insert below — two concurrent generate calls for the same job
 race safely: whichever loses is caught and returns the winner's row instead
 of erroring or creating a duplicate.
+
+The unfinished grounded generator lives in
+`backend.services.application_materials_agent.generate_grounded_application_materials`.
+Do not call it from this workflow until that student-owned function is
+implemented. `_mock_materials` below is the isolated legacy placeholder and
+the next replacement target for a single small integration change.
 """
 
 from __future__ import annotations
@@ -40,7 +46,12 @@ def _get_current_candidate(db: Session) -> Candidate | None:
 
 
 def _mock_materials(job: JobRecord) -> tuple[list[str], str, str, list[str]]:
-    """Placeholder tailored materials. Real generation is a separate, ongoing workstream."""
+    """LEGACY PLACEHOLDER — next replacement target for grounded generation.
+
+    Isolated from `application_materials_agent`. Do not feed this fabricated
+    output through the new service. Replace this call site only after
+    `generate_grounded_application_materials` is implemented.
+    """
     tailored_bullets = [
         f"Built Python APIs relevant to {job.company}'s intern stack.",
         "Wrote SQL-backed features with tests and documented edge cases.",

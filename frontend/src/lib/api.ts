@@ -1,8 +1,11 @@
 import { API_BASE_URL } from "./config";
 import type {
+  ApplicationListItem,
   ApplicationPackage,
+  ApplicationTrackerItem,
   ApprovalDecision,
   ApprovalResponse,
+  DashboardSummary,
   FormFillResult,
   HealthResponse,
   InterviewPrep,
@@ -13,6 +16,7 @@ import type {
   ParseResumeResponse,
   ScoutJobsResponse,
   TargetPreferences,
+  TrackerStatus,
 } from "./types";
 
 export class ApiClientError extends Error {
@@ -131,6 +135,23 @@ export const api = {
     request<InterviewPrep>(`/api/jobs/${jobId}/prepare-interview`, {
       method: "POST",
     }),
+
+  getInterviewPrep: (jobId: string) =>
+    request<InterviewPrep>(`/api/jobs/${jobId}/interview-prep`),
+
+  listApplications: () => request<ApplicationListItem[]>("/api/applications"),
+
+  getTracking: (jobId: string) =>
+    request<ApplicationTrackerItem>(`/api/applications/${jobId}/tracking`),
+
+  updateTracking: (jobId: string, status: TrackerStatus, note?: string | null) =>
+    request<ApplicationTrackerItem>(`/api/applications/${jobId}/tracking`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, note: note ?? null }),
+    }),
+
+  getDashboardSummary: () => request<DashboardSummary>("/api/dashboard/summary"),
 
   fillApplication: (jobId: string) =>
     request<FormFillResult>(`/api/jobs/${jobId}/fill-application`, {

@@ -87,6 +87,12 @@ class JobRecord(Base):
     match_scores: Mapped[list["MatchScoreRecord"]] = relationship(back_populates="job")
     applications: Mapped[list["ApplicationPackageRecord"]] = relationship(back_populates="job")
     form_fill_attempts: Mapped[list["FormFillAttemptRecord"]] = relationship(back_populates="job")
+    tracker: Mapped["ApplicationTrackerRecord | None"] = relationship(
+        back_populates="job", uselist=False
+    )
+    interview_prep: Mapped["InterviewPrepRecord | None"] = relationship(
+        back_populates="job", uselist=False
+    )
 
 
 class JobIntelligenceRecord(Base):
@@ -172,3 +178,44 @@ class FormFillAttemptRecord(Base):
     )
 
     job: Mapped[JobRecord] = relationship(back_populates="form_fill_attempts")
+
+
+class ApplicationTrackerRecord(Base):
+    """One explicit tracking row per job. Independent of approval and form fill."""
+
+    __tablename__ = "application_tracker"
+    __table_args__ = (Index("ux_application_tracker_job_id", "job_id", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    status_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    job: Mapped[JobRecord] = relationship(back_populates="tracker")
+
+
+class InterviewPrepRecord(Base):
+    """One interview-prep record per job (idempotent upsert)."""
+
+    __tablename__ = "interview_prep"
+    __table_args__ = (Index("ux_interview_prep_job_id", "job_id", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
+    likely_questions: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    talking_points: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    gaps_to_address: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    job: Mapped[JobRecord] = relationship(back_populates="interview_prep")

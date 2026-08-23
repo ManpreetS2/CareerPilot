@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import applications, candidate, health, interview, jobs, scoring
+from backend.api.routes import applications, candidate, health, interview, jobs, scoring, tracker
 from backend.core.config import settings
 from backend.core.logging import setup_logging
 from backend.db.init_db import init_db
@@ -29,7 +29,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="CareerPilot AI",
-    description="AI-assisted job search and application copilot. Agent logic is partially mocked until Day 2+ services are wired.",
+    description="AI-assisted job search and application copilot.",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -54,6 +54,7 @@ app.include_router(candidate.router)
 app.include_router(jobs.router)
 app.include_router(scoring.router)
 app.include_router(applications.router)
+app.include_router(tracker.router)
 app.include_router(interview.router)
 
 

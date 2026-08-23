@@ -247,3 +247,59 @@ class AutofillResponse(BaseModel):
     job_id: str
     platform: Literal["greenhouse", "lever", "unsupported"]
     fields: AutofillFields
+
+
+TrackerStatus = Literal[
+    "saved",
+    "pending_review",
+    "approved",
+    "ready_to_apply",
+    "applied",
+    "interviewing",
+    "rejected",
+    "offer",
+    "withdrawn",
+]
+
+
+class ApplicationTrackerItem(BaseModel):
+    job_id: str
+    status: TrackerStatus | None = None
+    note: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    allowed_statuses: list[TrackerStatus] = Field(default_factory=list)
+
+
+class ApplicationTrackerUpdate(BaseModel):
+    status: TrackerStatus
+    note: str | None = None
+
+
+class ApplicationListItem(BaseModel):
+    job_id: str
+    title: str
+    company: str
+    match_score: float | None = None
+    recommendation: Literal["apply", "consider", "skip"] | None = None
+    approval_status: Literal[
+        "draft", "pending_review", "approved", "edit_requested", "rejected"
+    ] | None = None
+    tracker_status: TrackerStatus | None = None
+    updated_at: datetime | None = None
+    allowed_statuses: list[TrackerStatus] = Field(default_factory=list)
+
+
+class DashboardSummary(BaseModel):
+    profile_completion: int = 0
+    skills_count: int = 0
+    target_roles: list[str] = Field(default_factory=list)
+    preferred_location: str | None = None
+    jobs_discovered: int = 0
+    jobs_verified: int = 0
+    high_matches: int = 0
+    ready_to_apply: int = 0
+    applications_saved: int = 0
+    applications_ready: int = 0
+    applications_applied: int = 0
+    interviews: int = 0

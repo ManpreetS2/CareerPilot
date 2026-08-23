@@ -1,25 +1,307 @@
-"""Interview-prep Day 1 mocks."""
+"""Grounded deterministic interview-prep baseline.
+
+Templates are built only from stored Job Intelligence, Fit & Gap results,
+and candidate evidence. This module never claims experience the candidate
+does not have. LLM question-quality upgrades are an injectable boundary
+and are not used on the production path.
+"""
 
 from __future__ import annotations
 
-from backend.schemas.schemas import InterviewPrep
-from backend.services.job_service import get_job
+import logging
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from backend.db.models import (
+    Candidate,
+    InterviewPrepRecord,
+    JobIntelligenceRecord,
+    JobRecord,
+    MatchScoreRecord,
+)
+from backend.schemas.schemas import InterviewPrep, JobIntelligence, MatchScore
+from backend.services.application_materials_agent import candidate_record_to_profile
+from backend.services.job_intelligence_service import get_stored_job_intelligence
+from backend.services.job_service import record_to_job
+
+logger = logging.getLogger(__name__)
+
+InterviewPrepImprover = Callable[["InterviewPrepContext", InterviewPrep], InterviewPrep]
 
 
-def mock_interview_prep(job_id: str) -> InterviewPrep:
-    job = get_job(job_id)
+class InterviewPrepError(Exception):
+    """Sanitized interview-prep error. ``str(exc)`` is safe for HTTP details."""
+
+
+class InterviewJobNotFoundError(InterviewPrepError):
+    def __init__(self) -> None:
+        super().__init__("Job not found.")
+
+
+class InterviewIntelligenceMissingError(InterviewPrepError):
+    def __init__(self) -> None:
+        super().__init__("Extract job requirements before preparing interview.")
+
+
+@dataclass
+class InterviewPrepContext:
+    job_id: str
+    job_pk: int
+    job_title: str
+    company: str
+    intelligence: JobIntelligence
+    fit_score: MatchScore | None
+    candidate_skills: list[str]
+    candidate_has_profile: bool
+
+
+def unfinished_llm_interview_improver(
+    context: InterviewPrepContext,
+    prep: InterviewPrep,
+) -> InterviewPrep:
+    """Named injectable boundary for later question-quality work.
+
+    Do not call this from the deterministic baseline. Real LLM interview
+    generation is out of scope for the foundation PR.
+    """
+
+    _ = context
+    raise InterviewPrepError("LLM interview improvement is not implemented.")
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _get_job(db: Session, job_id: str) -> JobRecord:
+    job = db.query(JobRecord).filter(JobRecord.public_id == job_id).first()
+    if job is None:
+        raise InterviewJobNotFoundError()
+    return job
+
+
+def _record_to_prep(record: InterviewPrepRecord, job_public_id: str) -> InterviewPrep:
     return InterviewPrep(
-        job_id=job.id or job_id,
-        likely_questions=[
-            "Walk me through a Python API you built.",
-            "How would you model this job's data in SQL?",
-            "Tell me about a time you got stuck and how you unblocked.",
-        ],
-        talking_points=[
-            f"Connect Campus Connect work to {job.company}'s stack.",
-            "Highlight tests and latency improvement from the intern role.",
-        ],
-        gaps_to_address=[
-            "No production Kubernetes experience yet (mock gap).",
-        ],
+        job_id=job_public_id,
+        likely_questions=list(record.likely_questions or []),
+        talking_points=list(record.talking_points or []),
+        gaps_to_address=list(record.gaps_to_address or []),
     )
+
+
+def get_interview_prep(db: Session, job_id: str) -> InterviewPrep | None:
+    """Read-only. Does not create, generate, or call a provider."""
+
+    job = _get_job(db, job_id)
+    record = (
+        db.query(InterviewPrepRecord)
+        .filter(InterviewPrepRecord.job_id == job.id)
+        .first()
+    )
+    if record is None:
+        logger.info("interview_prep read miss job_pk=%s", job.id)
+        return None
+    logger.info("interview_prep read hit job_pk=%s", job.id)
+    return _record_to_prep(record, job_id)
+
+
+def _latest_fit_score(db: Session, job: JobRecord, candidate: Candidate | None) -> MatchScore | None:
+    query = db.query(MatchScoreRecord).filter(MatchScoreRecord.job_id == job.id)
+    if candidate is not None:
+        query = query.filter(MatchScoreRecord.candidate_id == candidate.id)
+    record = query.order_by(MatchScoreRecord.id.desc()).first()
+    if record is None:
+        return None
+    return MatchScore(
+        job_id=job.public_id,
+        overall_score=record.overall_score,
+        skill_score=record.skill_score,
+        experience_score=record.experience_score,
+        education_score=record.education_score,
+        location_score=record.location_score,
+        preference_score=record.preference_score,
+        matched_skills=list(record.matched_skills or []),
+        partial_matches=list(record.partial_matches or []),
+        missing_skills=list(record.missing_skills or []),
+        recommendation=record.recommendation,  # type: ignore[arg-type]
+        rationale=record.rationale,
+    )
+
+
+def load_interview_prep_context(db: Session, job_id: str) -> InterviewPrepContext:
+    job = _get_job(db, job_id)
+    intelligence_row = (
+        db.query(JobIntelligenceRecord)
+        .filter(JobIntelligenceRecord.job_id == job.id)
+        .first()
+    )
+    if intelligence_row is None:
+        raise InterviewIntelligenceMissingError()
+    intelligence = get_stored_job_intelligence(db, job_id)
+    candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    skills: list[str] = []
+    if candidate is not None:
+        profile = candidate_record_to_profile(candidate)
+        skills = list(profile.skills)
+        for project in profile.projects:
+            skills.extend(project.technologies)
+    job_schema = record_to_job(job)
+    return InterviewPrepContext(
+        job_id=job.public_id,
+        job_pk=job.id,
+        job_title=job_schema.title,
+        company=job_schema.company,
+        intelligence=intelligence,
+        fit_score=_latest_fit_score(db, job, candidate),
+        candidate_skills=skills,
+        candidate_has_profile=candidate is not None,
+    )
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        key = item.strip().lower()
+        if not item.strip() or key in seen:
+            continue
+        seen.add(key)
+        out.append(item.strip())
+    return out
+
+
+def _role_is_internship(title: str, seniority: str | None) -> bool:
+    """True only when the stored role is explicitly an internship."""
+
+    seniority_key = (seniority or "").strip().lower()
+    if seniority_key in {"intern", "internship", "intern-level"}:
+        return True
+    return bool(re.search(r"\bintern(?:s|ship)?\b", title or "", flags=re.I))
+
+
+def build_deterministic_interview_prep(context: InterviewPrepContext) -> InterviewPrep:
+    """Deterministic templates from stored grounded records only."""
+
+    intel = context.intelligence
+    matched = list(context.fit_score.matched_skills) if context.fit_score else []
+    missing = list(context.fit_score.missing_skills) if context.fit_score else []
+    candidate_skill_keys = {item.strip().lower() for item in context.candidate_skills}
+
+    if context.fit_score is None:
+        for skill in [*intel.required_skills, *intel.preferred_skills, *intel.tech_stack]:
+            if skill.strip().lower() in candidate_skill_keys:
+                matched.append(skill)
+            else:
+                missing.append(skill)
+
+    matched = _dedupe(matched)
+    missing = _dedupe([skill for skill in missing if skill.strip().lower() not in {item.lower() for item in matched}])
+
+    questions: list[str] = []
+    for topic in intel.likely_interview_focus:
+        questions.append(f"What would you expect to discuss about {topic} for this role?")
+    role_phrase = "in this internship" if _role_is_internship(context.job_title, intel.seniority) else "for this role"
+    for skill in intel.required_skills[:8]:
+        questions.append(f"How would you demonstrate {skill} {role_phrase}?")
+    if not questions:
+        questions.append("Walk through a project from your stored profile that is relevant to this posting.")
+
+    talking_points: list[str] = []
+    if not context.candidate_has_profile:
+        talking_points = []
+    else:
+        for skill in matched:
+            talking_points.append(
+                f"Use stored candidate evidence related to {skill}; do not invent additional experience."
+            )
+
+    gaps: list[str] = []
+    for skill in missing:
+        gaps.append(
+            f"{skill} is a gap to address. It is not a current candidate strength."
+        )
+    if not context.candidate_has_profile:
+        gaps.insert(0, "No candidate profile is stored yet. Build a profile before treating talking points as evidence.")
+    if intel.years_experience:
+        gaps.append(
+            f"The posting asks for {intel.years_experience} years of experience. Only discuss years that appear in the stored profile."
+        )
+
+    logger.info(
+        "interview_prep deterministic questions=%s talking_points=%s gaps=%s job_pk=%s",
+        len(questions),
+        len(talking_points),
+        len(gaps),
+        context.job_pk,
+    )
+    return InterviewPrep(
+        job_id=context.job_id,
+        likely_questions=_dedupe(questions),
+        talking_points=_dedupe(talking_points),
+        gaps_to_address=_dedupe(gaps),
+    )
+
+
+def generate_and_store_interview_prep(
+    db: Session,
+    job_id: str,
+    *,
+    improver: InterviewPrepImprover | None = None,
+) -> InterviewPrep:
+    """Explicit generate + idempotent upsert. Page load must not call this."""
+
+    context = load_interview_prep_context(db, job_id)
+    prep = build_deterministic_interview_prep(context)
+    if improver is not None:
+        prep = improver(context, prep)
+
+    now = _now()
+    record = (
+        db.query(InterviewPrepRecord)
+        .filter(InterviewPrepRecord.job_id == context.job_pk)
+        .first()
+    )
+    if record is None:
+        record = InterviewPrepRecord(
+            job_id=context.job_pk,
+            likely_questions=list(prep.likely_questions),
+            talking_points=list(prep.talking_points),
+            gaps_to_address=list(prep.gaps_to_address),
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(record)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            existing = (
+                db.query(InterviewPrepRecord)
+                .filter(InterviewPrepRecord.job_id == context.job_pk)
+                .first()
+            )
+            if existing is None:
+                raise
+            existing.likely_questions = list(prep.likely_questions)
+            existing.talking_points = list(prep.talking_points)
+            existing.gaps_to_address = list(prep.gaps_to_address)
+            existing.updated_at = now
+            db.commit()
+            db.refresh(existing)
+            logger.info("interview_prep unique conflict recovered job_pk=%s", context.job_pk)
+            return _record_to_prep(existing, job_id)
+        db.refresh(record)
+    else:
+        record.likely_questions = list(prep.likely_questions)
+        record.talking_points = list(prep.talking_points)
+        record.gaps_to_address = list(prep.gaps_to_address)
+        record.updated_at = now
+        db.commit()
+        db.refresh(record)
+    logger.info("interview_prep stored job_pk=%s", context.job_pk)
+    return _record_to_prep(record, job_id)

@@ -95,17 +95,3 @@ export function useCandidateSession() {
     },
   };
 }
-
-/** Isolated demo metrics for dashboard cards until Day 2+ agents persist real aggregates. */
-export const DEMO_DASHBOARD_METRICS = {
-  source: "demo" as const,
-  profileCompletion: 72,
-  jobsDiscovered: 3,
-  jobsVerified: 1,
-  highMatches: 1,
-  readyToApply: 1,
-  applicationsSaved: 0,
-  applicationsReady: 1,
-  applicationsApplied: 0,
-  interviews: 0,
-};

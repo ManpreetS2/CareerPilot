@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   BriefcaseBusiness,
@@ -7,11 +8,55 @@ import {
   UserRound,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { DEMO_DASHBOARD_METRICS, useCandidateSession } from "../lib/session";
+import { ErrorBanner } from "../components/ErrorBanner";
+import { LoadingState } from "../components/LoadingState";
+import { api } from "../lib/api";
+import type { DashboardSummary } from "../lib/types";
+
+const EMPTY_SUMMARY: DashboardSummary = {
+  profile_completion: 0,
+  skills_count: 0,
+  target_roles: [],
+  preferred_location: null,
+  jobs_discovered: 0,
+  jobs_verified: 0,
+  high_matches: 0,
+  ready_to_apply: 0,
+  applications_saved: 0,
+  applications_ready: 0,
+  applications_applied: 0,
+  interviews: 0,
+};
 
 export function DashboardPage() {
-  const { candidate, preferences } = useCandidateSession();
-  const metrics = DEMO_DASHBOARD_METRICS;
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const next = await api.getDashboardSummary();
+        if (!cancelled) setSummary(next);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err);
+          setSummary(EMPTY_SUMMARY);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const metrics = summary ?? EMPTY_SUMMARY;
 
   return (
     <div className="space-y-8">
@@ -42,51 +87,51 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <DashboardCard
-          icon={UserRound}
-          title="Candidate Profile"
-          rows={[
-            ["Completion", `${candidate ? metrics.profileCompletion : 0}%`],
-            ["Skills", String(candidate?.skills.length ?? 0)],
-            [
-              "Target roles",
-              preferences?.target_roles?.length
-                ? preferences.target_roles.slice(0, 2).join(", ")
-                : "Not set",
-            ],
-            [
-              "Preferred location",
-              preferences?.preferred_locations?.[0] ?? "Not set",
-            ],
-          ]}
-          action={<Link to="/profile" className="btn-ghost px-0">Open profile</Link>}
-        />
-        <DashboardCard
-          icon={BriefcaseBusiness}
-          title="Job Pipeline"
-          rows={[
-            ["Discovered", String(metrics.jobsDiscovered)],
-            ["Verified", String(metrics.jobsVerified)],
-            ["High matches", String(metrics.highMatches)],
-            ["Ready to apply", String(metrics.readyToApply)],
-          ]}
-          action={<Link to="/jobs" className="btn-ghost px-0">Browse jobs</Link>}
-          footnote="Pipeline counts currently use isolated demo metrics until Job Scout persists live data."
-        />
-        <DashboardCard
-          icon={FileText}
-          title="Applications"
-          rows={[
-            ["Saved", String(metrics.applicationsSaved)],
-            ["Ready", String(metrics.applicationsReady)],
-            ["Applied", String(metrics.applicationsApplied)],
-            ["Interviews", String(metrics.interviews)],
-          ]}
-          action={<Link to="/applications" className="btn-ghost px-0">Review materials</Link>}
-          footnote="Application tracker metrics are placeholders until Day 4+ packaging lands."
-        />
-      </div>
+      <ErrorBanner error={error} />
+      {loading ? (
+        <LoadingState label="Loading dashboard…" />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <DashboardCard
+            icon={UserRound}
+            title="Candidate Profile"
+            rows={[
+              ["Completion", `${metrics.profile_completion}%`],
+              ["Skills", String(metrics.skills_count)],
+              [
+                "Target roles",
+                metrics.target_roles.length
+                  ? metrics.target_roles.slice(0, 2).join(", ")
+                  : "Not set",
+              ],
+              ["Preferred location", metrics.preferred_location ?? "Not set"],
+            ]}
+            action={<Link to="/profile" className="btn-ghost px-0">Open profile</Link>}
+          />
+          <DashboardCard
+            icon={BriefcaseBusiness}
+            title="Job Pipeline"
+            rows={[
+              ["Discovered", String(metrics.jobs_discovered)],
+              ["Verified", String(metrics.jobs_verified)],
+              ["High matches", String(metrics.high_matches)],
+              ["Ready to apply", String(metrics.ready_to_apply)],
+            ]}
+            action={<Link to="/jobs" className="btn-ghost px-0">Browse jobs</Link>}
+          />
+          <DashboardCard
+            icon={FileText}
+            title="Applications"
+            rows={[
+              ["Saved", String(metrics.applications_saved)],
+              ["Ready", String(metrics.applications_ready)],
+              ["Applied", String(metrics.applications_applied)],
+              ["Interviews", String(metrics.interviews)],
+            ]}
+            action={<Link to="/applications" className="btn-ghost px-0">Review materials</Link>}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -96,13 +141,11 @@ function DashboardCard({
   title,
   rows,
   action,
-  footnote,
 }: {
   icon: typeof UserRound;
   title: string;
   rows: [string, string][];
   action: ReactNode;
-  footnote?: string;
 }) {
   return (
     <section className="card flex flex-col p-5">
@@ -121,7 +164,6 @@ function DashboardCard({
         ))}
       </dl>
       <div className="mt-auto pt-4">{action}</div>
-      {footnote ? <p className="mt-2 text-xs text-ink-500">{footnote}</p> : null}
     </section>
   );
 }
