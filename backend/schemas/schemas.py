@@ -268,6 +268,7 @@ class ApplicationTrackerItem(BaseModel):
     note: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    allowed_statuses: list[TrackerStatus] = Field(default_factory=list)
 
 
 class ApplicationTrackerUpdate(BaseModel):
@@ -286,6 +287,7 @@ class ApplicationListItem(BaseModel):
     ] | None = None
     tracker_status: TrackerStatus | None = None
     updated_at: datetime | None = None
+    allowed_statuses: list[TrackerStatus] = Field(default_factory=list)
 
 
 class DashboardSummary(BaseModel):

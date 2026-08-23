@@ -17,7 +17,6 @@ from backend.db.models import (
     ApplicationPackageRecord,
     ApplicationTrackerRecord,
     Candidate,
-    InterviewPrepRecord,
     JobRecord,
     MatchScoreRecord,
     TargetPreference,
@@ -77,6 +76,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def allowed_statuses_for(current: str | None) -> list[TrackerStatus]:
+    """Statuses the UI may present for an explicit user selection.
+
+    Includes the current status so a <select> can display it, plus only
+    transitions the backend will accept. A missing tracker row may be created
+    with any first status.
+    """
+
+    if current is None:
+        allowed = set(TRACKER_STATUSES)
+    else:
+        allowed = {current} | set(ALLOWED_TRANSITIONS.get(current, frozenset()))
+    return [status for status in TRACKER_STATUSES if status in allowed]  # type: ignore[misc]
+
+
 def _get_job(db: Session, job_id: str) -> JobRecord:
     job = db.query(JobRecord).filter(JobRecord.public_id == job_id).first()
     if job is None:
@@ -91,6 +105,7 @@ def _record_to_item(record: ApplicationTrackerRecord, job_public_id: str) -> App
         note=record.status_note,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        allowed_statuses=allowed_statuses_for(record.status),
     )
 
 
@@ -159,7 +174,7 @@ def get_tracking(db: Session, job_id: str) -> ApplicationTrackerItem:
     )
     if record is None:
         logger.info("tracker read miss job_pk=%s", job.id)
-        return ApplicationTrackerItem(job_id=job_id)
+        return ApplicationTrackerItem(job_id=job_id, allowed_statuses=allowed_statuses_for(None))
     logger.info("tracker read hit job_pk=%s status=%s", job.id, record.status)
     return _record_to_item(record, job_id)
 
@@ -200,6 +215,9 @@ def list_applications(db: Session) -> list[ApplicationListItem]:
                 approval_status=package.approval_status if package is not None else None,  # type: ignore[arg-type]
                 tracker_status=tracker.status if tracker is not None else None,  # type: ignore[arg-type]
                 updated_at=updated_at,
+                allowed_statuses=allowed_statuses_for(
+                    tracker.status if tracker is not None else None
+                ),
             )
         )
     logger.info("tracker list count=%s", len(items))
@@ -289,11 +307,9 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
     preferences = _latest_preference(db, candidate)
     trackers = db.query(ApplicationTrackerRecord).all()
     packages = db.query(ApplicationPackageRecord).all()
-    interviews = db.query(InterviewPrepRecord).all()
 
     tracker_by_job = {row.job_id: row for row in trackers}
     package_by_job = {row.job_id: row for row in packages}
-    interview_jobs = {row.job_id for row in interviews}
 
     high_matches = 0
     candidate_id = candidate.id if candidate else None
@@ -306,7 +322,7 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
     applications_ready = 0
     applications_applied = 0
     ready_to_apply = 0
-    interview_count_jobs: set[int] = set(interview_jobs)
+    interview_count_jobs: set[int] = set()
 
     for job in jobs:
         tracker = tracker_by_job.get(job.id)

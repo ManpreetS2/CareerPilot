@@ -21,6 +21,13 @@ const TRACKER_STATUSES: TrackerStatus[] = [
   "withdrawn",
 ];
 
+function statusOptions(item: ApplicationListItem): TrackerStatus[] {
+  if (item.allowed_statuses && item.allowed_statuses.length > 0) {
+    return item.allowed_statuses;
+  }
+  return TRACKER_STATUSES;
+}
+
 function formatUpdated(value?: string | null) {
   if (!value) return "—";
   const parsed = new Date(value);
@@ -64,6 +71,7 @@ export function ApplicationsPage() {
                 ...item,
                 tracker_status: updated.status ?? nextStatus,
                 updated_at: updated.updated_at ?? item.updated_at,
+                allowed_statuses: updated.allowed_statuses ?? item.allowed_statuses,
               }
             : item,
         ),
@@ -147,7 +155,7 @@ export function ApplicationsPage() {
                     <option value="" disabled>
                       Set status…
                     </option>
-                    {TRACKER_STATUSES.map((status) => (
+                    {statusOptions(item).map((status) => (
                       <option key={status} value={status}>
                         {status.replaceAll("_", " ")}
                       </option>

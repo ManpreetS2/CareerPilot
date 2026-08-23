@@ -19,12 +19,14 @@ from backend.schemas.schemas import ApplicationTrackerUpdate
 from backend.services.application_tracker_service import (
     TrackerInvalidTransitionError,
     TrackerJobNotFoundError,
+    allowed_statuses_for,
     get_dashboard_summary,
     get_tracking,
     list_applications,
     update_tracking,
 )
 from backend.services.application_service import apply_approval, get_or_generate_application_package
+from backend.services.interview_service import generate_and_store_interview_prep
 from backend.schemas.schemas import ApprovalRequest
 import pytest
 
@@ -252,7 +254,7 @@ def test_dashboard_real_aggregation(isolated_session) -> None:
     assert summary.ready_to_apply == 1
     assert summary.applications_ready == 1
     assert summary.applications_applied == 0
-    assert summary.interviews == 1
+    assert summary.interviews == 0
     assert summary.skills_count == 1
     assert summary.profile_completion > 0
     assert summary.target_roles == ["Software Engineer Intern"]
@@ -288,6 +290,9 @@ def test_tracker_http_contracts(isolated_client) -> None:
     )
     assert created.status_code == 200
     assert created.json()["status"] == "saved"
+    assert "applied" not in created.json()["allowed_statuses"]
+    assert "pending_review" in created.json()["allowed_statuses"]
+    assert "saved" in created.json()["allowed_statuses"]
 
     invalid = client.patch(
         "/api/applications/http-job/tracking",
@@ -300,3 +305,97 @@ def test_tracker_http_contracts(isolated_client) -> None:
         json={"status": "not-a-status"},
     )
     assert schema.status_code == 422
+
+    listed = client.get("/api/applications")
+    assert listed.status_code == 200
+    assert listed.json()[0]["allowed_statuses"] == created.json()["allowed_statuses"]
+
+
+def test_allowed_statuses_contract_matches_backend_transitions() -> None:
+    assert "applied" not in allowed_statuses_for("saved")
+    assert allowed_statuses_for("saved")[0] == "saved"
+    assert set(allowed_statuses_for(None)) == {
+        "saved",
+        "pending_review",
+        "approved",
+        "ready_to_apply",
+        "applied",
+        "interviewing",
+        "rejected",
+        "offer",
+        "withdrawn",
+    }
+
+
+def test_interview_prep_record_alone_does_not_increment_interviews(isolated_session) -> None:
+    job = _job(isolated_session, public_id="prep-only", status="verified")
+    isolated_session.add(
+        InterviewPrepRecord(
+            job_id=job.id,
+            likely_questions=["What is Python?"],
+            talking_points=["Use stored Python evidence."],
+            gaps_to_address=[],
+        )
+    )
+    isolated_session.commit()
+    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"))
+    summary = get_dashboard_summary(isolated_session)
+    assert summary.interviews == 0
+
+
+def test_tracker_interviewing_increments_interviews_once(isolated_session) -> None:
+    first = _job(isolated_session, public_id="int-a")
+    second = _job(isolated_session, public_id="int-b")
+    update_tracking(isolated_session, first.public_id, ApplicationTrackerUpdate(status="interviewing"))
+    update_tracking(isolated_session, second.public_id, ApplicationTrackerUpdate(status="applied"))
+    isolated_session.add(
+        InterviewPrepRecord(
+            job_id=second.id,
+            likely_questions=["Unused prep"],
+            talking_points=[],
+            gaps_to_address=[],
+        )
+    )
+    isolated_session.commit()
+    summary = get_dashboard_summary(isolated_session)
+    assert summary.interviews == 1
+
+
+def test_dashboard_reads_do_not_mutate_rows(isolated_session) -> None:
+    job = _job(isolated_session)
+    item = update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"))
+    first = get_dashboard_summary(isolated_session)
+    second = get_dashboard_summary(isolated_session)
+    refreshed = isolated_session.query(ApplicationTrackerRecord).one()
+    assert first == second
+    assert refreshed.status == "saved"
+    assert refreshed.updated_at == item.updated_at
+    assert isolated_session.query(ApplicationTrackerRecord).count() == 1
+
+
+def test_generating_interview_prep_does_not_change_tracker_status(isolated_session) -> None:
+    candidate = _candidate(isolated_session)
+    job = _job(isolated_session, public_id="prep-status", status="verified")
+    isolated_session.add(
+        JobIntelligenceRecord(
+            job_id=job.id,
+            required_skills=["Python"],
+            preferred_skills=[],
+            education_requirements=[],
+            tech_stack=["Python"],
+            seniority="intern",
+            responsibilities=[],
+            likely_interview_focus=["Python"],
+        )
+    )
+    isolated_session.commit()
+    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"))
+    generate_and_store_interview_prep(isolated_session, job.public_id)
+    tracking = get_tracking(isolated_session, job.public_id)
+    assert tracking.status == "saved"
+    summary = get_dashboard_summary(isolated_session)
+    assert summary.interviews == 0
+    generate_and_store_interview_prep(isolated_session, job.public_id)
+    assert get_tracking(isolated_session, job.public_id).status == "saved"
+    assert isolated_session.query(InterviewPrepRecord).count() == 1
+    _ = candidate

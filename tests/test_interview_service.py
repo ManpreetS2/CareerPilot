@@ -14,10 +14,13 @@ from backend.db.models import (
 from backend.services.interview_service import (
     InterviewIntelligenceMissingError,
     InterviewJobNotFoundError,
+    InterviewPrepContext,
+    build_deterministic_interview_prep,
     generate_and_store_interview_prep,
     get_interview_prep,
     unfinished_llm_interview_improver,
 )
+from backend.schemas.schemas import JobIntelligence
 
 
 def _job(session, *, public_id: str = "job-interview") -> JobRecord:
@@ -189,3 +192,62 @@ def test_interview_http_get_read_only_and_explicit_generate(isolated_client) -> 
     no_intel = client.post("/api/jobs/job-no-intel/prepare-interview")
     assert no_intel.status_code == 409
     assert "job requirements" in no_intel.json()["detail"].lower()
+
+
+def test_interview_questions_use_internship_wording_only_for_intern_roles() -> None:
+    intern = build_deterministic_interview_prep(
+        InterviewPrepContext(
+            job_id="intern-job",
+            job_pk=1,
+            job_title="Software Engineer Intern",
+            company="Acme",
+            intelligence=JobIntelligence(
+                required_skills=["Python"],
+                likely_interview_focus=["Testing"],
+                seniority="intern",
+            ),
+            fit_score=None,
+            candidate_skills=["Python"],
+            candidate_has_profile=True,
+        )
+    )
+    intern_blob = " ".join(intern.likely_questions).lower()
+    assert "in this internship" in intern_blob
+
+    full_time = build_deterministic_interview_prep(
+        InterviewPrepContext(
+            job_id="fte-job",
+            job_pk=2,
+            job_title="Software Engineer",
+            company="Acme",
+            intelligence=JobIntelligence(
+                required_skills=["Python"],
+                likely_interview_focus=["Testing"],
+                seniority="mid",
+            ),
+            fit_score=None,
+            candidate_skills=["Python"],
+            candidate_has_profile=True,
+        )
+    )
+    fte_blob = " ".join(full_time.likely_questions).lower()
+    assert "for this role" in fte_blob
+    assert "internship" not in fte_blob
+
+    internal = build_deterministic_interview_prep(
+        InterviewPrepContext(
+            job_id="internal-job",
+            job_pk=3,
+            job_title="Internal Tools Engineer",
+            company="Acme",
+            intelligence=JobIntelligence(
+                required_skills=["Python"],
+                likely_interview_focus=[],
+                seniority="mid",
+            ),
+            fit_score=None,
+            candidate_skills=["Python"],
+            candidate_has_profile=True,
+        )
+    )
+    assert "internship" not in " ".join(internal.likely_questions).lower()

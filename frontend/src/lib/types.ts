@@ -187,6 +187,7 @@ export type ApplicationTrackerItem = {
   note?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  allowed_statuses?: TrackerStatus[];
 };
 
 export type ApplicationListItem = {
@@ -198,6 +199,7 @@ export type ApplicationListItem = {
   approval_status?: ApplicationPackage["approval_status"] | null;
   tracker_status?: TrackerStatus | null;
   updated_at?: string | null;
+  allowed_statuses?: TrackerStatus[];
 };
 
 export type DashboardSummary = {

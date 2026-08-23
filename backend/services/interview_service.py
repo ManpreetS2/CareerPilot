@@ -9,6 +9,7 @@ and are not used on the production path.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -174,6 +175,15 @@ def _dedupe(items: list[str]) -> list[str]:
     return out
 
 
+def _role_is_internship(title: str, seniority: str | None) -> bool:
+    """True only when the stored role is explicitly an internship."""
+
+    seniority_key = (seniority or "").strip().lower()
+    if seniority_key in {"intern", "internship", "intern-level"}:
+        return True
+    return bool(re.search(r"\bintern(?:s|ship)?\b", title or "", flags=re.I))
+
+
 def build_deterministic_interview_prep(context: InterviewPrepContext) -> InterviewPrep:
     """Deterministic templates from stored grounded records only."""
 
@@ -195,8 +205,9 @@ def build_deterministic_interview_prep(context: InterviewPrepContext) -> Intervi
     questions: list[str] = []
     for topic in intel.likely_interview_focus:
         questions.append(f"What would you expect to discuss about {topic} for this role?")
+    role_phrase = "in this internship" if _role_is_internship(context.job_title, intel.seniority) else "for this role"
     for skill in intel.required_skills[:8]:
-        questions.append(f"How would you demonstrate {skill} in this internship?")
+        questions.append(f"How would you demonstrate {skill} {role_phrase}?")
     if not questions:
         questions.append("Walk through a project from your stored profile that is relevant to this posting.")
 
