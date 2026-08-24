@@ -19,6 +19,7 @@ from backend.db.models import (
     TargetPreference,
 )
 from backend.services import application_service
+from tests.mvp_helpers import TEST_USER_ID, insert_candidate
 from backend.services.application_materials_agent import (
     ApplicationMaterialsDraft,
     ApplicationMaterialsParseError,
@@ -55,43 +56,7 @@ def _job(session, *, public_id: str = "job-materials") -> JobRecord:
 
 
 def _candidate(session) -> Candidate:
-    record = Candidate(
-        name="Jordan Avery",
-        email="jordan@example.com",
-        skills=["Python", "SQL"],
-        projects=[
-            {
-                "name": "Campus Planner",
-                "description": "Python API for campus events.",
-                "technologies": ["Python", "FastAPI"],
-                "url": None,
-            }
-        ],
-        experience=[
-            {
-                "title": "Software Engineering Intern",
-                "company": "Northstar Labs",
-                "start_date": "2025-05",
-                "end_date": "2025-08",
-                "highlights": ["Reduced p95 latency on search endpoints by 28%."],
-            }
-        ],
-        education=[
-            {
-                "institution": "State University",
-                "degree": "B.S.",
-                "field": "Computer Science",
-                "graduation_year": "2027",
-            }
-        ],
-        certifications=[],
-        strengths=["Backend APIs"],
-        evidence_links=[],
-    )
-    session.add(record)
-    session.commit()
-    session.refresh(record)
-    return record
+    return insert_candidate(session)
 
 
 def _intelligence(session, job: JobRecord) -> JobIntelligenceRecord:
@@ -153,14 +118,14 @@ def _full_context(session):
 def test_missing_job_fails_sanitized(isolated_session) -> None:
     _candidate(isolated_session)
     with pytest.raises(MissingJobError, match="Job not found"):
-        generate_grounded_application_materials(isolated_session, "missing-job")
+        generate_grounded_application_materials(isolated_session, "missing-job", TEST_USER_ID)
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
 
 
 def test_missing_candidate_fails_sanitized(isolated_session) -> None:
     _job(isolated_session)
     with pytest.raises(MissingCandidateError, match="candidate profile"):
-        generate_grounded_application_materials(isolated_session, "job-materials")
+        generate_grounded_application_materials(isolated_session, "job-materials", TEST_USER_ID)
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
 
 
@@ -169,7 +134,7 @@ def test_missing_job_intelligence_fails_sanitized(isolated_session) -> None:
     job = _job(isolated_session)
     _score(isolated_session, job, candidate)
     with pytest.raises(MissingJobIntelligenceError, match="job requirements"):
-        generate_grounded_application_materials(isolated_session, "job-materials")
+        generate_grounded_application_materials(isolated_session, "job-materials", TEST_USER_ID)
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
 
 
@@ -178,16 +143,16 @@ def test_missing_fit_score_fails_sanitized(isolated_session) -> None:
     job = _job(isolated_session)
     _intelligence(isolated_session, job)
     with pytest.raises(MissingFitScoreError, match="fit score"):
-        generate_grounded_application_materials(isolated_session, "job-materials")
+        generate_grounded_application_materials(isolated_session, "job-materials", TEST_USER_ID)
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
 
 
 def test_grounded_generator_persists_valid_output_and_reuses_it(isolated_session) -> None:
-    from tests.mvp_helpers import VALID_MATERIALS_JSON, fake_grounded_generator
+    from tests.mvp_helpers import TEST_USER_ID, VALID_MATERIALS_JSON, fake_grounded_generator
 
     _full_context(isolated_session)
     first = generate_grounded_application_materials(
-        isolated_session, "job-materials", generator=fake_grounded_generator
+        isolated_session, "job-materials", TEST_USER_ID, generator=fake_grounded_generator
     )
     assert isolated_session.query(ApplicationPackageRecord).count() == 1
     called = {"n": 0}
@@ -197,7 +162,7 @@ def test_grounded_generator_persists_valid_output_and_reuses_it(isolated_session
         return VALID_MATERIALS_JSON
 
     second = generate_grounded_application_materials(
-        isolated_session, "job-materials", generator=counting
+        isolated_session, "job-materials", TEST_USER_ID, generator=counting
     )
     assert called["n"] == 0
     assert first.tailored_bullets == second.tailored_bullets
@@ -205,7 +170,7 @@ def test_grounded_generator_persists_valid_output_and_reuses_it(isolated_session
 
 def test_context_loading_uses_stored_grounded_records(isolated_session) -> None:
     job, candidate = _full_context(isolated_session)
-    context = load_application_materials_context(isolated_session, job.public_id)
+    context = load_application_materials_context(isolated_session, job.public_id, TEST_USER_ID)
     assert context.job.title == "Software Engineer Intern"
     assert context.candidate.name == candidate.name
     assert context.intelligence.required_skills == ["Python", "SQL"]
@@ -217,7 +182,7 @@ def test_context_loading_uses_stored_grounded_records(isolated_session) -> None:
 
 def test_no_candidate_claim_invention(isolated_session) -> None:
     _full_context(isolated_session)
-    context = load_application_materials_context(isolated_session, "job-materials")
+    context = load_application_materials_context(isolated_session, "job-materials", TEST_USER_ID)
     invented = ApplicationMaterialsStructuredOutput(
         tailored_bullets=["Led production Kubernetes clusters and improved latency by 40%."],
         cover_letter_draft="I have deep Kubernetes experience at Globex.",
@@ -246,7 +211,7 @@ def test_no_candidate_claim_invention(isolated_session) -> None:
 def _report(session, **fields) -> MaterialsGroundingReport:
     if session.query(JobRecord).filter(JobRecord.public_id == "job-materials").first() is None:
         _full_context(session)
-    context = load_application_materials_context(session, "job-materials")
+    context = load_application_materials_context(session, "job-materials", TEST_USER_ID)
     output = ApplicationMaterialsStructuredOutput(
         tailored_bullets=list(fields.get("bullets") or []),
         cover_letter_draft=fields.get("cover") or "",
@@ -383,7 +348,7 @@ def test_grounding_is_deterministic_and_logs_are_count_only(isolated_session, ca
     import logging
 
     _full_context(isolated_session)
-    context = load_application_materials_context(isolated_session, "job-materials")
+    context = load_application_materials_context(isolated_session, "job-materials", TEST_USER_ID)
     output = ApplicationMaterialsStructuredOutput(
         tailored_bullets=["Worked at Globex and led a global engineering team."],
         cover_letter_draft="Launched a healthcare product and transformed customer retention.",
@@ -413,7 +378,7 @@ def test_structured_output_is_attempted_at_most_twice(isolated_session) -> None:
 
     with pytest.raises(ApplicationMaterialsParseError):
         generate_grounded_application_materials(
-            isolated_session, "job-materials", generator=bad
+            isolated_session, "job-materials", TEST_USER_ID, generator=bad
         )
     assert calls["n"] == 2
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
@@ -465,7 +430,7 @@ def test_parse_accepts_claim_evidence_without_changing_package_shape(isolated_se
     )
     assert parsed.claim_evidence[0].evidence_id == "skill:profile"
     _full_context(isolated_session)
-    context = load_application_materials_context(isolated_session, "job-materials")
+    context = load_application_materials_context(isolated_session, "job-materials", TEST_USER_ID)
     draft = ApplicationMaterialsDraft(
         job_id="job-materials",
         tailored_bullets=["Used Python"],
@@ -481,7 +446,7 @@ def test_parse_accepts_claim_evidence_without_changing_package_shape(isolated_se
 
 def test_prompt_json_and_persistence_conversion_do_not_write(isolated_session) -> None:
     _full_context(isolated_session)
-    context = load_application_materials_context(isolated_session, "job-materials")
+    context = load_application_materials_context(isolated_session, "job-materials", TEST_USER_ID)
     system_prompt, user_prompt = build_application_materials_prompt(context)
     assert "Never invent" in system_prompt
     assert "Python" in user_prompt

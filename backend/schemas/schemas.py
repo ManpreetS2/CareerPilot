@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class Project(BaseModel):
@@ -304,3 +304,42 @@ class DashboardSummary(BaseModel):
     applications_ready: int = 0
     applications_applied: int = 0
     interviews: int = 0
+
+
+_PASSWORD_MIN = 8
+_PASSWORD_MAX = 128
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=_PASSWORD_MIN, max_length=_PASSWORD_MAX)
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("password")
+    @classmethod
+    def _bounded_password(cls, value: str) -> str:
+        if len(value) < _PASSWORD_MIN or len(value) > _PASSWORD_MAX:
+            raise ValueError("Password does not meet length requirements.")
+        return value
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=_PASSWORD_MAX)
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class UserPublic(BaseModel):
+    id: int
+    email: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

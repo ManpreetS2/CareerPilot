@@ -7,7 +7,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
+from backend.db.models import User
 from backend.schemas.schemas import (
     ApplicationListItem,
     ApplicationTrackerItem,
@@ -44,16 +46,20 @@ def _http_for_tracker_error(exc: Exception) -> HTTPException:
 
 
 @router.get("/applications", response_model=list[ApplicationListItem])
-def list_application_rows(db: Session = Depends(get_db)) -> list[ApplicationListItem]:
+def list_application_rows(
+    db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> list[ApplicationListItem]:
     """Read-only applications list. Does not create tracker rows."""
-    return list_applications(db)
+    return list_applications(db, user.id)
 
 
 @router.get("/applications/{job_id}/tracking", response_model=ApplicationTrackerItem)
-def get_application_tracking(job_id: str, db: Session = Depends(get_db)) -> ApplicationTrackerItem:
+def get_application_tracking(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> ApplicationTrackerItem:
     """Read-only tracker lookup. Missing rows return a null status payload."""
     try:
-        return get_tracking(db, job_id)
+        return get_tracking(db, job_id, user.id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_tracker_error(exc) from exc
 
@@ -63,15 +69,18 @@ def patch_application_tracking(
     job_id: str,
     payload: ApplicationTrackerUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ApplicationTrackerItem:
     """Explicit user-triggered status update. Never called as a side effect of GET."""
     try:
-        return update_tracking(db, job_id, payload)
+        return update_tracking(db, job_id, payload, user.id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_tracker_error(exc) from exc
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummary)
-def dashboard_summary(db: Session = Depends(get_db)) -> DashboardSummary:
+def dashboard_summary(
+    db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> DashboardSummary:
     """Read-only dashboard metrics from stored records. Empty database is zeros."""
-    return get_dashboard_summary(db)
+    return get_dashboard_summary(db, user.id)

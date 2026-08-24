@@ -17,6 +17,7 @@ import type {
   ScoutJobsResponse,
   TargetPreferences,
   TrackerStatus,
+  User,
 } from "./types";
 
 export class ApiClientError extends Error {
@@ -33,7 +34,10 @@ export class ApiClientError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, init);
+    // Every request carries the session cookie — without this, the
+    // now-mandatory auth on every route would silently fail cross-origin
+    // (the Vite dev server and the API run on different ports).
+    response = await fetch(`${API_BASE_URL}${path}`, { ...init, credentials: "include" });
   } catch {
     throw new ApiClientError(
       0,
@@ -55,6 +59,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<HealthResponse>("/health"),
+
+  signup: (email: string, password: string) =>
+    request<User>("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    }),
+
+  login: (email: string, password: string) =>
+    request<User>("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    }),
+
+  logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+
+  me: () => request<User>("/api/auth/me"),
 
   parseResume: (file: File) => {
     const body = new FormData();
@@ -119,6 +141,11 @@ export const api = {
 
   generateMaterials: (jobId: string) =>
     request<ApplicationPackage>(`/api/jobs/${jobId}/generate-materials`, {
+      method: "POST",
+    }),
+
+  discardStaleMaterials: (jobId: string) =>
+    request<{ status: string }>(`/api/jobs/${jobId}/discard-stale-materials`, {
       method: "POST",
     }),
 

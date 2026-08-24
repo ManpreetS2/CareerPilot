@@ -7,7 +7,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
+from backend.db.models import User
 from backend.schemas.schemas import InterviewPrep
 from backend.services.interview_service import (
     InterviewIntelligenceMissingError,
@@ -37,10 +39,14 @@ def _http_for_interview_error(exc: Exception) -> HTTPException:
 
 
 @router.get("/jobs/{job_id}/interview-prep", response_model=InterviewPrep)
-def read_interview_prep(job_id: str, db: Session = Depends(get_db)) -> InterviewPrep:
+def read_interview_prep(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> InterviewPrep:
     """Return the stored interview-prep record without generating a new one."""
     try:
-        prep = get_interview_prep(db, job_id)
+        prep = get_interview_prep(db, job_id, user.id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_interview_error(exc) from exc
     if prep is None:
@@ -52,9 +58,13 @@ def read_interview_prep(job_id: str, db: Session = Depends(get_db)) -> Interview
 
 
 @router.post("/jobs/{job_id}/prepare-interview", response_model=InterviewPrep)
-def prepare_interview(job_id: str, db: Session = Depends(get_db)) -> InterviewPrep:
+def prepare_interview(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> InterviewPrep:
     """Explicit deterministic interview-prep generation. Does not call a provider."""
     try:
-        return generate_and_store_interview_prep(db, job_id)
+        return generate_and_store_interview_prep(db, job_id, user.id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_interview_error(exc) from exc

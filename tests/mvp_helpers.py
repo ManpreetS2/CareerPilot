@@ -11,7 +11,10 @@ from backend.db.models import (
     JobRecord,
     MatchScoreRecord,
     TargetPreference,
+    User,
 )
+
+TEST_USER_ID = 1
 
 VALID_MATERIALS_JSON = json.dumps(
     {
@@ -28,6 +31,21 @@ VALID_MATERIALS_JSON = json.dumps(
 
 def fake_grounded_generator(_prompt: str, _system_prompt: str | None = None) -> str:
     return VALID_MATERIALS_JSON
+
+
+def ensure_user(session, user_id: int = TEST_USER_ID, email: str | None = None) -> User:
+    existing = session.get(User, user_id)
+    if existing is not None:
+        return existing
+    user = User(
+        id=user_id,
+        email=email or f"user{user_id}@example.com",
+        hashed_password="x",
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
 
 
 def insert_job(
@@ -51,8 +69,14 @@ def insert_job(
     return record
 
 
-def insert_candidate(session) -> Candidate:
+def insert_candidate(session, *, user_id: int = TEST_USER_ID) -> Candidate:
+    ensure_user(session, user_id)
+    previous = session.query(Candidate).filter(Candidate.user_id == user_id).first()
+    if previous is not None:
+        previous.user_id = None
+        session.commit()
     record = Candidate(
+        user_id=user_id,
         name="Jordan Avery",
         email="jordan@example.com",
         skills=["Python", "SQL"],
@@ -142,20 +166,37 @@ def seed_materials_prerequisites(
     session,
     *,
     public_id: str = "manual-abc123",
+    job_id: str | None = None,
     with_score: bool = True,
     title: str = "Software Engineer Intern",
+    user_id: int = TEST_USER_ID,
 ):
-    candidate = session.query(Candidate).order_by(Candidate.id.desc()).first() or insert_candidate(session)
-    job = session.query(JobRecord).filter_by(public_id=public_id).first()
+    job_public_id = job_id or public_id
+    ensure_user(session, user_id)
+    candidate = (
+        session.query(Candidate).filter(Candidate.user_id == user_id).first()
+        or insert_candidate(session, user_id=user_id)
+    )
+    job = session.query(JobRecord).filter_by(public_id=job_public_id).first()
     if job is None:
-        job = insert_job(session, public_id=public_id, title=title)
+        job = insert_job(session, public_id=job_public_id, title=title)
+    elif title != job.title:
+        job.title = title
+        session.commit()
     if session.query(JobIntelligenceRecord).filter_by(job_id=job.id).first() is None:
         insert_intelligence(session, job)
-    if with_score and session.query(MatchScoreRecord).filter_by(job_id=job.id, candidate_id=candidate.id).first() is None:
+    if (
+        with_score
+        and session.query(MatchScoreRecord)
+        .filter_by(job_id=job.id, candidate_id=candidate.id)
+        .first()
+        is None
+    ):
         insert_score(session, job, candidate)
-    if session.query(TargetPreference).filter_by(candidate_id=candidate.id).first() is None:
+    if session.query(TargetPreference).filter_by(user_id=user_id).first() is None:
         session.add(
             TargetPreference(
+                user_id=user_id,
                 candidate_id=candidate.id,
                 target_roles=["Software Engineer Intern"],
                 preferred_locations=["Remote"],
@@ -166,13 +207,20 @@ def seed_materials_prerequisites(
 
 
 def insert_grounded_package(
-    session, job: JobRecord, *, candidate: Candidate | None = None
+    session,
+    job: JobRecord,
+    *,
+    candidate: Candidate | None = None,
+    user_id: int = TEST_USER_ID,
 ) -> ApplicationPackageRecord:
+    ensure_user(session, user_id)
     if candidate is None:
-        candidate = session.query(Candidate).order_by(Candidate.id.desc()).first()
+        candidate = session.query(Candidate).filter(Candidate.user_id == user_id).first()
+    owner_id = candidate.user_id if candidate is not None and candidate.user_id is not None else user_id
     payload = json.loads(VALID_MATERIALS_JSON)
     record = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=owner_id,
         candidate_id=candidate.id if candidate is not None else None,
         tailored_bullets=payload["tailored_bullets"],
         cover_letter_draft=payload["cover_letter_draft"],
@@ -186,8 +234,3 @@ def insert_grounded_package(
     session.refresh(record)
     return record
 
-
-seed_materials_prerequisites = seed_materials_prerequisites
-VALID_MATERIALS_JSON = VALID_MATERIALS_JSON
-fake_grounded_generator = fake_grounded_generator
-insert_grounded_package = insert_grounded_package

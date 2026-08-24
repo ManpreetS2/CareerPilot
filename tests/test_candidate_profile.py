@@ -1447,10 +1447,13 @@ General Studies
     assert report.as_counts().get("removed_education_fields") == 1
 
 
+TEST_USER_ID = 1
+
+
 def test_candidate_persistence_works(isolated_session: Session) -> None:
     db = isolated_session
     profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
-    stored = persist_candidate_profile(profile, db)
+    stored = persist_candidate_profile(profile, db, TEST_USER_ID)
     assert stored.id and stored.id.startswith("cand-")
     row = db.query(Candidate).order_by(Candidate.id.desc()).first()
     assert row is not None
@@ -1466,6 +1469,7 @@ def test_failed_extraction_creates_no_candidate_row(isolated_session: Session) -
             "alex.pdf",
             build_simple_text_pdf(SAMPLE_RESUME_TEXT),
             db=db,
+            user_id=TEST_USER_ID,
             content_type="application/pdf",
             generate_fn=lambda _p, _s: "not-json",
         )
@@ -1482,6 +1486,7 @@ def test_failed_grounding_creates_no_candidate_row(isolated_session: Session) ->
             "alex.pdf",
             build_simple_text_pdf(SAMPLE_RESUME_TEXT),
             db=db,
+            user_id=TEST_USER_ID,
             content_type="application/pdf",
             generate_fn=lambda _p, _s: json.dumps(bad),
         )
@@ -1494,8 +1499,49 @@ def test_persistence_rollback_on_failure(isolated_session: Session) -> None:
     profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
     with patch.object(db, "commit", side_effect=RuntimeError("db down")):
         with pytest.raises(RuntimeError, match="db down"):
-            persist_candidate_profile(profile, db)
+            persist_candidate_profile(profile, db, TEST_USER_ID)
     assert db.query(Candidate).count() == before
+
+
+def test_persist_recovers_from_a_lost_race_instead_of_erroring(isolated_session: Session) -> None:
+    """Simulates two concurrent resume uploads from the same user (a
+    double-submit, or two tabs): this call's own existence check misses (as
+    if a concurrent upload hadn't committed yet from its point of view), but
+    a winner row is already committed by the time this call's insert runs.
+    Must update the winner's row with this call's data instead of raising or
+    creating a second Candidate for the same user — the DB-level unique
+    index on Candidate.user_id is what makes the insert fail in the first
+    place."""
+    db = isolated_session
+    winner = Candidate(user_id=TEST_USER_ID, name="Winner Of The Race", skills=[])
+    db.add(winner)
+    db.commit()
+
+    real_query = db.query
+    call_count = {"n": 0}
+
+    class _EmptyQuery:
+        def filter(self, *_a, **_k):
+            return self
+
+        def first(self):
+            return None
+
+    def query_that_misses_once(model):
+        if model is Candidate:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return _EmptyQuery()
+        return real_query(model)
+
+    with patch.object(db, "query", side_effect=query_that_misses_once):
+        profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
+        stored = persist_candidate_profile(profile, db, TEST_USER_ID)
+
+    assert stored.id == f"cand-{winner.id:03d}"
+    assert db.query(Candidate).count() == 1
+    row = db.query(Candidate).filter(Candidate.user_id == TEST_USER_ID).first()
+    assert row.name == "Alex Rivera"  # this call's data won, not left as "Winner Of The Race"
 
 
 def test_grounded_profile_persists_with_stored_id(isolated_session: Session) -> None:
@@ -1504,6 +1550,7 @@ def test_grounded_profile_persists_with_stored_id(isolated_session: Session) -> 
         "alex.pdf",
         build_simple_text_pdf(SAMPLE_RESUME_TEXT),
         db=db,
+        user_id=TEST_USER_ID,
         content_type="application/pdf",
         generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
     )
@@ -1556,6 +1603,7 @@ def test_build_from_upload_end_to_end(isolated_session: Session) -> None:
         "alex.pdf",
         content,
         db=isolated_session,
+        user_id=TEST_USER_ID,
         content_type="application/pdf",
         generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
     )
@@ -1575,6 +1623,7 @@ def test_upload_path_never_creates_named_temp_file(isolated_session: Session) ->
             "alex.pdf",
             content,
             db=isolated_session,
+            user_id=TEST_USER_ID,
             content_type="application/pdf",
             generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
         )
@@ -1645,7 +1694,7 @@ def test_preferences_associates_saved_row_with_the_current_candidate(isolated_cl
     location/LinkedIn/etc. lookups) could ever find it."""
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        candidate = Candidate(name="Jordan Quill", email="jordan@example.com", skills=[], projects=[],
+        candidate = Candidate(user_id=client.test_user_id, name="Jordan Quill", email="jordan@example.com", skills=[], projects=[],
                                experience=[], education=[], certifications=[], strengths=[], evidence_links=[])
         db.add(candidate)
         db.commit()

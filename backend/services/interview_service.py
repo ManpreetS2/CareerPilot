@@ -94,13 +94,13 @@ def _record_to_prep(record: InterviewPrepRecord, job_public_id: str) -> Intervie
     )
 
 
-def get_interview_prep(db: Session, job_id: str) -> InterviewPrep | None:
+def get_interview_prep(db: Session, job_id: str, user_id: int) -> InterviewPrep | None:
     """Read-only. Does not create, generate, or call a provider."""
 
     job = _get_job(db, job_id)
     record = (
         db.query(InterviewPrepRecord)
-        .filter(InterviewPrepRecord.job_id == job.id)
+        .filter(InterviewPrepRecord.job_id == job.id, InterviewPrepRecord.user_id == user_id)
         .first()
     )
     if record is None:
@@ -133,7 +133,7 @@ def _latest_fit_score(db: Session, job: JobRecord, candidate: Candidate | None) 
     )
 
 
-def load_interview_prep_context(db: Session, job_id: str) -> InterviewPrepContext:
+def load_interview_prep_context(db: Session, job_id: str, user_id: int) -> InterviewPrepContext:
     job = _get_job(db, job_id)
     intelligence_row = (
         db.query(JobIntelligenceRecord)
@@ -143,7 +143,7 @@ def load_interview_prep_context(db: Session, job_id: str) -> InterviewPrepContex
     if intelligence_row is None:
         raise InterviewIntelligenceMissingError()
     intelligence = get_stored_job_intelligence(db, job_id)
-    candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     skills: list[str] = []
     if candidate is not None:
         profile = candidate_record_to_profile(candidate)
@@ -250,12 +250,13 @@ def build_deterministic_interview_prep(context: InterviewPrepContext) -> Intervi
 def generate_and_store_interview_prep(
     db: Session,
     job_id: str,
+    user_id: int,
     *,
     improver: InterviewPrepImprover | None = None,
 ) -> InterviewPrep:
     """Explicit generate + idempotent upsert. Page load must not call this."""
 
-    context = load_interview_prep_context(db, job_id)
+    context = load_interview_prep_context(db, job_id, user_id)
     prep = build_deterministic_interview_prep(context)
     if improver is not None:
         prep = improver(context, prep)
@@ -263,12 +264,13 @@ def generate_and_store_interview_prep(
     now = _now()
     record = (
         db.query(InterviewPrepRecord)
-        .filter(InterviewPrepRecord.job_id == context.job_pk)
+        .filter(InterviewPrepRecord.job_id == context.job_pk, InterviewPrepRecord.user_id == user_id)
         .first()
     )
     if record is None:
         record = InterviewPrepRecord(
             job_id=context.job_pk,
+            user_id=user_id,
             likely_questions=list(prep.likely_questions),
             talking_points=list(prep.talking_points),
             gaps_to_address=list(prep.gaps_to_address),
@@ -282,7 +284,10 @@ def generate_and_store_interview_prep(
             db.rollback()
             existing = (
                 db.query(InterviewPrepRecord)
-                .filter(InterviewPrepRecord.job_id == context.job_pk)
+                .filter(
+                    InterviewPrepRecord.job_id == context.job_pk,
+                    InterviewPrepRecord.user_id == user_id,
+                )
                 .first()
             )
             if existing is None:

@@ -46,5 +46,41 @@ class Settings(BaseSettings):
     form_fill_headless: bool = True
     form_fill_timeout_ms: int = 20_000
 
+    # --- Auth ---
+    session_cookie_name: str = "careerpilot_session"
+    # Accepted only on the extension autofill route. Ordinary web routes
+    # authenticate exclusively from the HttpOnly session cookie.
+    session_header_name: str = "X-CareerPilot-Session"
+    session_ttl_days: int = 30
+    # False for local http. Production (APP_ENV=production) refuses to start
+    # unless COOKIE_SECURE=true.
+    cookie_secure: bool = False
+    app_env: str = "development"
+    # Comma-separated frontend origins. Never use "*" with credentials.
+    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # Exact chrome-extension://<id> origin. Empty disables extension CORS.
+    extension_origin: str = ""
+
+    @property
+    def cors_allow_origins(self) -> list[str]:
+        origins = [item.strip() for item in self.allowed_origins.split(",") if item.strip()]
+        if self.extension_origin.strip():
+            origins.append(self.extension_origin.strip())
+        return origins
+
+    @property
+    def cors_origin_regex(self) -> str | None:
+        # Exact configured extension origin is listed in allow_origins.
+        # Do not match arbitrary chrome-extension://* origins.
+        return None
+
+
+def validate_runtime_settings() -> None:
+    env = settings.app_env.strip().lower()
+    if env in {"production", "prod"} and not settings.cookie_secure:
+        raise RuntimeError(
+            "Production refuses insecure session cookies. Set COOKIE_SECURE=true."
+        )
+
 
 settings = Settings()

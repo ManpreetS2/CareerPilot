@@ -279,9 +279,34 @@ export function ApplicationPage() {
           {materialsState === "current" ? (
             <p className="text-sm text-ink-500">Saved materials for the current profile.</p>
           ) : materialsState === "stale_reviewed" ? (
-            <p className="text-sm text-ink-500">
-              Reviewed materials belong to a previous candidate profile and were not replaced.
-            </p>
+            <div className="flex flex-col items-end gap-2">
+              <p className="text-sm text-ink-500">
+                Reviewed materials belong to a previous candidate profile and were not replaced.
+              </p>
+              <button
+                type="button"
+                className="btn-secondary"
+                data-testid="discard-stale-materials"
+                onClick={() => {
+                  if (!jobId) return;
+                  void (async () => {
+                    setGenerating(true);
+                    setError(null);
+                    try {
+                      await api.discardStaleMaterials(jobId);
+                      setMaterials(null);
+                      setMaterialsState("missing");
+                    } catch (err) {
+                      setError(err);
+                    } finally {
+                      setGenerating(false);
+                    }
+                  })();
+                }}
+              >
+                Discard previous reviewed materials
+              </button>
+            </div>
           ) : (
             <button
               type="button"

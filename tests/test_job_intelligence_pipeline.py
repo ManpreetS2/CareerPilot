@@ -35,7 +35,7 @@ from scripts.test_job_intelligence_real_descriptions import (
     _has_required_variety,
     _select_postings,
 )
-from tests.test_fit_scoring import _candidate, _intelligence
+from tests.test_fit_scoring import TEST_USER_ID, _candidate, _intelligence
 from tests.test_job_intelligence import SequenceGenerator, _job, _payload
 
 
@@ -88,6 +88,7 @@ def test_score_with_stored_intelligence_makes_zero_provider_calls(isolated_sessi
     result = score_job_with_intelligence(
         isolated_session,
         job.public_id,
+        TEST_USER_ID,
         generate_fn=generator,
     )
 
@@ -105,6 +106,7 @@ def test_missing_intelligence_extracts_once_before_scoring(isolated_session) -> 
     result = score_job_with_intelligence(
         isolated_session,
         job.public_id,
+        TEST_USER_ID,
         generate_fn=generator,
     )
 
@@ -116,6 +118,7 @@ def test_missing_intelligence_extracts_once_before_scoring(isolated_session) -> 
     repeated = score_job_with_intelligence(
         isolated_session,
         job.public_id,
+        TEST_USER_ID,
         generate_fn=generator,
     )
 
@@ -154,6 +157,7 @@ def test_extraction_failures_persist_no_score(
         score_job_with_intelligence(
             isolated_session,
             job.public_id,
+            TEST_USER_ID,
             generate_fn=generator,
         )
 
@@ -175,6 +179,7 @@ def test_descriptionless_job_preserves_existing_unavailable_behavior(isolated_se
         score_job_with_intelligence(
             isolated_session,
             job.public_id,
+            TEST_USER_ID,
             generate_fn=generator,
         )
 
@@ -210,6 +215,7 @@ def test_non_scoreable_extraction_never_falls_back_to_provisional(
         score_job_with_intelligence(
             isolated_session,
             job.public_id,
+            TEST_USER_ID,
             generate_fn=generator,
         )
 
@@ -249,7 +255,7 @@ def test_stored_non_scoreable_intelligence_does_not_fallback_through_score_job(
         provider,
     ):
         with pytest.raises(RequirementsUnavailableError):
-            score_job(isolated_session, job.public_id)
+            score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     provider.assert_not_called()
     assert isolated_session.query(MatchScoreRecord).count() == 0
@@ -353,6 +359,7 @@ def test_concurrent_first_scores_extract_once_and_leave_one_row(tmp_path) -> Non
             return score_job_with_intelligence(
                 db,
                 job.public_id,
+                TEST_USER_ID,
                 generate_fn=generator,
             ).overall_score
 
@@ -394,6 +401,7 @@ def test_concurrent_first_scores_without_process_lock_leave_one_intelligence_row
             return score_job_with_intelligence(
                 db,
                 job.public_id,
+                TEST_USER_ID,
                 generate_fn=generator,
             ).overall_score
 
@@ -662,6 +670,7 @@ def test_orchestration_logs_are_count_and_identifier_only(
         score_job_with_intelligence(
             isolated_session,
             job.public_id,
+            TEST_USER_ID,
             generate_fn=generator,
         )
 

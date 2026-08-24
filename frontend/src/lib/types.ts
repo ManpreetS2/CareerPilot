@@ -1,5 +1,11 @@
 /** Shared TypeScript types mirroring backend Pydantic schemas. */
 
+export type User = {
+  id: number;
+  email: string;
+  created_at: string;
+};
+
 export type Project = {
   name: string;
   description?: string | null;

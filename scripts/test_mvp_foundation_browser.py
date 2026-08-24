@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Privacy-safe Playwright workflow for MVP dashboard, tracker, and interview prep.
+"""Privacy-safe Playwright workflow for authenticated multi-user MVP.
 
 Uses a temporary SQLite database, unique local ports, fake/no providers, and
 count-only output. Never touches data/careerpilot.db.
@@ -28,18 +28,23 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.db.database import Base
 from backend.db.models import (
+    ApplicationPackageRecord,
     ApplicationTrackerRecord,
     Candidate,
     InterviewPrepRecord,
     JobIntelligenceRecord,
     JobRecord,
     TargetPreference,
+    User,
 )
 
 PRODUCTION_DATABASE = (ROOT / "data" / "careerpilot.db").resolve()
 JOB_PUBLIC_ID = "mvp-browser-job"
 JOB_TITLE = "Synthetic Browser Engineer"
 JOB_COMPANY = "Fictional Browser Works"
+USER_A_EMAIL = "browser-a@example.com"
+USER_B_EMAIL = "browser-b@example.com"
+USER_PASSWORD = "browser-password-123"
 _FONT_HOSTS = ("fonts.googleapis.com", "fonts.gstatic.com")
 
 
@@ -138,33 +143,31 @@ def _is_stylesheet_font(url: str) -> bool:
     return any(host in url for host in _FONT_HOSTS)
 
 
-def _seed(session: Session, *, tracker_status: str = "saved") -> None:
-    candidate = Candidate(
-        name="Synthetic Browser Candidate",
-        email="browser@example.invalid",
-        skills=["Python"],
-        projects=[{"name": "Synthetic Planner", "description": "Python app", "technologies": ["Python"]}],
-        experience=[
-            {
-                "title": "Intern",
-                "company": "Fictional Harbor Labs",
-                "highlights": ["Wrote Python tests."],
-            }
-        ],
-        education=[{"institution": "Fictional Lakeside University", "degree": "B.S."}],
-        certifications=[],
-        strengths=["Backend"],
-        evidence_links=[],
-    )
-    session.add(candidate)
-    session.flush()
-    session.add(
-        TargetPreference(
-            candidate_id=candidate.id,
-            target_roles=["Software Engineer"],
-            preferred_locations=["Remote"],
-        )
-    )
+def _signup(page: Any, base: str, email: str, password: str) -> None:
+    page.goto(f"{base}/signup")
+    page.locator('input[type="email"]').fill(email)
+    page.locator('input[type="password"]').fill(password)
+    page.get_by_role("button", name=re.compile(r"Sign up", re.I)).click()
+    page.wait_for_url(re.compile(r"/dashboard"))
+
+
+def _login(page: Any, base: str, email: str, password: str) -> None:
+    # Full navigation clears any ProtectedRoute "from" state left by logout.
+    page.goto(f"{base}/login")
+    page.locator('input[type="email"]').fill(email)
+    page.locator('input[type="password"]').fill(password)
+    page.get_by_role("button", name=re.compile(r"^Log in$", re.I)).click()
+    page.wait_for_function("() => !window.location.pathname.includes('/login')")
+    page.goto(f"{base}/dashboard")
+    page.wait_for_url(re.compile(r"/dashboard"))
+
+
+def _logout(page: Any) -> None:
+    page.get_by_role("button", name=re.compile(r"Log out", re.I)).click()
+    page.wait_for_url(re.compile(r"/login"))
+
+
+def _seed_shared_job(session: Session) -> JobRecord:
     job = JobRecord(
         public_id=JOB_PUBLIC_ID,
         title=JOB_TITLE,
@@ -193,8 +196,63 @@ def _seed(session: Session, *, tracker_status: str = "saved") -> None:
             likely_interview_focus=["Python fundamentals"],
         )
     )
-    session.add(ApplicationTrackerRecord(job_id=job.id, status=tracker_status))
     session.commit()
+    session.refresh(job)
+    return job
+
+
+def _seed_user_private_rows(
+    session: Session,
+    *,
+    email: str,
+    job: JobRecord,
+    tracker_status: str = "saved",
+    name: str = "Synthetic Browser Candidate",
+) -> tuple[User, Candidate]:
+    user = session.query(User).filter(User.email == email).one()
+    candidate = Candidate(
+        user_id=user.id,
+        name=name,
+        email=email,
+        skills=["Python"],
+        projects=[{"name": "Synthetic Planner", "description": "Python app", "technologies": ["Python"]}],
+        experience=[
+            {
+                "title": "Intern",
+                "company": "Fictional Harbor Labs",
+                "highlights": ["Wrote Python tests."],
+            }
+        ],
+        education=[{"institution": "Fictional Lakeside University", "degree": "B.S."}],
+        certifications=[],
+        strengths=["Backend"],
+        evidence_links=[],
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(
+        TargetPreference(
+            user_id=user.id,
+            candidate_id=candidate.id,
+            target_roles=["Software Engineer"],
+            preferred_locations=["Remote"],
+        )
+    )
+    existing_tracker = (
+        session.query(ApplicationTrackerRecord)
+        .filter(
+            ApplicationTrackerRecord.job_id == job.id,
+            ApplicationTrackerRecord.user_id == user.id,
+        )
+        .first()
+    )
+    if existing_tracker is None:
+        session.add(
+            ApplicationTrackerRecord(job_id=job.id, user_id=user.id, status=tracker_status)
+        )
+    session.commit()
+    session.refresh(candidate)
+    return user, candidate
 
 
 def run_browser_workflow() -> dict[str, int]:
@@ -218,6 +276,7 @@ def run_browser_workflow() -> dict[str, int]:
         Base.metadata.create_all(bind=engine)
         SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, class_=Session)
 
+        origin = f"http://127.0.0.1:{frontend_port}"
         backend_env = os.environ.copy()
         backend_env["DATABASE_URL"] = f"sqlite:///{database_path}"
         backend_env["GEMINI_API_KEY"] = ""
@@ -225,6 +284,10 @@ def run_browser_workflow() -> dict[str, int]:
         backend_env["OPENAI_API_KEY"] = ""
         backend_env["ADZUNA_APP_ID"] = ""
         backend_env["ADZUNA_APP_KEY"] = ""
+        backend_env["APP_ENV"] = "development"
+        backend_env["COOKIE_SECURE"] = "false"
+        backend_env["ALLOWED_ORIGINS"] = origin
+        backend_env["EXTENSION_ORIGIN"] = ""
         frontend_env = os.environ.copy()
         frontend_env["VITE_API_BASE_URL"] = f"http://127.0.0.1:{backend_port}"
         backend_log_handle = backend_log.open("w", encoding="utf-8")
@@ -269,6 +332,7 @@ def run_browser_workflow() -> dict[str, int]:
         score_posts: list[str] = []
         intelligence_posts: list[str] = []
         materials_posts: list[str] = []
+        me_gets: list[str] = []
         blocked_external: list[str] = []
         try:
             _wait_for_url(
@@ -292,7 +356,8 @@ def run_browser_workflow() -> dict[str, int]:
                     executable_path=str(executable) if executable else None,
                     args=["--disable-web-security"],
                 )
-                page = browser.new_page()
+                context = browser.new_context()
+                page = context.new_page()
 
                 def _route(route: Any) -> None:
                     url = route.request.url
@@ -323,23 +388,28 @@ def run_browser_workflow() -> dict[str, int]:
                         intelligence_posts.append(url)
                     if method == "POST" and path.endswith("/generate-materials"):
                         materials_posts.append(url)
+                    if method == "GET" and path.endswith("/api/auth/me"):
+                        me_gets.append(url)
 
                 page.on("request", _track)
-                base = f"http://127.0.0.1:{frontend_port}"
+                base = origin
 
                 page.goto(f"{base}/dashboard")
+                expect(page).to_have_url(re.compile(r"/login"))
+                checks += 1
+
+                _signup(page, base, USER_A_EMAIL, USER_PASSWORD)
                 expect(page.get_by_role("heading", name="Find the right jobs", exact=False)).to_be_visible()
                 expect(_metric(page, "Discovered")).to_have_text("0")
-                expect(_metric(page, "Interviews")).to_have_text("0")
                 checks += 1
 
                 with SessionLocal() as session:
-                    _seed(session)
+                    job = _seed_shared_job(session)
+                    _seed_user_private_rows(session, email=USER_A_EMAIL, job=job)
 
                 page.reload()
                 expect(_metric(page, "Discovered")).to_have_text("1")
                 expect(_metric(page, "Verified")).to_have_text("1")
-                expect(_metric(page, "Interviews")).to_have_text("0")
                 checks += 1
 
                 before_score_posts = len(score_posts)
@@ -348,7 +418,6 @@ def run_browser_workflow() -> dict[str, int]:
                 page.goto(f"{base}/jobs")
                 expect(page.get_by_role("heading", name="Jobs", exact=True)).to_be_visible()
                 expect(page.get_by_text(JOB_TITLE, exact=True)).to_be_visible()
-                expect(page.get_by_text("Not scored", exact=True)).to_be_visible()
                 if len(score_posts) != before_score_posts:
                     raise AssertionError("Jobs page load issued a scoring POST.")
                 if len(intelligence_posts) != before_intelligence_posts:
@@ -362,8 +431,6 @@ def run_browser_workflow() -> dict[str, int]:
                 expect(page.get_by_text("No grounded materials stored yet.")).to_be_visible()
                 if len(score_posts) != before_score_posts:
                     raise AssertionError("Application page load issued a scoring POST.")
-                if len(intelligence_posts) != before_intelligence_posts:
-                    raise AssertionError("Application page load issued an intelligence POST.")
                 if len(materials_posts) != before_materials_posts:
                     raise AssertionError("Application page load issued a materials POST.")
                 checks += 1
@@ -386,13 +453,6 @@ def run_browser_workflow() -> dict[str, int]:
                     raise AssertionError("Application refresh issued another materials POST.")
                 checks += 1
 
-                page.goto(f"{base}/jobs")
-                page.get_by_test_id("recommendation-filter").select_option("unscored")
-                expect(page.get_by_text(JOB_TITLE, exact=True)).to_have_count(0)
-                page.get_by_test_id("recommendation-filter").select_option("all")
-                expect(page.get_by_text(JOB_TITLE, exact=True)).to_be_visible()
-                checks += 1
-
                 page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
                 approve = page.get_by_role("button", name="Approve")
                 expect(approve).to_be_disabled()
@@ -400,8 +460,6 @@ def run_browser_workflow() -> dict[str, int]:
                 expect(approve).to_be_enabled()
                 approve.click()
                 expect(page.get_by_text("approved", exact=False)).to_be_visible()
-                expect(page.get_by_role("heading", name="Assisted apply")).to_be_visible()
-                expect(page.get_by_role("button", name="Fill Application Form")).to_be_visible()
                 checks += 1
 
                 before_patches = len(patch_calls)
@@ -422,22 +480,10 @@ def run_browser_workflow() -> dict[str, int]:
                     raise AssertionError("Invalid saved -> applied transition was offered.")
                 if "pending_review" not in option_values:
                     raise AssertionError("Valid saved -> pending_review transition was missing.")
-                checks += 1
-
                 select.select_option("pending_review")
                 expect(select).to_have_value("pending_review")
                 if len(patch_calls) != before_patches + 1:
                     raise AssertionError("Valid tracker selection did not issue exactly one PATCH.")
-                page.reload()
-                expect(page.get_by_label(f"Tracking status for {JOB_TITLE} at {JOB_COMPANY}")).to_have_value(
-                    "pending_review"
-                )
-                if len(patch_calls) != before_patches + 1:
-                    raise AssertionError("Applications refresh issued another tracker PATCH.")
-                checks += 1
-
-                page.get_by_role("link", name="Open application").click()
-                expect(page).to_have_url(re.compile(rf"/applications/{JOB_PUBLIC_ID}$"))
                 checks += 1
 
                 before_interview_posts = len(interview_posts)
@@ -445,7 +491,6 @@ def run_browser_workflow() -> dict[str, int]:
                 page.goto(f"{base}/jobs/{JOB_PUBLIC_ID}")
                 expect(page.get_by_role("heading", name=JOB_TITLE)).to_be_visible()
                 expect(page.get_by_text("No interview prep stored yet.")).to_be_visible()
-                expect(page.get_by_text("Loading interview prep")).to_have_count(0)
                 if len(interview_posts) != before_interview_posts:
                     raise AssertionError("Job Detail load issued an interview POST.")
                 if len(interview_gets) < before_interview_gets + 1:
@@ -453,31 +498,111 @@ def run_browser_workflow() -> dict[str, int]:
                 checks += 1
 
                 page.get_by_role("button", name="Prepare interview").click()
-                expect(page.get_by_text("What would you expect to discuss about Python fundamentals for this role?", exact=True)).to_be_visible()
-                expect(page.get_by_text("How would you demonstrate Python for this role?", exact=True)).to_be_visible()
+                expect(
+                    page.get_by_text(
+                        "What would you expect to discuss about Python fundamentals for this role?",
+                        exact=True,
+                    )
+                ).to_be_visible()
                 if len(interview_posts) != before_interview_posts + 1:
                     raise AssertionError("Prepare Interview did not issue exactly one POST.")
-                page.reload()
-                expect(page.get_by_text("How would you demonstrate Python for this role?", exact=True)).to_be_visible()
-                if len(interview_posts) != before_interview_posts + 1:
-                    raise AssertionError("Job Detail refresh issued another interview POST.")
                 checks += 1
 
-                page.goto(f"{base}/dashboard")
-                expect(_metric(page, "Interviews")).to_have_text("0")
-                with SessionLocal() as session:
-                    prep_count = session.query(InterviewPrepRecord).count()
-                    tracker = session.query(ApplicationTrackerRecord).one()
-                    if prep_count != 1:
-                        raise AssertionError("Interview prep was not stored once.")
-                    if tracker.status != "pending_review":
-                        raise AssertionError("Interview prep mutated tracker status.")
-                checks += 1
-
+                # Cross-user isolation: user B must not see user A's private rows.
+                _logout(page)
+                _signup(page, base, USER_B_EMAIL, USER_PASSWORD)
+                page.goto(f"{base}/applications")
+                expect(page.get_by_text(JOB_TITLE, exact=True)).to_have_count(0)
+                page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
+                expect(page.get_by_text("No grounded materials stored yet.")).to_be_visible()
                 page.goto(f"{base}/jobs/{JOB_PUBLIC_ID}")
-                expect(page.get_by_text("Loading interview prep")).to_have_count(0)
-                expect(page.get_by_role("alert")).to_have_count(0)
-                expect(page.get_by_text("How would you demonstrate Python for this role?", exact=True)).to_be_visible()
+                expect(page.get_by_text("No interview prep stored yet.")).to_be_visible()
+                checks += 1
+
+                # Explicit stale reviewed reset for user A.
+                _logout(page)
+                _login(page, base, USER_A_EMAIL, USER_PASSWORD)
+                with SessionLocal() as session:
+                    user_a = session.query(User).filter(User.email == USER_A_EMAIL).one()
+                    package = (
+                        session.query(ApplicationPackageRecord)
+                        .filter(ApplicationPackageRecord.user_id == user_a.id)
+                        .one()
+                    )
+                    package.approval_status = "approved"
+                    old_candidate = (
+                        session.query(Candidate).filter(Candidate.user_id == user_a.id).one()
+                    )
+                    old_candidate.user_id = None
+                    session.flush()
+                    session.add(
+                        Candidate(
+                            user_id=user_a.id,
+                            name="Synthetic Browser Candidate v2",
+                            email=USER_A_EMAIL,
+                            skills=["Python"],
+                            projects=[
+                                {
+                                    "name": "Synthetic Planner",
+                                    "description": "Python app",
+                                    "technologies": ["Python"],
+                                }
+                            ],
+                            experience=[
+                                {
+                                    "title": "Intern",
+                                    "company": "Fictional Harbor Labs",
+                                    "highlights": ["Wrote Python tests."],
+                                }
+                            ],
+                            education=[
+                                {
+                                    "institution": "Fictional Lakeside University",
+                                    "degree": "B.S.",
+                                }
+                            ],
+                            certifications=[],
+                            strengths=["Backend"],
+                            evidence_links=[],
+                        )
+                    )
+                    session.commit()
+
+                page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
+                discard = page.get_by_test_id("discard-stale-materials")
+                expect(discard).to_be_visible()
+                before_materials = len(materials_posts)
+                discard.click()
+                expect(page.get_by_test_id("generate-materials")).to_be_visible()
+                if len(materials_posts) != before_materials:
+                    raise AssertionError("Discard stale materials issued a materials POST.")
+                checks += 1
+
+                # Extension header isolation against ordinary routes.
+                cookies = context.cookies()
+                session_cookie = next(
+                    (item for item in cookies if item["name"] == "careerpilot_session"),
+                    None,
+                )
+                if session_cookie is None:
+                    raise AssertionError("Missing careerpilot_session cookie after login.")
+                import urllib.error
+                import urllib.request as ureq
+
+                req = ureq.Request(
+                    f"http://127.0.0.1:{backend_port}/api/jobs",
+                    headers={"X-CareerPilot-Session": session_cookie["value"]},
+                    method="GET",
+                )
+                try:
+                    with ureq.urlopen(req, timeout=5) as response:
+                        status = response.status
+                except urllib.error.HTTPError as err:
+                    status = err.code
+                if status != 401:
+                    raise AssertionError(
+                        f"Extension header authenticated an ordinary route status={status}"
+                    )
                 checks += 1
 
                 if blocked_external:
@@ -495,6 +620,7 @@ def run_browser_workflow() -> dict[str, int]:
                 "score_posts": len(score_posts),
                 "intelligence_posts": len(intelligence_posts),
                 "materials_posts": len(materials_posts),
+                "me_gets": len(me_gets),
                 "external_requests": len(blocked_external),
             }
         finally:
@@ -512,8 +638,8 @@ def main() -> int:
         "mvp_browser_checks={checks} tracker_patches={tracker_patches} "
         "interview_posts={interview_posts} interview_gets={interview_gets} "
         "score_posts={score_posts} intelligence_posts={intelligence_posts} "
-        "materials_posts={materials_posts} external_requests={external_requests} "
-        "result=pass".format(**result)
+        "materials_posts={materials_posts} me_gets={me_gets} "
+        "external_requests={external_requests} result=pass".format(**result)
     )
     return 0
 

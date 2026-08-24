@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 from backend.db.models import ApplicationPackageRecord, Candidate, MatchScoreRecord
 from backend.services.application_materials_agent import (
     ApplicationMaterialsConflictError,
     ApplicationMaterialsParseError,
+    ApplicationMaterialsGroundingError,
     ApplicationMaterialsStructuredOutput,
+    StaleApplicationMaterialsError,
     generate_grounded_application_materials,
     ground_application_materials,
     is_grounded_package_record,
@@ -22,6 +26,7 @@ from backend.services.application_service import (
     get_stored_application_package,
 )
 from tests.mvp_helpers import (
+    TEST_USER_ID,
     VALID_MATERIALS_JSON,
     fake_grounded_generator,
     insert_candidate,
@@ -38,8 +43,7 @@ def _report(session, **fields):
             public_id="job-materials",
             title=fields.pop("job_title", "Software Engineer Intern"),
         )
-    job_id = session.query(type(seed_materials_prerequisites(session)[0])).first()
-    context = load_application_materials_context(session, "manual-abc123")
+    context = load_application_materials_context(session, "manual-abc123", TEST_USER_ID)
     output = ApplicationMaterialsStructuredOutput(
         tailored_bullets=list(fields.get("bullets") or []),
         cover_letter_draft=fields.get("cover") or "",
@@ -51,7 +55,7 @@ def _report(session, **fields):
 
 def test_target_company_does_not_support_candidate_employment_history(isolated_session) -> None:
     seed_materials_prerequisites(isolated_session, title="Software Engineer Intern")
-    context = load_application_materials_context(isolated_session, "manual-abc123")
+    context = load_application_materials_context(isolated_session, "manual-abc123", TEST_USER_ID)
     output = ApplicationMaterialsStructuredOutput(
         tailored_bullets=["Worked at Acme."],
         cover_letter_draft="I previously worked at Acme.",
@@ -65,7 +69,7 @@ def test_target_company_does_not_support_candidate_employment_history(isolated_s
 
 def test_target_role_does_not_support_candidate_title_claim(isolated_session) -> None:
     seed_materials_prerequisites(isolated_session, title="Data Scientist")
-    context = load_application_materials_context(isolated_session, "manual-abc123")
+    context = load_application_materials_context(isolated_session, "manual-abc123", TEST_USER_ID)
     output = ApplicationMaterialsStructuredOutput(
         tailored_bullets=["I am a Data Scientist."],
         cover_letter_draft="My background as a Data Scientist is a strong match.",
@@ -79,7 +83,7 @@ def test_target_role_does_not_support_candidate_title_claim(isolated_session) ->
 
 def test_job_interest_statements_may_use_target_company_and_role(isolated_session) -> None:
     seed_materials_prerequisites(isolated_session, title="Data Scientist")
-    context = load_application_materials_context(isolated_session, "manual-abc123")
+    context = load_application_materials_context(isolated_session, "manual-abc123", TEST_USER_ID)
     output = ApplicationMaterialsStructuredOutput(
         tailored_bullets=["Built Python APIs at Northstar Labs as Software Engineering Intern."],
         cover_letter_draft="I am applying to Acme. I am interested in the Data Scientist role at Acme.",
@@ -129,7 +133,7 @@ def test_empty_generator_output_does_not_persist(isolated_session) -> None:
 
     with pytest.raises(ApplicationMaterialsParseError):
         generate_grounded_application_materials(
-            isolated_session, "manual-abc123", generator=empty
+            isolated_session, "manual-abc123", TEST_USER_ID, generator=empty
         )
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
 
@@ -146,7 +150,7 @@ def test_typeerror_from_generator_invokes_once_and_persists_nothing(isolated_ses
 
     with pytest.raises(ApplicationMaterialsParseError):
         generate_grounded_application_materials(
-            isolated_session, "manual-abc123", generator=one_arg_contract
+            isolated_session, "manual-abc123", TEST_USER_ID, generator=one_arg_contract
         )
     assert calls["n"] == 1
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
@@ -168,7 +172,7 @@ def test_get_rejects_package_from_previous_candidate(isolated_client) -> None:
 def test_refresh_reuses_current_candidate_package_without_provider(isolated_session) -> None:
     seed_materials_prerequisites(isolated_session)
     first = get_or_generate_application_package(
-        isolated_session, "manual-abc123", generator=fake_grounded_generator
+        isolated_session, "manual-abc123", TEST_USER_ID, generator=fake_grounded_generator
     )
     calls = {"n": 0}
 
@@ -177,7 +181,7 @@ def test_refresh_reuses_current_candidate_package_without_provider(isolated_sess
         return VALID_MATERIALS_JSON
 
     second = get_or_generate_application_package(
-        isolated_session, "manual-abc123", generator=counting
+        isolated_session, "manual-abc123", TEST_USER_ID, generator=counting
     )
     assert calls["n"] == 0
     assert first.tailored_bullets == second.tailored_bullets
@@ -189,7 +193,7 @@ def test_stale_pending_package_is_replaced_after_new_grounded_output(isolated_se
     second = insert_candidate(isolated_session)
     insert_score(isolated_session, job, second)
     package = get_or_generate_application_package(
-        isolated_session, "manual-abc123", generator=fake_grounded_generator
+        isolated_session, "manual-abc123", TEST_USER_ID, generator=fake_grounded_generator
     )
     record = isolated_session.query(ApplicationPackageRecord).one()
     assert record.candidate_id == second.id
@@ -203,10 +207,11 @@ def test_stale_approved_package_is_protected(isolated_session) -> None:
     isolated_session.commit()
     second = insert_candidate(isolated_session)
     insert_score(isolated_session, job, second)
-    with pytest.raises((ApplicationMaterialsConflictError, Exception)):
+    with pytest.raises(HTTPException) as exc_info:
         get_or_generate_application_package(
-            isolated_session, "manual-abc123", generator=fake_grounded_generator
+            isolated_session, "manual-abc123", TEST_USER_ID, generator=fake_grounded_generator
         )
+    assert exc_info.value.status_code == 409
     stored = isolated_session.query(ApplicationPackageRecord).one()
     assert stored.candidate_id == first.id
     assert stored.approval_status == "approved"
@@ -216,6 +221,7 @@ def test_unique_conflict_does_not_return_ungrounded_winner(isolated_session, mon
     job, candidate = seed_materials_prerequisites(isolated_session)
     winner = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=candidate.user_id,
         candidate_id=candidate.id,
         tailored_bullets=[],
         cover_letter_draft="",
@@ -245,19 +251,20 @@ def test_unique_conflict_does_not_return_ungrounded_winner(isolated_session, mon
         return real_query(model)
 
     monkeypatch.setattr(isolated_session, "query", miss_once)
-    with pytest.raises((ApplicationMaterialsConflictError, ApplicationMaterialsParseError)):
+    with pytest.raises(ApplicationMaterialsConflictError):
         generate_grounded_application_materials(
-            isolated_session, "manual-abc123", generator=fake_grounded_generator
+            isolated_session, "manual-abc123", TEST_USER_ID, generator=fake_grounded_generator
         )
     monkeypatch.undo()
-    stored = get_stored_application_package
-    with pytest.raises(Exception):
-        stored(isolated_session, "manual-abc123")
+    from backend.services.application_service import StoredMaterialsNotFoundError
+
+    with pytest.raises(StoredMaterialsNotFoundError):
+        get_stored_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
 
 
 def test_unsupported_word_quantity_is_rejected(isolated_session) -> None:
     seed_materials_prerequisites(isolated_session)
-    context = load_application_materials_context(isolated_session, "manual-abc123")
+    context = load_application_materials_context(isolated_session, "manual-abc123", TEST_USER_ID)
     years = ApplicationMaterialsStructuredOutput(
         tailored_bullets=["I have ten years of Python experience."],
         cover_letter_draft="I built Python APIs at Northstar Labs.",
@@ -294,7 +301,7 @@ def test_supported_ten_years_is_retained_when_evidence_matches(isolated_session)
         }
     ]
     isolated_session.commit()
-    context = load_application_materials_context(isolated_session, "manual-abc123")
+    context = load_application_materials_context(isolated_session, "manual-abc123", TEST_USER_ID)
     output = ApplicationMaterialsStructuredOutput(
         tailored_bullets=["I have ten years of Python experience at Northstar Labs."],
         cover_letter_draft="I built Python APIs at Northstar Labs.",
@@ -307,7 +314,7 @@ def test_supported_ten_years_is_retained_when_evidence_matches(isolated_session)
 
 def test_one_of_my_strengths_is_not_treated_as_a_quantity(isolated_session) -> None:
     seed_materials_prerequisites(isolated_session)
-    context = load_application_materials_context(isolated_session, "manual-abc123")
+    context = load_application_materials_context(isolated_session, "manual-abc123", TEST_USER_ID)
     output = ApplicationMaterialsStructuredOutput(
         tailored_bullets=["Backend APIs are one of my strengths, including Python at Northstar Labs."],
         cover_letter_draft="I built Python APIs at Northstar Labs.",
@@ -316,6 +323,85 @@ def test_one_of_my_strengths_is_not_treated_as_a_quantity(isolated_session) -> N
     )
     report = ground_application_materials(output, context)
     assert report.grounded is True
+
+
+def test_lowercase_employer_title_and_interest_laundering_attacks_are_rejected(isolated_session) -> None:
+    seed_materials_prerequisites(isolated_session, title="Data Scientist")
+    context = load_application_materials_context(isolated_session, "manual-abc123", TEST_USER_ID)
+    attacks = [
+        "worked at globex.",
+        "worked at acme.",
+        "I work as a data scientist.",
+        "I have data scientist experience.",
+        "I have twenty years of Python experience.",
+        "My accomplishments at Acme make me a fit for this role.",
+        "I delivered Python APIs at Acme for this role.",
+    ]
+    for claim in attacks:
+        output = ApplicationMaterialsStructuredOutput(
+            tailored_bullets=[claim],
+            cover_letter_draft=claim,
+            recruiter_message="Happy to discuss Python.",
+            source_traceability_notes=["Python <- skills"],
+        )
+        report = ground_application_materials(output, context)
+        assert report.grounded is False, claim
+        assert isolated_session.query(ApplicationPackageRecord).count() == 0
+
+        def fake(_prompt: str, _system: str | None = None, *, _claim: str = claim) -> str:
+            return json.dumps(
+                {
+                    "tailored_bullets": [_claim],
+                    "cover_letter_draft": _claim,
+                    "recruiter_message": "Happy to discuss Python.",
+                    "source_traceability_notes": ["Python <- skills"],
+                }
+            )
+
+        with pytest.raises(
+            (ApplicationMaterialsParseError, ApplicationMaterialsConflictError, ApplicationMaterialsGroundingError)
+        ):
+            generate_grounded_application_materials(
+                isolated_session, "manual-abc123", TEST_USER_ID, generator=fake
+            )
+        assert isolated_session.query(ApplicationPackageRecord).count() == 0
+
+
+def test_word_quantities_and_fuzzy_magnitudes_are_typed(isolated_session) -> None:
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    candidate.experience = [
+        {
+            "title": "Software Engineering Intern",
+            "company": "Northstar Labs",
+            "start_date": "2024-05",
+            "end_date": "2025-08",
+            "highlights": ["Shipped 2 APIs and two APIs for campus events serving 100 users."],
+        }
+    ]
+    isolated_session.commit()
+    context = load_application_materials_context(isolated_session, "manual-abc123", TEST_USER_ID)
+    supported = ApplicationMaterialsStructuredOutput(
+        tailored_bullets=["I shipped two APIs at Northstar Labs."],
+        cover_letter_draft="I built Python APIs at Northstar Labs.",
+        recruiter_message="Happy to discuss Python.",
+        source_traceability_notes=["Python <- skills"],
+    )
+    assert ground_application_materials(supported, context).grounded is True
+    rejected = ApplicationMaterialsStructuredOutput(
+        tailored_bullets=["I shipped one hundred users of APIs at Northstar Labs."],
+        cover_letter_draft="I have a decade of Kubernetes at Northstar Labs.",
+        recruiter_message="Happy to discuss Python.",
+        source_traceability_notes=["Python <- skills"],
+    )
+    report = ground_application_materials(rejected, context)
+    assert report.grounded is False
+    dozens = ApplicationMaterialsStructuredOutput(
+        tailored_bullets=["I shipped dozens of APIs at Northstar Labs."],
+        cover_letter_draft="I built Python APIs at Northstar Labs.",
+        recruiter_message="Happy to discuss Python.",
+        source_traceability_notes=["Python <- skills"],
+    )
+    assert ground_application_materials(dozens, context).grounded is False
 
 
 def test_production_main_has_no_browser_fake_materials_backdoor() -> None:

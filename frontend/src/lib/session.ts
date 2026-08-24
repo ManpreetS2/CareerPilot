@@ -5,6 +5,16 @@ const CANDIDATE_KEY = "careerpilot.candidate";
 const PREFERENCES_KEY = "careerpilot.preferences";
 const SELECTED_JOB_KEY = "careerpilot.selectedJobId";
 
+let activeUserId: number | null = null;
+
+export function bindSessionUser(userId: number | null) {
+  activeUserId = userId;
+}
+
+function scopedKey(base: string): string {
+  return activeUserId == null ? base : `${base}.u${activeUserId}`;
+}
+
 /** Prototype hourly values were small positives (e.g. 35). Annual salaries are >= 10000. */
 export const LEGACY_HOURLY_SALARY_CEILING = 9999;
 
@@ -31,11 +41,11 @@ export function sanitizeStoredPreferences(
 }
 
 export function saveCandidate(candidate: CandidateProfile) {
-  localStorage.setItem(CANDIDATE_KEY, JSON.stringify(candidate));
+  localStorage.setItem(scopedKey(CANDIDATE_KEY), JSON.stringify(candidate));
 }
 
 export function savePreferences(preferences: TargetPreferences) {
-  localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
+  localStorage.setItem(scopedKey(PREFERENCES_KEY), JSON.stringify(preferences));
 }
 
 /** @deprecated Prefer saveCandidate / savePreferences independently. */
@@ -48,25 +58,34 @@ export function saveCandidateSession(
 }
 
 export function saveSelectedJobId(jobId: string) {
-  localStorage.setItem(SELECTED_JOB_KEY, jobId);
+  localStorage.setItem(scopedKey(SELECTED_JOB_KEY), jobId);
+}
+
+export function clearCandidateSession() {
+  const prefixes = [CANDIDATE_KEY, PREFERENCES_KEY, SELECTED_JOB_KEY];
+  for (const key of Object.keys(localStorage)) {
+    if (prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}.u`))) {
+      localStorage.removeItem(key);
+    }
+  }
 }
 
 export function getSelectedJobId(): string | null {
-  return localStorage.getItem(SELECTED_JOB_KEY);
+  return localStorage.getItem(scopedKey(SELECTED_JOB_KEY));
 }
 
 export function useCandidateSession() {
   const [candidate, setCandidate] = useState<CandidateProfile | null>(() =>
-    readJson<CandidateProfile>(CANDIDATE_KEY),
+    readJson<CandidateProfile>(scopedKey(CANDIDATE_KEY)),
   );
   const [preferences, setPreferences] = useState<TargetPreferences | null>(() =>
-    sanitizeStoredPreferences(readJson<TargetPreferences>(PREFERENCES_KEY)),
+    sanitizeStoredPreferences(readJson<TargetPreferences>(scopedKey(PREFERENCES_KEY))),
   );
 
   useEffect(() => {
     const onStorage = () => {
-      setCandidate(readJson<CandidateProfile>(CANDIDATE_KEY));
-      setPreferences(sanitizeStoredPreferences(readJson<TargetPreferences>(PREFERENCES_KEY)));
+      setCandidate(readJson<CandidateProfile>(scopedKey(CANDIDATE_KEY)));
+      setPreferences(sanitizeStoredPreferences(readJson<TargetPreferences>(scopedKey(PREFERENCES_KEY))));
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);

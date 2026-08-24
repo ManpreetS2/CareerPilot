@@ -32,6 +32,7 @@ _JOB_LOCKS = tuple(threading.Lock() for _ in range(64))
 def score_job_with_intelligence(
     db: Session,
     job_public_id: str,
+    user_id: int,
     *,
     generate_fn: GenerateFn | None = None,
     as_of: date | None = None,
@@ -41,7 +42,7 @@ def score_job_with_intelligence(
     with job_lock:
         job = load_job(db, job_public_id)
         # Preserve the candidate prerequisite before spending a provider request.
-        load_latest_candidate(db)
+        load_latest_candidate(db, user_id)
         intelligence_exists = (
             db.query(JobIntelligenceRecord.id)
             .filter(JobIntelligenceRecord.job_id == job.id)
@@ -78,4 +79,4 @@ def score_job_with_intelligence(
         )
         if intelligence_exists and load_requirements(db, job).source != "intelligence":
             raise RequirementsUnavailableError()
-        return score_job(db, job_public_id, as_of=as_of)
+        return score_job(db, job_public_id, user_id, as_of=as_of)

@@ -79,7 +79,7 @@ _STRUCTURED_FIELDS = (
 )
 
 _PARENT_KINDS = frozenset({"experience", "project", "education", "certification"})
-_ORG_NAME = r"[A-Z][A-Za-z0-9&.\'-]*(?:\s+[A-Z][A-Za-z0-9&.\'-]*){0,4}"
+_ORG_NAME = r"[A-Za-z][A-Za-z0-9&.\'-]*(?:\s+[A-Za-z][A-Za-z0-9&.\'-]*){0,4}"
 _AT_RE = re.compile(
     rf"\b(?:(?:work(?:ed|ing)?|intern(?:ed)?|employed|joined)\s+)?(?:at|from)\s+({_ORG_NAME})"
 )
@@ -93,7 +93,8 @@ _PRODUCT_LAUNCH_RE = re.compile(
     re.I,
 )
 _PROJECT_BUILD_RE = re.compile(
-    rf"\b(?:[Bb]uilt|[Cc]reated|[Dd]eveloped)\s+({_ORG_NAME})"
+    rf"\b(?:[Bb]uilt|[Cc]reated|[Dd]eveloped)\s+({_ORG_NAME}?)"
+    rf"(?=\s+(?:at|for|with|using|via|from|by|in|on|as|and|to)\b|[.,;!?]|$)"
 )
 _LEADERSHIP_RES = (
     re.compile(r"\bled (?:a |the )?(?:global )?.{0,50}\bteam\b", re.I),
@@ -116,12 +117,19 @@ _JOB_INTEREST_FRAME_RE = re.compile(
     re.I,
 )
 _CANDIDATE_EMPLOYMENT_RE = re.compile(
-    r"\b(?:my (?:experience|background|time) (?:at|as)|worked at|working at|"
-    r"interned at|served as|i (?:previously )?worked at)\b",
+    r"\b(?:worked at|work(?:ing)? at|employed (?:at|by)|joined|interned at|"
+    r"my (?:experience|background|time|accomplishments?) (?:at|as)|"
+    r"experience (?:at|with)|background at|accomplishments? at|"
+    r"i (?:previously )?work(?:ed)? at|i work as|i have .{0,40} experience)\b",
     re.I,
 )
 _CANDIDATE_SELF_TITLE_RE = re.compile(
-    r"\b(?:i(?:'m| am| was)|my background as|served as)\s+(?:a |an )?",
+    r"\b(?:i(?:'m| am| was)|my background as|served as|i work as|i have)\s+(?:a |an )?",
+    re.I,
+)
+_ACHIEVEMENT_VERB_RE = re.compile(
+    r"\b(?:delivered|built|shipped|reduced|led|launched|implemented|developed|"
+    r"accomplished|accomplishments?|worked|working|employed|interned|joined)\b",
     re.I,
 )
 _MAX_BULLETS = 8
@@ -131,6 +139,8 @@ _MAX_COVER_CHARS = 4000
 _MAX_RECRUITER_CHARS = 1500
 _MAX_NOTE_CHARS = 400
 _WORD_NUMBERS = {
+    "zero": "0",
+    "one": "1",
     "two": "2",
     "three": "3",
     "four": "4",
@@ -142,13 +152,28 @@ _WORD_NUMBERS = {
     "ten": "10",
     "eleven": "11",
     "twelve": "12",
-    "dozen": "12",
+    "thirteen": "13",
+    "fourteen": "14",
+    "fifteen": "15",
+    "sixteen": "16",
+    "seventeen": "17",
+    "eighteen": "18",
+    "nineteen": "19",
+    "twenty": "20",
+    "thirty": "30",
+    "forty": "40",
+    "fifty": "50",
+    "sixty": "60",
+    "seventy": "70",
+    "eighty": "80",
+    "ninety": "90",
 }
 _WORD_MAGNITUDES = {
-    "dozens": "12",
+    "dozens": "dozens",
     "hundreds": "hundreds",
     "thousands": "thousands",
     "millions": "millions",
+    "decade": "decade",
 }
 _QUANTITY_UNITS = r"(?:years?|months?|internships?|apis?|users?|customers?|dollars?)"
 _STRENGTH_RE = re.compile(
@@ -383,6 +408,7 @@ class ApplicationMaterialsContext:
     job_pk: int
     candidate: CandidateProfile
     candidate_pk: int
+    user_id: int
     intelligence: JobIntelligence
     fit_score: MatchScore
     preferences: TargetPreferences | None
@@ -468,14 +494,14 @@ def _match_record_to_schema(record: MatchScoreRecord, job_public_id: str) -> Mat
     )
 
 
-def load_application_materials_context(db: Session, job_id: str) -> ApplicationMaterialsContext:
+def load_application_materials_context(db: Session, job_id: str, user_id: int) -> ApplicationMaterialsContext:
     """Load stored grounded records only. Never creates or mutates rows."""
 
     job_record = db.query(JobRecord).filter(JobRecord.public_id == job_id).first()
     if job_record is None:
         raise MissingJobError()
 
-    candidate_record = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    candidate_record = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     if candidate_record is None:
         raise MissingCandidateError()
 
@@ -509,7 +535,7 @@ def load_application_materials_context(db: Session, job_id: str) -> ApplicationM
     if preference_record is None:
         preference_record = (
             db.query(TargetPreference)
-            .filter(TargetPreference.candidate_id.is_(None))
+            .filter(TargetPreference.user_id == user_id)
             .order_by(TargetPreference.id.desc())
             .first()
         )
@@ -525,6 +551,7 @@ def load_application_materials_context(db: Session, job_id: str) -> ApplicationM
         job_pk=job_record.id,
         candidate=candidate_record_to_profile(candidate_record),
         candidate_pk=candidate_record.id,
+        user_id=user_id,
         intelligence=intelligence,
         fit_score=_match_record_to_schema(score_record, job_id),
         preferences=_preference_record_to_schema(preference_record) if preference_record else None,
@@ -779,6 +806,44 @@ def _extract_numeric_facts(text: str) -> list[tuple[str, str]]:
         else:
             kind = "count"
         facts.append((kind, value))
+
+    for match in re.finditer(
+        rf"\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-(one|two|three|four|five|six|seven|eight|nine)\s+({_QUANTITY_UNITS})\b",
+        text,
+        flags=re.I,
+    ):
+        if _spans_overlap(match.span(), occupied):
+            continue
+        occupied.append(match.span())
+        value = str(int(_WORD_NUMBERS[match.group(1).lower()]) + int(_WORD_NUMBERS[match.group(2).lower()]))
+        unit = match.group(3).lower()
+        kind = "years" if unit.startswith("year") else "months" if unit.startswith("month") else "count"
+        facts.append((kind, value))
+
+    ones = "|".join(
+        re.escape(word)
+        for word in ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+    )
+    for match in re.finditer(
+        rf"\b({ones})\s+hundred(?:\s+and)?\s+({word_alt})?\s*({_QUANTITY_UNITS})\b",
+        text,
+        flags=re.I,
+    ):
+        if _spans_overlap(match.span(), occupied):
+            continue
+        occupied.append(match.span())
+        value = int(_WORD_NUMBERS[match.group(1).lower()]) * 100
+        if match.group(2):
+            value += int(_WORD_NUMBERS[match.group(2).lower()])
+        unit = match.group(3).lower()
+        kind = "years" if unit.startswith("year") else "months" if unit.startswith("month") else "count"
+        facts.append((kind, str(value)))
+
+    for match in re.finditer(r"\ba\s+decade\b|(?<![A-Za-z])decade(?![A-Za-z])", text, flags=re.I):
+        if _spans_overlap(match.span(), occupied):
+            continue
+        occupied.append(match.span())
+        facts.append(("years", "decade"))
 
     magnitude_alt = "|".join(
         re.escape(word) for word in sorted(_WORD_MAGNITUDES, key=len, reverse=True)
@@ -1111,7 +1176,13 @@ def ground_application_materials(
                     reject("skill", candidate=True)
 
         def _job_name_allowed() -> bool:
-            return (job_interest or job_framed) and not employment_claim
+            # Job-interest phrasing may name the employer/title, but it must not
+            # launder an unsupported achievement in the same sentence.
+            if employment_claim or kind == "strength":
+                return False
+            if _ACHIEVEMENT_VERB_RE.search(unit):
+                return False
+            return bool(job_interest or job_framed)
 
         def _matches_job_name(value: str) -> bool:
             if _phrase_in_text(value, job_ctx.text):
@@ -1135,7 +1206,8 @@ def ground_application_materials(
 
         if job_title:
             self_title = re.search(
-                rf"\b(?:i(?:'m| am| was)|my background as|served as)\s+(?:a |an )?{re.escape(job_title)}\b",
+                rf"\b(?:i(?:'m| am| was)|i work as|my background as|served as|i have)\s+"
+                rf"(?:a |an )?{re.escape(job_title)}(?:\s+experience)?\b",
                 unit,
                 flags=re.I,
             )
@@ -1169,24 +1241,30 @@ def ground_application_materials(
             ):
                 reject("invented_title", candidate=True)
 
+        project_claim_spans: list[tuple[int, int]] = []
         for match in _PROJECT_BUILD_RE.finditer(unit):
             product = match.group(1).strip()
             if product.lower() in _GENERIC_PROPER_TOKENS:
                 continue
-            if any(_skill_in_text(skill, product) for skill in all_closed_skills):
-                continue
             if product.split()[0].lower() in _SENTENCE_START_IGNORE:
                 continue
             project_names = [project.name for project in context.candidate.projects]
-            if product and not any(_phrase_in_text(product, name) or _phrase_in_text(name, product) for name in project_names):
-                # "Python APIs" is skill + generic
+            if product and not any(
+                _phrase_in_text(product, name) or _phrase_in_text(name, product) for name in project_names
+            ):
+                # "Python APIs" is skill + generic — only skip when every token
+                # is a known skill or filler. A named product that merely
+                # mentions a skill (e.g. "Campus Connect with Python") remains
+                # an invented project claim.
                 tokens = product.split()
                 if tokens and all(
                     token.lower() in _GENERIC_PROPER_TOKENS
+                    or token.lower() in {"with", "using", "via", "and", "or", "for", "in", "on", "a", "an", "the"}
                     or any(_skill_in_text(skill, token) for skill in all_closed_skills)
                     for token in tokens
                 ):
                     continue
+                project_claim_spans.append(match.span(1))
                 reject("invented_project", candidate=True)
 
         if _PRODUCT_LAUNCH_RE.search(unit) or _DOMAIN_PRODUCT_RE.search(unit):
@@ -1214,6 +1292,15 @@ def ground_application_materials(
         leftover = _leftover_proper_tokens(unit, candidate_names, all_closed_skills)
         for token in leftover:
             if _job_name_allowed() and _matches_job_name(token):
+                continue
+            token_span = None
+            for match in re.finditer(rf"\b{re.escape(token)}\b", unit):
+                token_span = match.span()
+                break
+            if token_span is not None and any(
+                token_span[0] >= start and token_span[1] <= end for start, end in project_claim_spans
+            ):
+                # Already counted as an invented project name in this unit.
                 continue
             reject("invented_employer", candidate=True)
 
@@ -1310,23 +1397,18 @@ def is_grounded_package_record(record: ApplicationPackageRecord | None) -> bool:
     return _package_has_useful_content(record)
 
 
-def is_package_ready_for_apply(db: Session, package: ApplicationPackageRecord | None) -> bool:
-    """The shared gate for anything that treats a package as safe to act on
-    for real: approving it, or handing it to either Assisted Apply path
-    (server-side Playwright and the browser extension both load through
-    _load_approved_application, which calls this too). Adds one more
-    requirement on top of is_grounded_package_record (which already covers
-    not-a-placeholder, the grounded flag, and real non-blank content via
-    _package_has_useful_content): candidate_id must be set and still match
-    the current candidate profile, so a package generated before a fresh
-    resume upload can't be approved or applied against stale data.
-    """
+def is_package_ready_for_apply(
+    db: Session, package: ApplicationPackageRecord | None, user_id: int
+) -> bool:
+    """Shared gate for approval and both Assisted Apply paths."""
     if not is_grounded_package_record(package):
         return False
-    assert package is not None  # is_grounded_package_record already excluded None
+    assert package is not None
+    if package.user_id != user_id:
+        return False
     if package.candidate_id is None:
         return False
-    current_candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    current_candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     if current_candidate is None or package.candidate_id != current_candidate.id:
         return False
     return True
@@ -1374,6 +1456,7 @@ def _persist_grounded_draft(
         return existing
     if existing is not None:
         existing.candidate_id = context.candidate_pk
+        existing.user_id = context.user_id
         existing.tailored_bullets = list(payload["tailored_bullets"])
         existing.cover_letter_draft = payload["cover_letter_draft"]
         existing.recruiter_message = payload["recruiter_message"]
@@ -1384,6 +1467,7 @@ def _persist_grounded_draft(
     else:
         record = ApplicationPackageRecord(
             job_id=context.job_pk,
+            user_id=context.user_id,
             candidate_id=context.candidate_pk,
             tailored_bullets=list(payload["tailored_bullets"]),
             cover_letter_draft=payload["cover_letter_draft"],
@@ -1399,13 +1483,17 @@ def _persist_grounded_draft(
         db.rollback()
         winner = (
             db.query(ApplicationPackageRecord)
-            .filter(ApplicationPackageRecord.job_id == context.job_pk)
+            .filter(
+                ApplicationPackageRecord.job_id == context.job_pk,
+                ApplicationPackageRecord.user_id == context.user_id,
+            )
             .first()
         )
         if (
             winner is not None
             and is_grounded_package_record(winner)
             and winner.candidate_id == context.candidate_pk
+            and winner.user_id == context.user_id
         ):
             logger.info(
                 "application_materials persist recovered unique_conflict job_pk=%s",
@@ -1425,18 +1513,22 @@ def _persist_grounded_draft(
 def generate_grounded_application_materials(
     db: Session,
     job_id: str,
+    user_id: int,
     *,
     generator: ApplicationMaterialsGenerateFn | ApplicationMaterialsGenerator | None = None,
 ) -> ApplicationMaterialsDraft:
     """Generate grounded application materials from stored candidate, job, and score evidence."""
 
-    context = load_application_materials_context(db, job_id)
+    context = load_application_materials_context(db, job_id, user_id)
     if not _has_usable_intelligence(context.intelligence):
         raise MissingJobIntelligenceError()
 
     existing = (
         db.query(ApplicationPackageRecord)
-        .filter(ApplicationPackageRecord.job_id == context.job_pk)
+        .filter(
+            ApplicationPackageRecord.job_id == context.job_pk,
+            ApplicationPackageRecord.user_id == user_id,
+        )
         .first()
     )
     same_candidate = existing is not None and existing.candidate_id == context.candidate_pk

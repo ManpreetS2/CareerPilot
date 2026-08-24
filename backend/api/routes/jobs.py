@@ -5,7 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
+from backend.db.models import User
 from backend.schemas.schemas import (
     IngestJobUrlRequest,
     Job,
@@ -24,18 +26,24 @@ DEFAULT_SCOUT_QUERY = "software engineer intern"
 
 
 @router.get("/jobs", response_model=list[Job])
-def get_jobs() -> list[Job]:
+def get_jobs(user: User = Depends(get_current_user)) -> list[Job]:
     return list_jobs()
 
 
 @router.get("/jobs/scores", response_model=list[MatchScore])
-def list_job_scores(db: Session = Depends(get_db)) -> list[MatchScore]:
+def list_job_scores(
+    db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> list[MatchScore]:
     """Return stored fit scores for every job that already has one. Never scores."""
-    return list_stored_match_scores(db)
+    return list_stored_match_scores(db, user.id)
 
 
 @router.post("/scout-jobs", response_model=ScoutJobsResponse, status_code=status.HTTP_202_ACCEPTED)
-def trigger_scout(what: str = DEFAULT_SCOUT_QUERY, where: str | None = None) -> ScoutJobsResponse:
+def trigger_scout(
+    what: str = DEFAULT_SCOUT_QUERY,
+    where: str | None = None,
+    user: User = Depends(get_current_user),
+) -> ScoutJobsResponse:
     """Run Adzuna + RemoteOK scouts, normalize/dedupe/persist, and return the stored jobs."""
     jobs = scout_jobs(query=what, location=where)
     return ScoutJobsResponse(
@@ -45,7 +53,7 @@ def trigger_scout(what: str = DEFAULT_SCOUT_QUERY, where: str | None = None) -> 
 
 
 @router.post("/jobs/ingest-url", response_model=Job, status_code=status.HTTP_201_CREATED)
-def ingest_job_url_route(payload: IngestJobUrlRequest) -> Job:
+def ingest_job_url_route(payload: IngestJobUrlRequest, user: User = Depends(get_current_user)) -> Job:
     """Manually add a single job URL — fetches a best-effort title/description
     and stores it with source="manual" for later review/editing."""
     url = payload.url.strip()
@@ -63,12 +71,14 @@ def ingest_job_url_route(payload: IngestJobUrlRequest) -> Job:
 
 
 @router.get("/jobs/{job_id}", response_model=Job)
-def get_job_by_id(job_id: str) -> Job:
+def get_job_by_id(job_id: str, user: User = Depends(get_current_user)) -> Job:
     return get_job(job_id)
 
 
 @router.post("/jobs/verify", response_model=JobVerificationResponse)
-def verify_jobs_route(status_filter: str | None = "discovered") -> JobVerificationResponse:
+def verify_jobs_route(
+    status_filter: str | None = "discovered", user: User = Depends(get_current_user)
+) -> JobVerificationResponse:
     """Run "still open" + suspicious-posting checks. Defaults to only newly
     discovered jobs; pass status_filter=none (or any falsy value via empty
     string) to re-verify every job in the DB."""
@@ -83,5 +93,5 @@ def verify_jobs_route(status_filter: str | None = "discovered") -> JobVerificati
 
 
 @router.post("/jobs/{job_id}/verify", response_model=Job)
-def verify_job_route(job_id: str) -> Job:
+def verify_job_route(job_id: str, user: User = Depends(get_current_user)) -> Job:
     return verify_and_store(job_id)

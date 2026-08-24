@@ -109,8 +109,8 @@ def _record_to_item(record: ApplicationTrackerRecord, job_public_id: str) -> App
     )
 
 
-def _latest_candidate(db: Session) -> Candidate | None:
-    return db.query(Candidate).order_by(Candidate.id.desc()).first()
+def _latest_candidate(db: Session, user_id: int) -> Candidate | None:
+    return db.query(Candidate).filter(Candidate.user_id == user_id).first()
 
 
 def _latest_match_for_job(
@@ -124,22 +124,23 @@ def _latest_match_for_job(
     return query.order_by(MatchScoreRecord.id.desc()).first()
 
 
-def _latest_preference(db: Session, candidate: Candidate | None) -> TargetPreference | None:
+def _latest_preference(db: Session, candidate: Candidate | None, user_id: int) -> TargetPreference | None:
+    linked = (
+        db.query(TargetPreference)
+        .filter(TargetPreference.user_id == user_id)
+        .order_by(TargetPreference.id.desc())
+        .first()
+    )
+    if linked is not None:
+        return linked
     if candidate is not None:
-        linked = (
+        return (
             db.query(TargetPreference)
             .filter(TargetPreference.candidate_id == candidate.id)
             .order_by(TargetPreference.id.desc())
             .first()
         )
-        if linked is not None:
-            return linked
-    return (
-        db.query(TargetPreference)
-        .filter(TargetPreference.candidate_id.is_(None))
-        .order_by(TargetPreference.id.desc())
-        .first()
-    )
+    return None
 
 
 def profile_completion_percent(
@@ -163,13 +164,13 @@ def profile_completion_percent(
     return int(round(100 * sum(1 for item in checks if item) / len(checks)))
 
 
-def get_tracking(db: Session, job_id: str) -> ApplicationTrackerItem:
+def get_tracking(db: Session, job_id: str, user_id: int) -> ApplicationTrackerItem:
     """Read-only. Missing tracker rows return a null status payload, not a new row."""
 
     job = _get_job(db, job_id)
     record = (
         db.query(ApplicationTrackerRecord)
-        .filter(ApplicationTrackerRecord.job_id == job.id)
+        .filter(ApplicationTrackerRecord.job_id == job.id, ApplicationTrackerRecord.user_id == user_id)
         .first()
     )
     if record is None:
@@ -179,22 +180,22 @@ def get_tracking(db: Session, job_id: str) -> ApplicationTrackerItem:
     return _record_to_item(record, job_id)
 
 
-def list_applications(db: Session) -> list[ApplicationListItem]:
+def list_applications(db: Session, user_id: int) -> list[ApplicationListItem]:
     """Read-only list of stored jobs with optional tracker/package/score fields."""
 
     jobs = db.query(JobRecord).order_by(JobRecord.id.desc()).all()
-    candidate = _latest_candidate(db)
+    candidate = _latest_candidate(db, user_id)
     candidate_id = candidate.id if candidate else None
     items: list[ApplicationListItem] = []
     for job in jobs:
         tracker = (
             db.query(ApplicationTrackerRecord)
-            .filter(ApplicationTrackerRecord.job_id == job.id)
+            .filter(ApplicationTrackerRecord.job_id == job.id, ApplicationTrackerRecord.user_id == user_id)
             .first()
         )
         package = (
             db.query(ApplicationPackageRecord)
-            .filter(ApplicationPackageRecord.job_id == job.id)
+            .filter(ApplicationPackageRecord.job_id == job.id, ApplicationPackageRecord.user_id == user_id)
             .first()
         )
         match = _latest_match_for_job(db, job.id, candidate_id)
@@ -235,13 +236,14 @@ def update_tracking(
     db: Session,
     job_id: str,
     request: ApplicationTrackerUpdate,
+    user_id: int,
 ) -> ApplicationTrackerItem:
     """Explicit status update. Creates the unique tracker row if needed."""
 
     job = _get_job(db, job_id)
     record = (
         db.query(ApplicationTrackerRecord)
-        .filter(ApplicationTrackerRecord.job_id == job.id)
+        .filter(ApplicationTrackerRecord.job_id == job.id, ApplicationTrackerRecord.user_id == user_id)
         .first()
     )
     current = record.status if record is not None else None
@@ -258,6 +260,7 @@ def update_tracking(
     if record is None:
         record = ApplicationTrackerRecord(
             job_id=job.id,
+            user_id=user_id,
             status=request.status,
             status_note=request.note if "note" in request.model_fields_set else None,
             created_at=now,
@@ -270,7 +273,7 @@ def update_tracking(
             db.rollback()
             existing = (
                 db.query(ApplicationTrackerRecord)
-                .filter(ApplicationTrackerRecord.job_id == job.id)
+                .filter(ApplicationTrackerRecord.job_id == job.id, ApplicationTrackerRecord.user_id == user_id)
                 .first()
             )
             if existing is None:
@@ -299,14 +302,14 @@ def update_tracking(
     return _record_to_item(record, job_id)
 
 
-def get_dashboard_summary(db: Session) -> DashboardSummary:
+def get_dashboard_summary(db: Session, user_id: int) -> DashboardSummary:
     """Read-only aggregates from stored rows. Empty database returns zeros."""
 
     jobs = db.query(JobRecord).all()
-    candidate = _latest_candidate(db)
-    preferences = _latest_preference(db, candidate)
-    trackers = db.query(ApplicationTrackerRecord).all()
-    packages = db.query(ApplicationPackageRecord).all()
+    candidate = _latest_candidate(db, user_id)
+    preferences = _latest_preference(db, candidate, user_id)
+    trackers = db.query(ApplicationTrackerRecord).filter(ApplicationTrackerRecord.user_id == user_id).all()
+    packages = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.user_id == user_id).all()
 
     tracker_by_job = {row.job_id: row for row in trackers}
     package_by_job = {row.job_id: row for row in packages}

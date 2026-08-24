@@ -1,4 +1,7 @@
 const BACKEND_URL = "http://localhost:8000";
+// Must match backend/core/config.py's session_cookie_name / session_header_name.
+const SESSION_COOKIE_NAME = "careerpilot_session";
+const SESSION_HEADER_NAME = "X-CareerPilot-Session";
 
 const button = document.getElementById("fill-btn");
 const statusEl = document.getElementById("status");
@@ -17,8 +20,29 @@ async function runFill() {
       throw new Error("Could not read the current tab.");
     }
 
-    const response = await fetch(`${BACKEND_URL}/api/extension/autofill?url=${encodeURIComponent(tab.url)}`);
+    // The extension has no login UI of its own — it rides on whatever
+    // session you already have from logging in at the CareerPilot web app
+    // in a regular tab. It CANNOT get there via `credentials: "include"`
+    // the way the web app does: this fetch is chrome-extension://<id> to
+    // http://localhost:8000, a cross-site request from the browser's point
+    // of view, and the session cookie is SameSite=Lax — Lax cookies only
+    // ride along on top-level navigations, never on a subresource fetch
+    // from a different site, so the browser would silently omit it here.
+    // Instead, the privileged chrome.cookies API (not subject to that
+    // restriction) reads the cookie's value directly, and it's sent back as
+    // X-CareerPilot-Session — accepted only by /api/extension/autofill.
+    const sessionCookie = await chrome.cookies.get({ url: BACKEND_URL, name: SESSION_COOKIE_NAME });
+    if (!sessionCookie) {
+      throw new Error("Log in to CareerPilot in your browser first, then try again.");
+    }
+
+    const response = await fetch(`${BACKEND_URL}/api/extension/autofill?url=${encodeURIComponent(tab.url)}`, {
+      headers: { [SESSION_HEADER_NAME]: sessionCookie.value },
+    });
     const body = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      throw new Error("Log in to CareerPilot in your browser first, then try again.");
+    }
     if (!response.ok) {
       throw new Error(body.detail || `Request failed (${response.status})`);
     }

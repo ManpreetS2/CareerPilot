@@ -11,8 +11,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import applications, candidate, health, interview, jobs, scoring, tracker
-from backend.core.config import settings
+from backend.api.routes import applications, auth, candidate, health, interview, jobs, scoring, tracker
+from backend.core.config import settings, validate_runtime_settings
+from backend.core.csrf import OriginCSRFMiddleware
 from backend.core.logging import setup_logging
 from backend.db.init_db import init_db
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(settings.log_level)
+    validate_runtime_settings()
     init_db()
     logger.info("CareerPilot API started")
     yield
@@ -36,20 +38,16 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    # Unpacked extensions get a chrome-extension:// origin whose id varies
-    # per install (no fixed manifest key) — matched by regex rather than an
-    # exact origin. Local-only dev server, single machine, single user.
-    allow_origin_regex=r"^chrome-extension://.*",
+    allow_origins=settings.cors_allow_origins,
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(OriginCSRFMiddleware)
 
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(candidate.router)
 app.include_router(jobs.router)
 app.include_router(scoring.router)
@@ -77,7 +75,6 @@ async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONR
 async def validation_exception_handler(
     _request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    # Ensure every error entry is JSON-serializable (Pydantic ctx may include Exception).
     safe_errors = []
     for err in exc.errors():
         item = dict(err)

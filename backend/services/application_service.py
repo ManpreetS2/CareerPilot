@@ -3,9 +3,10 @@
 Grounded generation lives in
 `backend.services.application_materials_agent.generate_grounded_application_materials`.
 This module owns stored-package reads, the production generate path, and the
-approve/edit/reject decision. A grounded package is created once per job;
-re-requesting it returns the stored package rather than silently regenerating
-reviewed content. Approved or edit-requested packages are never replaced.
+approve/edit/reject decision. A grounded package is created once per job per
+user; re-requesting it returns the stored package rather than silently
+regenerating reviewed content. Approved or edit-requested packages are never
+replaced except through an explicit stale-reviewed discard by the owner.
 """
 
 from __future__ import annotations
@@ -50,8 +51,8 @@ def _get_job_record(db: Session, job_id: str) -> JobRecord:
     return record
 
 
-def _get_current_candidate(db: Session) -> Candidate | None:
-    return db.query(Candidate).order_by(Candidate.id.desc()).first()
+def _get_current_candidate(db: Session, user_id: int) -> Candidate | None:
+    return db.query(Candidate).filter(Candidate.user_id == user_id).first()
 
 
 class StoredMaterialsNotFoundError(Exception):
@@ -74,17 +75,24 @@ def _record_to_package(record: ApplicationPackageRecord, job_public_id: str) -> 
     )
 
 
-def get_stored_application_package(db: Session, job_id: str) -> ApplicationPackage:
-    """Return a stored grounded package. Never generates, writes, or calls a provider."""
-    job = _get_job_record(db, job_id)
-    record = (
+def _owned_package(db: Session, job: JobRecord, user_id: int) -> ApplicationPackageRecord | None:
+    return (
         db.query(ApplicationPackageRecord)
-        .filter(ApplicationPackageRecord.job_id == job.id)
+        .filter(
+            ApplicationPackageRecord.job_id == job.id,
+            ApplicationPackageRecord.user_id == user_id,
+        )
         .first()
     )
+
+
+def get_stored_application_package(db: Session, job_id: str, user_id: int) -> ApplicationPackage:
+    """Return a stored grounded package. Never generates, writes, or calls a provider."""
+    job = _get_job_record(db, job_id)
+    record = _owned_package(db, job, user_id)
     if record is None or not is_grounded_package_record(record):
         raise StoredMaterialsNotFoundError()
-    current = _get_current_candidate(db)
+    current = _get_current_candidate(db, user_id)
     if current is not None and record.candidate_id != current.id:
         reviewed = record.approval_status in {"approved", "edit_requested"}
         raise StaleApplicationMaterialsError(reviewed=reviewed)
@@ -94,12 +102,13 @@ def get_stored_application_package(db: Session, job_id: str) -> ApplicationPacka
 def get_or_generate_application_package(
     db: Session,
     job_id: str,
+    user_id: int,
     *,
     generator: ApplicationMaterialsGenerateFn | ApplicationMaterialsGenerator | None = None,
 ) -> ApplicationPackage:
     job = _get_job_record(db, job_id)
     try:
-        generate_grounded_application_materials(db, job_id, generator=generator)
+        generate_grounded_application_materials(db, job_id, user_id, generator=generator)
     except MissingJobIntelligenceError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except MissingCandidateError as exc:
@@ -128,11 +137,7 @@ def get_or_generate_application_package(
             detail="The language model request failed.",
         ) from None
 
-    record = (
-        db.query(ApplicationPackageRecord)
-        .filter(ApplicationPackageRecord.job_id == job.id)
-        .first()
-    )
+    record = _owned_package(db, job, user_id)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -141,10 +146,33 @@ def get_or_generate_application_package(
     return _record_to_package(record, job_id)
 
 
-def apply_approval(db: Session, job_id: str, request: ApprovalRequest) -> ApprovalResponse:
+def discard_stale_reviewed_package(db: Session, job_id: str, user_id: int) -> dict[str, str]:
+    """Owner-only explicit reset of reviewed materials that belong to a previous profile.
+
+    Never calls a provider. Invalid state returns a sanitized conflict.
+    """
+    job = _get_job_record(db, job_id)
+    record = _owned_package(db, job, user_id)
+    current = _get_current_candidate(db, user_id)
+    if (
+        record is None
+        or current is None
+        or record.candidate_id == current.id
+        or record.approval_status not in {"approved", "edit_requested"}
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Reviewed materials for a previous profile are not available to discard.",
+        )
+    db.delete(record)
+    db.commit()
+    return {"status": "discarded"}
+
+
+def apply_approval(db: Session, job_id: str, user_id: int, request: ApprovalRequest) -> ApprovalResponse:
     job = _get_job_record(db, job_id)
 
-    record = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.job_id == job.id).first()
+    record = _owned_package(db, job, user_id)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -157,11 +185,7 @@ def apply_approval(db: Session, job_id: str, request: ApprovalRequest) -> Approv
             detail="Confirm work authorization, salary, and eligibility before approving.",
         )
 
-    # Same gate _load_approved_application() enforces before either Assisted
-    # Apply path can use a package — checked again here so a blank,
-    # placeholder, ungrounded, or wrong-candidate package can never be
-    # approved in the first place, not just caught later at apply time.
-    if request.decision == "approved" and not is_package_ready_for_apply(db, record):
+    if request.decision == "approved" and not is_package_ready_for_apply(db, record, user_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -171,22 +195,8 @@ def apply_approval(db: Session, job_id: str, request: ApprovalRequest) -> Approv
         )
 
     record.approval_status = request.decision
-    # Only an approval decision carries eligibility weight (the validation
-    # above is what requires it to be true). Edit/reject never touch this
-    # field — a previously-recorded confirmation must never be silently
-    # downgraded to False as a side effect of an unrelated decision, e.g. a
-    # caller that omits eligibility_confirmed and gets the schema's False
-    # default.
     if request.decision == "approved":
         record.eligibility_confirmed = True
-    # Notes are freeform reviewer input, not a confirmation, so they're
-    # applied regardless of decision type — but only when the caller
-    # actually sent the field. `model_fields_set` distinguishes "field
-    # omitted from the request" (leave the stored value alone) from "field
-    # explicitly sent as empty/null" (clear it) — both would otherwise look
-    # identical as `None` once Pydantic applies its default, which is
-    # exactly what silently cleared a field on every unrelated decision
-    # before this fix.
     provided = request.model_fields_set
     if "eligibility_notes" in provided:
         record.eligibility_notes = request.eligibility_notes or None

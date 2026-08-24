@@ -2,6 +2,8 @@
 """Explicit batch scoring. Never imported by the app, tests, CI, or page load.
 
 Counts only. Does not print candidate, job, prompt, or provider content.
+Requires an explicit user (--user-id or --user-email). Never selects a global
+latest candidate.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.core.config import settings
-from backend.db.models import Candidate, JobIntelligenceRecord, JobRecord, MatchScoreRecord
+from backend.db.models import Candidate, JobIntelligenceRecord, JobRecord, MatchScoreRecord, User
 
 PRODUCTION_SQLITE = (ROOT / "data" / "careerpilot.db").resolve()
 logger = logging.getLogger("score_all_jobs")
@@ -41,6 +43,22 @@ def _is_production_url(url: str) -> bool:
     return path is not None and path == PRODUCTION_SQLITE
 
 
+def _refuse(reason: str, selected: int = 0) -> dict[str, int]:
+    logger.info("batch_score refused reason=%s selected=%s", reason, selected)
+    print(f"refused reason={reason} written=0")
+    return {
+        "selected": selected,
+        "scored": 0,
+        "skipped_already_scored": 0,
+        "skipped_missing_intelligence": 0,
+        "failed": 0,
+        "written": 0,
+        "refused": 1,
+        "eligible": 0,
+        "would_score": 0,
+    }
+
+
 def run_batch_scoring(
     *,
     database_url: str,
@@ -49,21 +67,11 @@ def run_batch_scoring(
     only_unscored: bool = False,
     status_filter: str | None = None,
     confirm_production: bool = False,
+    user_id: int | None = None,
+    user_email: str | None = None,
 ) -> dict[str, int]:
     if _is_production_url(database_url) and not dry_run and not confirm_production:
-        logger.info("batch_score refused reason=production_unconfirmed")
-        print("refused reason=production_unconfirmed written=0")
-        return {
-            "selected": 0,
-            "scored": 0,
-            "skipped_already_scored": 0,
-            "skipped_missing_intelligence": 0,
-            "failed": 0,
-            "written": 0,
-            "refused": 1,
-            "eligible": 0,
-            "would_score": 0,
-        }
+        return _refuse("production_unconfirmed")
 
     engine = create_engine(
         database_url,
@@ -87,7 +95,17 @@ def run_batch_scoring(
             if limit is not None:
                 jobs = jobs[: max(0, limit)]
             selected = len(jobs)
-            current_candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+            if user_id is not None and user_email:
+                return _refuse("ambiguous_user", selected)
+            if user_id is not None:
+                current_user = db.query(User).filter(User.id == user_id).first()
+            elif user_email:
+                current_user = db.query(User).filter(User.email == user_email.strip().lower()).first()
+            else:
+                return _refuse("missing_user", selected)
+            if current_user is None:
+                return _refuse("unknown_user", selected)
+            current_candidate = db.query(Candidate).filter(Candidate.user_id == current_user.id).first()
             if current_candidate is None:
                 logger.info("batch_score skipped reason=no_current_candidate selected=%s", selected)
             else:
@@ -120,7 +138,7 @@ def run_batch_scoring(
                         would_score += 1
                         continue
                     try:
-                        score_job(db, job.public_id)
+                        score_job(db, job.public_id, current_user.id)
                         scored += 1
                     except Exception:
                         db.rollback()
@@ -159,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--status", dest="status_filter", default=None)
     parser.add_argument("--database-url", default=settings.database_url)
     parser.add_argument("--confirm-production", action="store_true")
+    parser.add_argument("--user-id", type=int, default=None)
+    parser.add_argument("--user-email", default=None)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     result = run_batch_scoring(
@@ -168,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
         only_unscored=args.only_unscored,
         status_filter=args.status_filter,
         confirm_production=args.confirm_production,
+        user_id=args.user_id,
+        user_email=args.user_email,
     )
     if result.get("refused"):
         return 2
