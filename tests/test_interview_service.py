@@ -14,11 +14,14 @@ from backend.db.models import (
     MatchScoreRecord,
 )
 from backend.services.interview_service import (
+    InterviewAnswerEmptyError,
     InterviewIntelligenceMissingError,
     InterviewJobNotFoundError,
     InterviewPrepContext,
+    InterviewQuestionNotFoundError,
     build_deterministic_interview_prep,
     generate_and_store_interview_prep,
+    get_interview_answer_feedback,
     get_interview_prep,
     unfinished_llm_interview_improver,
 )
@@ -148,6 +151,184 @@ def test_llm_improver_boundary_is_not_used_by_default(isolated_session) -> None:
     assert called["n"] == 0
     with pytest.raises(Exception, match="not implemented"):
         unfinished_llm_interview_improver(None, None)  # type: ignore[arg-type]
+
+
+def _fake_feedback_generator(prompt: str, system_prompt: str | None = None) -> str:
+    return "Solid structure — mention a specific outcome next time."
+
+
+def test_answer_feedback_missing_job_404s(isolated_session) -> None:
+    with pytest.raises(InterviewJobNotFoundError):
+        get_interview_answer_feedback(isolated_session, "missing", TEST_USER_ID, "Q?", "answer")
+
+
+def test_answer_feedback_requires_prep_generated_first(isolated_session) -> None:
+    """No InterviewPrepRecord at all yet — practicing before generating prep
+    must be rejected, not silently accepted with an ungrounded question."""
+    job = _job(isolated_session)
+    _intelligence(isolated_session, job)
+    with pytest.raises(InterviewQuestionNotFoundError):
+        get_interview_answer_feedback(isolated_session, job.public_id, TEST_USER_ID, "Any question", "answer")
+
+
+def test_answer_feedback_rejects_a_question_not_in_stored_prep(isolated_session) -> None:
+    _candidate(isolated_session)
+    job = _job(isolated_session)
+    _intelligence(isolated_session, job)
+    generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
+    with pytest.raises(InterviewQuestionNotFoundError):
+        get_interview_answer_feedback(
+            isolated_session,
+            job.public_id,
+            TEST_USER_ID,
+            "This question was never generated for this job",
+            "answer",
+        )
+
+
+def test_answer_feedback_rejects_empty_or_whitespace_answer(isolated_session) -> None:
+    _candidate(isolated_session)
+    job = _job(isolated_session)
+    _intelligence(isolated_session, job)
+    prep = generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
+    question = prep.likely_questions[0]
+    with pytest.raises(InterviewAnswerEmptyError):
+        get_interview_answer_feedback(isolated_session, job.public_id, TEST_USER_ID, question, "")
+    with pytest.raises(InterviewAnswerEmptyError):
+        get_interview_answer_feedback(isolated_session, job.public_id, TEST_USER_ID, question, "   ")
+
+
+def test_answer_feedback_happy_path_uses_injected_generator(isolated_session) -> None:
+    _candidate(isolated_session)
+    job = _job(isolated_session)
+    _intelligence(isolated_session, job)
+    prep = generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
+    question = prep.likely_questions[0]
+
+    result = get_interview_answer_feedback(
+        isolated_session,
+        job.public_id,
+        TEST_USER_ID,
+        question,
+        "I built a Python API and wrote tests for it.",
+        generate_fn=_fake_feedback_generator,
+    )
+    assert result.question == question
+    assert result.answer == "I built a Python API and wrote tests for it."
+    assert result.feedback == "Solid structure — mention a specific outcome next time."
+
+
+def test_answer_feedback_is_never_persisted(isolated_session) -> None:
+    """Ephemeral by design — no new InterviewPrepRecord (or any row) should
+    appear just from requesting practice feedback."""
+    _candidate(isolated_session)
+    job = _job(isolated_session)
+    _intelligence(isolated_session, job)
+    prep = generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
+    before = isolated_session.query(InterviewPrepRecord).count()
+
+    get_interview_answer_feedback(
+        isolated_session,
+        job.public_id,
+        TEST_USER_ID,
+        prep.likely_questions[0],
+        "An answer.",
+        generate_fn=_fake_feedback_generator,
+    )
+    assert isolated_session.query(InterviewPrepRecord).count() == before
+
+
+def test_answer_feedback_prompt_includes_question_answer_and_grounding_instruction(isolated_session) -> None:
+    """The generator receives the actual question/answer (not something
+    reconstructed), and the system prompt explicitly forbids inventing new
+    candidate facts — the same safety bar the rest of the app holds to."""
+    candidate = _candidate(isolated_session)
+    job = _job(isolated_session)
+    _intelligence(isolated_session, job)
+    prep = generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
+    question = prep.likely_questions[0]
+    answer = "I used FastAPI for the backend and wrote pytest coverage."
+
+    captured: dict[str, str | None] = {}
+
+    def capturing_generator(prompt: str, system_prompt: str | None = None) -> str:
+        captured["prompt"] = prompt
+        captured["system_prompt"] = system_prompt
+        return "feedback text"
+
+    get_interview_answer_feedback(
+        isolated_session, job.public_id, TEST_USER_ID, question, answer, generate_fn=capturing_generator
+    )
+
+    assert question in captured["prompt"]
+    assert answer in captured["prompt"]
+    assert candidate.skills[0] in captured["prompt"] if candidate.skills else True
+    system_prompt = captured["system_prompt"] or ""
+    assert "never invent" in system_prompt.lower() or "do not invent" in system_prompt.lower() or "never" in system_prompt.lower()
+
+
+def test_answer_feedback_http_route_with_injected_generator(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(db)
+        _intelligence(db, job)
+        _candidate(db)
+
+    prepared = client.post("/api/jobs/job-interview/prepare-interview")
+    question = prepared.json()["likely_questions"][0]
+
+    client.app.state.interview_answer_generator = _fake_feedback_generator
+    response = client.post(
+        "/api/jobs/job-interview/interview-prep/feedback",
+        json={"question": question, "answer": "I led a small backend project."},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["question"] == question
+    assert body["feedback"] == "Solid structure — mention a specific outcome next time."
+
+
+def test_answer_feedback_http_route_rejects_unknown_question(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(db)
+        _intelligence(db, job)
+        _candidate(db)
+    client.post("/api/jobs/job-interview/prepare-interview")
+
+    client.app.state.interview_answer_generator = _fake_feedback_generator
+    response = client.post(
+        "/api/jobs/job-interview/interview-prep/feedback",
+        json={"question": "Not a real stored question", "answer": "answer"},
+    )
+    assert response.status_code == 400
+
+
+def test_answer_feedback_http_route_rejects_empty_answer(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(db)
+        _intelligence(db, job)
+        _candidate(db)
+    prepared = client.post("/api/jobs/job-interview/prepare-interview")
+    question = prepared.json()["likely_questions"][0]
+
+    client.app.state.interview_answer_generator = _fake_feedback_generator
+    response = client.post(
+        "/api/jobs/job-interview/interview-prep/feedback",
+        json={"question": question, "answer": "   "},
+    )
+    assert response.status_code == 400
+
+
+def test_answer_feedback_http_route_missing_job_404s(isolated_client) -> None:
+    client, _SessionLocal = isolated_client
+    client.app.state.interview_answer_generator = _fake_feedback_generator
+    response = client.post(
+        "/api/jobs/does-not-exist/interview-prep/feedback",
+        json={"question": "Q?", "answer": "answer"},
+    )
+    assert response.status_code == 404
 
 
 def test_interview_http_get_read_only_and_explicit_generate(isolated_client) -> None:

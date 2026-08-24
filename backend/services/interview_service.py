@@ -24,14 +24,16 @@ from backend.db.models import (
     JobRecord,
     MatchScoreRecord,
 )
-from backend.schemas.schemas import InterviewPrep, JobIntelligence, MatchScore
+from backend.schemas.schemas import InterviewAnswerFeedback, InterviewPrep, JobIntelligence, MatchScore
 from backend.services.application_materials_agent import candidate_record_to_profile
 from backend.services.job_intelligence_service import get_stored_job_intelligence
 from backend.services.job_service import record_to_job
+from backend.services.llm_client import get_llm_client
 
 logger = logging.getLogger(__name__)
 
 InterviewPrepImprover = Callable[["InterviewPrepContext", InterviewPrep], InterviewPrep]
+InterviewAnswerGenerateFn = Callable[[str, str | None], str]
 
 
 class InterviewPrepError(Exception):
@@ -46,6 +48,19 @@ class InterviewJobNotFoundError(InterviewPrepError):
 class InterviewIntelligenceMissingError(InterviewPrepError):
     def __init__(self) -> None:
         super().__init__("Extract job requirements before preparing interview.")
+
+
+class InterviewAnswerEmptyError(InterviewPrepError):
+    def __init__(self) -> None:
+        super().__init__("Write an answer before requesting feedback.")
+
+
+class InterviewQuestionNotFoundError(InterviewPrepError):
+    def __init__(self) -> None:
+        super().__init__(
+            "This question is not part of the stored interview prep for this job. "
+            "Prepare interview first, then practice one of the listed questions."
+        )
 
 
 @dataclass
@@ -317,3 +332,69 @@ def generate_and_store_interview_prep(
         db.refresh(record)
     logger.info("interview_prep stored job_pk=%s", context.job_pk)
     return _record_to_prep(record, job_id)
+
+
+_ANSWER_FEEDBACK_SYSTEM_PROMPT = (
+    "You are a concise interview coach reviewing one practice answer. Comment only on "
+    "how the answer communicates the candidate's existing experience — structure, "
+    "clarity, specificity, and relevance to the question and role. Never invent, "
+    "assume, or suggest experience, skills, employers, metrics, or projects the "
+    "candidate did not already mention in their answer or in the background provided "
+    "to you. If the answer is thin, say so and suggest what kind of detail from the "
+    "candidate's own experience would strengthen it — do not supply that detail "
+    "yourself. Keep the feedback to 2-4 sentences, addressed directly to the candidate."
+)
+
+
+def _default_answer_feedback_generator(prompt: str, system_prompt: str | None = None) -> str:
+    return get_llm_client().generate(prompt, system_prompt=system_prompt)
+
+
+def get_interview_answer_feedback(
+    db: Session,
+    job_id: str,
+    user_id: int,
+    question: str,
+    answer: str,
+    *,
+    generate_fn: InterviewAnswerGenerateFn | None = None,
+) -> InterviewAnswerFeedback:
+    """Practice-only feedback on how a typed answer is delivered. Ephemeral —
+    never persisted, unlike the stored InterviewPrepRecord. Grounded the same
+    way as the rest of this module: the prompt supplies only stored candidate
+    skills as background, and the system prompt forbids inventing new candidate
+    facts — feedback may only speak to delivery, not assert new experience.
+
+    `question` must be one of this job's already-generated likely_questions,
+    not an arbitrary string — keeps the feature scoped to real prep instead of
+    becoming a general-purpose free-text prompt to the provider.
+    """
+
+    if not answer.strip():
+        raise InterviewAnswerEmptyError()
+
+    job = _get_job(db, job_id)
+    record = (
+        db.query(InterviewPrepRecord)
+        .filter(InterviewPrepRecord.job_id == job.id, InterviewPrepRecord.user_id == user_id)
+        .first()
+    )
+    if record is None or question not in (record.likely_questions or []):
+        raise InterviewQuestionNotFoundError()
+
+    context = load_interview_prep_context(db, job_id, user_id)
+    invoke = generate_fn if generate_fn is not None else _default_answer_feedback_generator
+
+    background = ", ".join(context.candidate_skills) or "no stored skills on file"
+    prompt = (
+        f"Role: {context.job_title} at {context.company}.\n"
+        f"Interview question: {question}\n"
+        f"Candidate's stored skills (background only, for judging relevance — do not "
+        f"treat this as a checklist to grade the answer against): {background}\n"
+        f"Candidate's answer:\n{answer}\n\n"
+        "Give brief feedback on this answer per your instructions."
+    )
+    feedback_text = invoke(prompt, _ANSWER_FEEDBACK_SYSTEM_PROMPT)
+
+    logger.info("interview_answer_feedback generated job_pk=%s", context.job_pk)
+    return InterviewAnswerFeedback(question=question, answer=answer, feedback=feedback_text.strip())

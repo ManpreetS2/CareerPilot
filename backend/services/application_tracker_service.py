@@ -103,6 +103,7 @@ def _record_to_item(record: ApplicationTrackerRecord, job_public_id: str) -> App
         job_id=job_public_id,
         status=record.status,  # type: ignore[arg-type]
         note=record.status_note,
+        reminder_date=record.reminder_date,
         created_at=record.created_at,
         updated_at=record.updated_at,
         allowed_statuses=allowed_statuses_for(record.status),
@@ -222,6 +223,7 @@ def list_applications(db: Session, user_id: int) -> list[ApplicationListItem]:
                 recommendation=match.recommendation if match is not None else None,  # type: ignore[arg-type]
                 approval_status=package.approval_status if package is not None else None,  # type: ignore[arg-type]
                 tracker_status=tracker.status if tracker is not None else None,  # type: ignore[arg-type]
+                reminder_date=tracker.reminder_date if tracker is not None else None,
                 updated_at=updated_at,
                 allowed_statuses=allowed_statuses_for(
                     tracker.status if tracker is not None else None
@@ -270,6 +272,7 @@ def update_tracking(
             user_id=user_id,
             status=request.status,
             status_note=request.note if "note" in request.model_fields_set else None,
+            reminder_date=request.reminder_date if "reminder_date" in request.model_fields_set else None,
             created_at=now,
             updated_at=now,
         )
@@ -291,6 +294,8 @@ def update_tracking(
             existing.status = request.status
             if "note" in request.model_fields_set:
                 existing.status_note = request.note
+            if "reminder_date" in request.model_fields_set:
+                existing.reminder_date = request.reminder_date
             existing.updated_at = now
             db.commit()
             db.refresh(existing)
@@ -302,6 +307,8 @@ def update_tracking(
     record.status = request.status
     if "note" in request.model_fields_set:
         record.status_note = request.note
+    if "reminder_date" in request.model_fields_set:
+        record.reminder_date = request.reminder_date
     record.updated_at = now
     db.commit()
     db.refresh(record)

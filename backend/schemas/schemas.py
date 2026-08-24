@@ -155,6 +155,19 @@ class InterviewPrep(BaseModel):
     gaps_to_address: list[str] = Field(default_factory=list)
 
 
+class InterviewAnswerRequest(BaseModel):
+    question: str
+    answer: str
+
+
+class InterviewAnswerFeedback(BaseModel):
+    """Ephemeral — never persisted. One practice round, not saved history."""
+
+    question: str
+    answer: str
+    feedback: str
+
+
 class ParseResumeResponse(BaseModel):
     candidate: CandidateProfile
     preferences: TargetPreferences | None = None
@@ -267,6 +280,7 @@ class ApplicationTrackerItem(BaseModel):
     job_id: str
     status: TrackerStatus | None = None
     note: str | None = None
+    reminder_date: date | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     allowed_statuses: list[TrackerStatus] = Field(default_factory=list)
@@ -275,6 +289,7 @@ class ApplicationTrackerItem(BaseModel):
 class ApplicationTrackerUpdate(BaseModel):
     status: TrackerStatus
     note: str | None = None
+    reminder_date: date | None = None
 
 
 class ApplicationListItem(BaseModel):
@@ -287,6 +302,7 @@ class ApplicationListItem(BaseModel):
         "draft", "pending_review", "approved", "edit_requested", "rejected"
     ] | None = None
     tracker_status: TrackerStatus | None = None
+    reminder_date: date | None = None
     updated_at: datetime | None = None
     allowed_statuses: list[TrackerStatus] = Field(default_factory=list)
 

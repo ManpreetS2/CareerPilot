@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BriefcaseBusiness,
   FileText,
@@ -15,6 +15,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { APP_NAME, APP_TAGLINE } from "../lib/config";
 import { useTheme } from "../lib/theme";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 type NavItem = { to: string; label: string; icon: LucideIcon };
 
@@ -28,6 +29,7 @@ const nav: NavItem[] = [
 export function Layout() {
   const { theme, toggle } = useTheme();
   const { user, logout } = useAuth();
+  const location = useLocation();
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -145,7 +147,13 @@ export function Layout() {
         </div>
       </header>
       <main id="main" className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-        <Outlet />
+        {/* Keyed by path so a crash's fallback clears on navigation instead
+            of persisting after the user has already left the broken page —
+            nav/header above stay live either way since they're outside this
+            boundary. */}
+        <ErrorBoundary key={location.pathname} scope="This page">
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );

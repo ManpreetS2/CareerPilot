@@ -82,6 +82,73 @@ def test_tracker_idempotent_creation(isolated_session) -> None:
     assert isolated_session.query(ApplicationTrackerRecord).count() == 1
 
 
+def test_tracker_reminder_date_set_on_creation(isolated_session) -> None:
+    from datetime import date
+
+    job = _job(isolated_session)
+    result = update_tracking(
+        isolated_session,
+        job.public_id,
+        ApplicationTrackerUpdate(status="saved", reminder_date=date(2026, 9, 1)),
+        TEST_USER_ID,
+    )
+    assert result.reminder_date == date(2026, 9, 1)
+    stored = isolated_session.query(ApplicationTrackerRecord).one()
+    assert stored.reminder_date == date(2026, 9, 1)
+
+
+def test_tracker_reminder_date_omitted_is_not_cleared(isolated_session) -> None:
+    """A status-only update (the shape the UI actually sends today) must not
+    silently wipe out a reminder date the user set earlier — same
+    omitted-vs-explicit-null distinction the note field already relies on."""
+    from datetime import date
+
+    job = _job(isolated_session)
+    update_tracking(
+        isolated_session,
+        job.public_id,
+        ApplicationTrackerUpdate(status="saved", reminder_date=date(2026, 9, 1)),
+        TEST_USER_ID,
+    )
+    result = update_tracking(
+        isolated_session, job.public_id, ApplicationTrackerUpdate(status="pending_review"), TEST_USER_ID
+    )
+    assert result.reminder_date == date(2026, 9, 1)
+
+
+def test_tracker_reminder_date_can_be_explicitly_cleared(isolated_session) -> None:
+    from datetime import date
+
+    job = _job(isolated_session)
+    update_tracking(
+        isolated_session,
+        job.public_id,
+        ApplicationTrackerUpdate(status="saved", reminder_date=date(2026, 9, 1)),
+        TEST_USER_ID,
+    )
+    result = update_tracking(
+        isolated_session,
+        job.public_id,
+        ApplicationTrackerUpdate(status="saved", reminder_date=None),
+        TEST_USER_ID,
+    )
+    assert result.reminder_date is None
+
+
+def test_tracker_reminder_date_appears_in_applications_list(isolated_session) -> None:
+    from datetime import date
+
+    job = _job(isolated_session)
+    update_tracking(
+        isolated_session,
+        job.public_id,
+        ApplicationTrackerUpdate(status="saved", reminder_date=date(2026, 9, 1)),
+        TEST_USER_ID,
+    )
+    listed = list_applications(isolated_session, TEST_USER_ID)
+    assert listed[0].reminder_date == date(2026, 9, 1)
+
+
 def test_tracker_unique_conflict_recovery(isolated_session, monkeypatch) -> None:
     job = _job(isolated_session)
     winner = ApplicationTrackerRecord(job_id=job.id, user_id=TEST_USER_ID, status="saved")
@@ -113,6 +180,47 @@ def test_tracker_unique_conflict_recovery(isolated_session, monkeypatch) -> None
     monkeypatch.undo()
     assert result.status == "pending_review"
     assert isolated_session.query(ApplicationTrackerRecord).count() == 1
+
+
+def test_tracker_reminder_date_threads_through_conflict_recovery(isolated_session, monkeypatch) -> None:
+    """Same race as test_tracker_unique_conflict_recovery, but proving the
+    reminder_date field specifically survives the IntegrityError-recovery
+    branch in update_tracking, not just status."""
+    from datetime import date
+
+    job = _job(isolated_session)
+    winner = ApplicationTrackerRecord(job_id=job.id, user_id=TEST_USER_ID, status="saved")
+    isolated_session.add(winner)
+    isolated_session.commit()
+
+    real_query = isolated_session.query
+    call_count = {"n": 0}
+
+    class _EmptyQuery:
+        def filter(self, *_a, **_k):
+            return self
+
+        def first(self):
+            return None
+
+    def query_that_misses_once(model):
+        if model is ApplicationTrackerRecord:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return _EmptyQuery()
+        return real_query(model)
+
+    monkeypatch.setattr(isolated_session, "query", query_that_misses_once)
+    result = update_tracking(
+        isolated_session,
+        job.public_id,
+        ApplicationTrackerUpdate(status="pending_review", reminder_date=date(2026, 9, 1)),
+        TEST_USER_ID,
+    )
+    monkeypatch.undo()
+    assert result.reminder_date == date(2026, 9, 1)
+    stored = isolated_session.query(ApplicationTrackerRecord).one()
+    assert stored.reminder_date == date(2026, 9, 1)
 
 
 def test_tracker_unique_index_rejects_direct_duplicate(isolated_session) -> None:
