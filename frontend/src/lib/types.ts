@@ -65,6 +65,11 @@ export type TargetPreferences = {
   disability_status?: string | null;
 };
 
+export type CurrentProfile = {
+  candidate: CandidateProfile | null;
+  preferences: TargetPreferences | null;
+};
+
 export type JobStatus = "discovered" | "verified" | "flagged" | "stale";
 
 export type Job = {

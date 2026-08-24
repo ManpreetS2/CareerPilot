@@ -118,10 +118,17 @@ def _latest_match_for_job(
     job_pk: int,
     candidate_id: int | None,
 ) -> MatchScoreRecord | None:
-    query = db.query(MatchScoreRecord).filter(MatchScoreRecord.job_id == job_pk)
-    if candidate_id is not None:
-        query = query.filter(MatchScoreRecord.candidate_id == candidate_id)
-    return query.order_by(MatchScoreRecord.id.desc()).first()
+    if candidate_id is None:
+        return None
+    return (
+        db.query(MatchScoreRecord)
+        .filter(
+            MatchScoreRecord.job_id == job_pk,
+            MatchScoreRecord.candidate_id == candidate_id,
+        )
+        .order_by(MatchScoreRecord.id.desc())
+        .first()
+    )
 
 
 def _latest_preference(db: Session, candidate: Candidate | None, user_id: int) -> TargetPreference | None:

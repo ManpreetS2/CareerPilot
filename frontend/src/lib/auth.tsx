@@ -1,6 +1,10 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, ApiClientError } from "./api";
-import { bindSessionUser, clearCandidateSession } from "./session";
+import {
+  applyServerProfile,
+  bindSessionUser,
+  clearCurrentUserSensitiveCache,
+} from "./session";
 import type { User } from "./types";
 
 type AuthState = {
@@ -16,6 +20,15 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+async function hydrateProfile(): Promise<void> {
+  try {
+    const profile = await api.getProfile();
+    applyServerProfile(profile.candidate ?? null, profile.preferences ?? null);
+  } catch {
+    // Keep this user's existing cache if the read fails.
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,11 +37,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     api
       .me()
-      .then((current) => {
-        if (!cancelled) {
-          bindSessionUser(current.id);
-          setUser(current);
-        }
+      .then(async (current) => {
+        bindSessionUser(current.id);
+        await hydrateProfile();
+        if (!cancelled) setUser(current);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -48,15 +60,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) {
     const current = await api.login(email, password);
-    clearCandidateSession();
     bindSessionUser(current.id);
+    await hydrateProfile();
     setUser(current);
   }
 
   async function signup(email: string, password: string) {
     const current = await api.signup(email, password);
-    clearCandidateSession();
     bindSessionUser(current.id);
+    await hydrateProfile();
     setUser(current);
   }
 
@@ -72,8 +84,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     }
+    clearCurrentUserSensitiveCache();
     setUser(null);
-    clearCandidateSession();
     bindSessionUser(null);
   }
 

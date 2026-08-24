@@ -140,6 +140,8 @@ def insert_score(
     *,
     recommendation: str = "apply",
     overall_score: float = 82.0,
+    matched_skills: list[str] | None = None,
+    missing_skills: list[str] | None = None,
 ) -> MatchScoreRecord:
     record = MatchScoreRecord(
         job_id=job.id,
@@ -150,9 +152,9 @@ def insert_score(
         education_score=100.0,
         location_score=None,
         preference_score=None,
-        matched_skills=["Python", "SQL"],
+        matched_skills=list(matched_skills or ["Python", "SQL"]),
         partial_matches=[],
-        missing_skills=["Docker"],
+        missing_skills=list(missing_skills or ["Docker"]),
         recommendation=recommendation,
         rationale="Matched Python and SQL from stored evidence.",
     )

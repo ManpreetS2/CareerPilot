@@ -34,6 +34,7 @@ from backend.db.models import (
     InterviewPrepRecord,
     JobIntelligenceRecord,
     JobRecord,
+    MatchScoreRecord,
     TargetPreference,
     User,
 )
@@ -234,7 +235,7 @@ def _seed_user_private_rows(
         TargetPreference(
             user_id=user.id,
             candidate_id=candidate.id,
-            target_roles=["Software Engineer"],
+            target_roles=["Harbor Robotics Intern"],
             preferred_locations=["Remote"],
         )
     )
@@ -410,6 +411,14 @@ def run_browser_workflow() -> dict[str, int]:
                 page.reload()
                 expect(_metric(page, "Discovered")).to_have_text("1")
                 expect(_metric(page, "Verified")).to_have_text("1")
+                page.goto(f"{base}/profile")
+                expect(page.get_by_text("Synthetic Browser Candidate")).to_be_visible()
+                expect(page.get_by_text("Harbor Robotics Intern")).to_be_visible()
+                _logout(page)
+                _login(page, base, USER_A_EMAIL, USER_PASSWORD)
+                page.goto(f"{base}/profile")
+                expect(page.get_by_text("Synthetic Browser Candidate")).to_be_visible()
+                expect(page.get_by_text("Harbor Robotics Intern")).to_be_visible()
                 checks += 1
 
                 before_score_posts = len(score_posts)
@@ -439,6 +448,17 @@ def run_browser_workflow() -> dict[str, int]:
                 expect(page.get_by_text("Not scored yet. Calculate fit to store a score.")).to_have_count(0)
                 if len(score_posts) != before_score_posts + 1:
                     raise AssertionError("Calculate fit did not issue exactly one scoring POST.")
+                with SessionLocal() as session:
+                    user_a = session.query(User).filter(User.email == USER_A_EMAIL).one()
+                    candidate = session.query(Candidate).filter(Candidate.user_id == user_a.id).one()
+                    score = (
+                        session.query(MatchScoreRecord)
+                        .filter(MatchScoreRecord.candidate_id == candidate.id)
+                        .one()
+                    )
+                    score.matched_skills = ["UniqueMatchedSkillAlpha"]
+                    score.missing_skills = ["UniqueMissingSkillOmega"]
+                    session.commit()
                 checks += 1
 
                 page.get_by_test_id("generate-materials").click()
@@ -508,20 +528,36 @@ def run_browser_workflow() -> dict[str, int]:
                     raise AssertionError("Prepare Interview did not issue exactly one POST.")
                 checks += 1
 
-                # Cross-user isolation: user B must not see user A's private rows.
+                # Cross-user isolation: jobs are shared; private records are not.
                 _logout(page)
                 _signup(page, base, USER_B_EMAIL, USER_PASSWORD)
+                page.goto(f"{base}/profile")
+                expect(page.get_by_text("Synthetic Browser Candidate")).to_have_count(0)
+                expect(page.get_by_text("Harbor Robotics Intern")).to_have_count(0)
+                page.goto(f"{base}/dashboard")
+                expect(page.get_by_text("Loading dashboard…")).to_have_count(0)
+                expect(_metric(page, "High matches")).to_have_text("0")
                 page.goto(f"{base}/applications")
-                expect(page.get_by_text(JOB_TITLE, exact=True)).to_have_count(0)
+                expect(page.get_by_text("Loading applications…")).to_have_count(0)
+                expect(page.get_by_role("heading", name=JOB_TITLE)).to_be_visible()
+                expect(page.get_by_text("Not scored")).to_be_visible()
+                expect(page.get_by_text("No approval yet")).to_be_visible()
+                expect(page.get_by_text("Not tracked")).to_be_visible()
                 page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
                 expect(page.get_by_text("No grounded materials stored yet.")).to_be_visible()
                 page.goto(f"{base}/jobs/{JOB_PUBLIC_ID}")
                 expect(page.get_by_text("No interview prep stored yet.")).to_be_visible()
+                page.get_by_role("button", name="Prepare interview").click()
+                expect(page.get_by_text("UniqueMatchedSkillAlpha")).to_have_count(0)
+                expect(page.get_by_text("UniqueMissingSkillOmega")).to_have_count(0)
                 checks += 1
 
                 # Explicit stale reviewed reset for user A.
                 _logout(page)
                 _login(page, base, USER_A_EMAIL, USER_PASSWORD)
+                page.goto(f"{base}/profile")
+                expect(page.get_by_text("Synthetic Browser Candidate")).to_be_visible()
+                expect(page.get_by_text("Harbor Robotics Intern")).to_be_visible()
                 with SessionLocal() as session:
                     user_a = session.query(User).filter(User.email == USER_A_EMAIL).one()
                     package = (

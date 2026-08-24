@@ -4,11 +4,19 @@ import type { CandidateProfile, TargetPreferences } from "./types";
 const CANDIDATE_KEY = "careerpilot.candidate";
 const PREFERENCES_KEY = "careerpilot.preferences";
 const SELECTED_JOB_KEY = "careerpilot.selectedJobId";
+const SESSION_EVENT = "careerpilot-session-changed";
 
 let activeUserId: number | null = null;
 
+function emitSessionChange() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(SESSION_EVENT));
+  }
+}
+
 export function bindSessionUser(userId: number | null) {
   activeUserId = userId;
+  emitSessionChange();
 }
 
 function scopedKey(base: string): string {
@@ -42,10 +50,12 @@ export function sanitizeStoredPreferences(
 
 export function saveCandidate(candidate: CandidateProfile) {
   localStorage.setItem(scopedKey(CANDIDATE_KEY), JSON.stringify(candidate));
+  emitSessionChange();
 }
 
 export function savePreferences(preferences: TargetPreferences) {
   localStorage.setItem(scopedKey(PREFERENCES_KEY), JSON.stringify(preferences));
+  emitSessionChange();
 }
 
 /** @deprecated Prefer saveCandidate / savePreferences independently. */
@@ -61,13 +71,34 @@ export function saveSelectedJobId(jobId: string) {
   localStorage.setItem(scopedKey(SELECTED_JOB_KEY), jobId);
 }
 
-export function clearCandidateSession() {
-  const prefixes = [CANDIDATE_KEY, PREFERENCES_KEY, SELECTED_JOB_KEY];
-  for (const key of Object.keys(localStorage)) {
-    if (prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}.u`))) {
-      localStorage.removeItem(key);
-    }
+export function applyServerProfile(
+  candidate: CandidateProfile | null,
+  preferences: TargetPreferences | null,
+) {
+  if (candidate) {
+    localStorage.setItem(scopedKey(CANDIDATE_KEY), JSON.stringify(candidate));
+  } else {
+    localStorage.removeItem(scopedKey(CANDIDATE_KEY));
   }
+  if (preferences) {
+    const cleaned = sanitizeStoredPreferences(preferences) ?? preferences;
+    localStorage.setItem(scopedKey(PREFERENCES_KEY), JSON.stringify(cleaned));
+  } else {
+    localStorage.removeItem(scopedKey(PREFERENCES_KEY));
+  }
+  emitSessionChange();
+}
+
+export function clearCurrentUserSensitiveCache() {
+  localStorage.removeItem(scopedKey(CANDIDATE_KEY));
+  localStorage.removeItem(scopedKey(PREFERENCES_KEY));
+  localStorage.removeItem(scopedKey(SELECTED_JOB_KEY));
+  emitSessionChange();
+}
+
+/** Clears only the current user's sensitive cache. Other users' keys stay. */
+export function clearCandidateSession() {
+  clearCurrentUserSensitiveCache();
 }
 
 export function getSelectedJobId(): string | null {
@@ -83,12 +114,18 @@ export function useCandidateSession() {
   );
 
   useEffect(() => {
-    const onStorage = () => {
+    const onChange = () => {
       setCandidate(readJson<CandidateProfile>(scopedKey(CANDIDATE_KEY)));
-      setPreferences(sanitizeStoredPreferences(readJson<TargetPreferences>(scopedKey(PREFERENCES_KEY))));
+      setPreferences(
+        sanitizeStoredPreferences(readJson<TargetPreferences>(scopedKey(PREFERENCES_KEY))),
+      );
     };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener("storage", onChange);
+    window.addEventListener(SESSION_EVENT, onChange);
+    return () => {
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(SESSION_EVENT, onChange);
+    };
   }, []);
 
   return {

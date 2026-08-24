@@ -750,7 +750,7 @@ def run_assisted_apply(db: Session, job_id: str, user_id: int) -> FormFillResult
             finally:
                 browser.close()
     except PlaywrightError as exc:
-        logger.warning("Assisted apply failed for %s: %s", job_id, exc)
+        logger.warning("Assisted apply failed for %s type=%s", job_id, type(exc).__name__)
         error_message = f"Could not load or fill the application form: {exc}"
 
     if error_message:

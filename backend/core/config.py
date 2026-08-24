@@ -1,11 +1,15 @@
 """Application settings loaded from environment variables."""
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENV_FILE = _REPO_ROOT / ".env"
+
+_WEB_SCHEMES = {"http", "https"}
+_EXTENSION_SCHEME = "chrome-extension"
 
 
 class Settings(BaseSettings):
@@ -75,12 +79,58 @@ class Settings(BaseSettings):
         return None
 
 
+def validate_origin_settings(cfg: Settings | None = None) -> None:
+    """Reject wildcard or non-exact origins for credentialed CORS."""
+
+    cfg = cfg or settings
+    raw_allowed = cfg.allowed_origins or ""
+    raw_extension = cfg.extension_origin or ""
+    if "*" in raw_allowed or "*" in raw_extension:
+        raise RuntimeError(
+            "Wildcard origins are not allowed in ALLOWED_ORIGINS or EXTENSION_ORIGIN."
+        )
+    for origin in [item.strip() for item in raw_allowed.split(",") if item.strip()]:
+        _validate_web_origin(origin)
+    extension = raw_extension.strip()
+    if extension:
+        _validate_extension_origin(extension)
+    if "*" in cfg.cors_allow_origins:
+        raise RuntimeError("Credentialed CORS cannot use a wildcard origin.")
+
+
+def _validate_web_origin(origin: str) -> None:
+    parsed = urlparse(origin)
+    if parsed.scheme not in _WEB_SCHEMES or not parsed.netloc:
+        raise RuntimeError(
+            "ALLOWED_ORIGINS entries must be exact http:// or https:// origins."
+        )
+    if parsed.username or parsed.password:
+        raise RuntimeError("ALLOWED_ORIGINS entries must not include credentials.")
+    if parsed.path not in {"",} or parsed.params or parsed.query or parsed.fragment:
+        raise RuntimeError(
+            "ALLOWED_ORIGINS entries must not include a path, query, or fragment."
+        )
+
+
+def _validate_extension_origin(origin: str) -> None:
+    parsed = urlparse(origin)
+    if parsed.scheme != _EXTENSION_SCHEME or not parsed.netloc:
+        raise RuntimeError(
+            "EXTENSION_ORIGIN must be blank or one exact chrome-extension://<id> origin."
+        )
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        raise RuntimeError(
+            "EXTENSION_ORIGIN must not include a path, query, or fragment."
+        )
+
+
 def validate_runtime_settings() -> None:
     env = settings.app_env.strip().lower()
     if env in {"production", "prod"} and not settings.cookie_secure:
         raise RuntimeError(
             "Production refuses insecure session cookies. Set COOKIE_SECURE=true."
         )
+    validate_origin_settings(settings)
 
 
 settings = Settings()

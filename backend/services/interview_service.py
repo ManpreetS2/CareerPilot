@@ -111,10 +111,17 @@ def get_interview_prep(db: Session, job_id: str, user_id: int) -> InterviewPrep 
 
 
 def _latest_fit_score(db: Session, job: JobRecord, candidate: Candidate | None) -> MatchScore | None:
-    query = db.query(MatchScoreRecord).filter(MatchScoreRecord.job_id == job.id)
-    if candidate is not None:
-        query = query.filter(MatchScoreRecord.candidate_id == candidate.id)
-    record = query.order_by(MatchScoreRecord.id.desc()).first()
+    if candidate is None:
+        return None
+    record = (
+        db.query(MatchScoreRecord)
+        .filter(
+            MatchScoreRecord.job_id == job.id,
+            MatchScoreRecord.candidate_id == candidate.id,
+        )
+        .order_by(MatchScoreRecord.id.desc())
+        .first()
+    )
     if record is None:
         return None
     return MatchScore(

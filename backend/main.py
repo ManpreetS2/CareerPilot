@@ -71,24 +71,51 @@ async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONR
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
+_SENSITIVE_LOC = {
+    "password",
+    "token",
+    "secret",
+    "authorization",
+    "cookie",
+    "api_key",
+    "apikey",
+    "session",
+}
+
+
+def _sanitize_validation_errors(errors: list[dict]) -> list[dict]:
+    sanitized: list[dict] = []
+    for err in errors:
+        item = dict(err)
+        item.pop("input", None)
+        loc = [str(part).lower() for part in item.get("loc", ())]
+        sensitive = any(key in part for part in loc for key in _SENSITIVE_LOC)
+        ctx = item.get("ctx")
+        if isinstance(ctx, dict):
+            cleaned: dict[str, object] = {}
+            for key, value in ctx.items():
+                if isinstance(value, BaseException):
+                    cleaned[key] = type(value).__name__
+                elif sensitive or key.lower() in _SENSITIVE_LOC:
+                    cleaned[key] = "[redacted]"
+                else:
+                    cleaned[key] = value
+            item["ctx"] = cleaned
+        sanitized.append(item)
+    return sanitized
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     _request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    safe_errors = []
-    for err in exc.errors():
-        item = dict(err)
-        ctx = item.get("ctx")
-        if isinstance(ctx, dict):
-            item["ctx"] = {
-                key: (str(value) if isinstance(value, BaseException) else value)
-                for key, value in ctx.items()
-            }
-        safe_errors.append(item)
-    return JSONResponse(status_code=422, content={"detail": safe_errors})
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _sanitize_validation_errors(exc.errors())},
+    )
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("Unhandled server error: %s", exc)
+    logger.error("Unhandled server error type=%s", type(exc).__name__)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})

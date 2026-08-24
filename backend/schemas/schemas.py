@@ -343,3 +343,10 @@ class UserPublic(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CurrentProfile(BaseModel):
+    """Authenticated read of the current user's stored candidate and preferences."""
+
+    candidate: CandidateProfile | None = None
+    preferences: TargetPreferences | None = None

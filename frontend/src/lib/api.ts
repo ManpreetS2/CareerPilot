@@ -14,6 +14,7 @@ import type {
   JobVerificationResponse,
   MatchScore,
   ParseResumeResponse,
+  CurrentProfile,
   ScoutJobsResponse,
   TargetPreferences,
   TrackerStatus,
@@ -77,6 +78,8 @@ export const api = {
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 
   me: () => request<User>("/api/auth/me"),
+
+  getProfile: () => request<CurrentProfile>("/api/profile"),
 
   parseResume: (file: File) => {
     const body = new FormData();

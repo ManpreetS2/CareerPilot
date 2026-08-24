@@ -449,6 +449,10 @@ def _preference_record_to_schema(record: TargetPreference) -> TargetPreferences:
     )
 
 
+def preference_record_to_schema(record: TargetPreference) -> TargetPreferences:
+    return _preference_record_to_schema(record)
+
+
 def candidate_record_to_profile(record: Candidate) -> CandidateProfile:
     projects: list[Project] = []
     for item in record.projects or []:
