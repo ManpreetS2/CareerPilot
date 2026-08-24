@@ -22,10 +22,17 @@ from backend.services.analysis_service import (
     canonicalize_skill,
 )
 from backend.services.llm_client import (
+    LLMConfigurationError,
     LLMEmptyResponseError,
     LLMProviderError,
     get_llm_client,
 )
+from backend.services.llm_provider_sequence import (
+    configured_provider_names,
+    invoke_provider_generate,
+    uses_injected_generator,
+)
+from backend.services.llm_structured_schemas import job_intelligence_llm_schema
 
 logger = logging.getLogger(__name__)
 
@@ -905,12 +912,17 @@ def get_stored_job_intelligence(db: Session, public_id: str) -> JobIntelligence:
 def _extract_structured(
     job: JobRecord,
     generate_fn: GenerateFn | None,
+    *,
+    provider: str | None = None,
 ) -> JobIntelligence:
     system_prompt, user_prompt = build_extraction_prompts(job)
+    schema = job_intelligence_llm_schema()
     generator = generate_fn
     if generator is None:
-        client = get_llm_client("gemini")
-        generator = lambda prompt, system: client.generate(prompt, system_prompt=system)
+        client = get_llm_client(provider or "gemini")
+        generator = lambda prompt, system: invoke_provider_generate(
+            client, prompt, system, schema
+        )
 
     last_error: Exception | None = None
     for attempt in range(2):
@@ -995,25 +1007,54 @@ def extract_job_intelligence(
         job = _load_job(db, public_id)
         _require_posting_evidence(job)
         logger.info("job intelligence extraction started job_pk=%s", job.id)
-        structured = _extract_structured(job, generate_fn)
-        grounded, counts = ground_job_intelligence(structured, job)
-        logger.info(
-            "job intelligence grounding job_pk=%s counts=%s",
-            job.id,
-            counts,
-        )
-        if not _has_usable_intelligence(grounded):
-            raise EmptyGroundedIntelligenceError()
-        stored = _persist_grounded(db, job, grounded)
-        logger.info(
-            "job intelligence persisted job_pk=%s categories=%s",
-            job.id,
-            sum(
-                bool(getattr(stored, field))
-                for field in _STRUCTURED_FIELDS
-            ),
-        )
-        return stored
+        if uses_injected_generator(generate_fn):
+            structured = _extract_structured(job, generate_fn)
+            return _ground_and_persist_intelligence(db, job, structured)
+        last_error: Exception | None = None
+        for provider in configured_provider_names():
+            try:
+                structured = _extract_structured(job, None, provider=provider)
+                return _ground_and_persist_intelligence(db, job, structured)
+            except (
+                StructuredIntelligenceError,
+                EmptyGroundedIntelligenceError,
+                LLMProviderError,
+                LLMEmptyResponseError,
+                LLMConfigurationError,
+            ) as exc:
+                last_error = exc
+                logger.warning(
+                    "job intelligence provider sequence failed category=%s job_pk=%s",
+                    type(exc).__name__,
+                    job.id,
+                )
+                db.rollback()
+                continue
+        if last_error is not None:
+            raise last_error
+        raise StructuredIntelligenceError()
     except Exception:
         db.rollback()
         raise
+
+
+def _ground_and_persist_intelligence(
+    db: Session,
+    job: JobRecord,
+    structured: JobIntelligence,
+) -> JobIntelligence:
+    grounded, counts = ground_job_intelligence(structured, job)
+    logger.info(
+        "job intelligence grounding job_pk=%s counts=%s",
+        job.id,
+        counts,
+    )
+    if not _has_usable_intelligence(grounded):
+        raise EmptyGroundedIntelligenceError()
+    stored = _persist_grounded(db, job, grounded)
+    logger.info(
+        "job intelligence persisted job_pk=%s categories=%s",
+        job.id,
+        sum(bool(getattr(stored, field)) for field in _STRUCTURED_FIELDS),
+    )
+    return stored

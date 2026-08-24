@@ -120,3 +120,8 @@ def _block_llm_generate_during_tests(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("LLMClient.generate must not be called during automated tests")
 
     monkeypatch.setattr("backend.services.llm_client.LLMClient.generate", _blocked)
+
+
+@pytest.fixture(autouse=True)
+def _blank_llm_provider_order_during_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("backend.core.config.settings.llm_provider_order", "")

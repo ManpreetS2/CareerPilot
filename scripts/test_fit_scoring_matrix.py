@@ -36,6 +36,7 @@ if str(ROOT) not in sys.path:
 
 from backend.api.dependencies import get_current_user
 from backend.api.routes.scoring import router as scoring_router
+from backend.core.config import settings
 from backend.db.database import Base, get_db
 from backend.db.models import (
     Candidate,
@@ -206,6 +207,10 @@ def run_scenario(manifest: dict[str, Any], database_path: Path) -> MatrixResult:
     extraction_responses = list(manifest.get("extraction_responses") or [])
     if manifest.get("extraction_response") is not None:
         extraction_responses = [manifest["extraction_response"]]
+
+    # Isolated from the developer's .env provider order. This matrix asserts
+    # historical single-provider call counts unless a manifest opts in.
+    settings.llm_provider_order = str(manifest.get("llm_provider_order") or "")
 
     class _MatrixLLM:
         def __init__(self) -> None:

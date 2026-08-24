@@ -68,7 +68,7 @@ def _http_for_candidate_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LLMConfigurationError):
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The resume parser is not configured correctly. Check the local Gemini configuration.",
+            detail="The resume parser is not configured correctly. Check the local LLM configuration.",
         )
     if isinstance(exc, ProfileExtractionError):
         return HTTPException(
