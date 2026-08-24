@@ -232,3 +232,105 @@ def test_structured_schemas_omit_persistence_fields() -> None:
 def test_unsupported_provider_still_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(LLMConfigurationError):
         LLMClient(provider="not-a-provider")
+
+
+FAKE_TS_HOST = "host-device.tailnet.ts.net"
+FAKE_TS_URL = f"https://{FAKE_TS_HOST}"
+SECRET_ERROR_BODY = "SECRET_OLLAMA_ERROR_BODY_DO_NOT_LOG"
+SECRET_CONTENT = "SECRET_OLLAMA_CONTENT_DO_NOT_LOG"
+
+
+def _install_real_httpx_transport(monkeypatch: pytest.MonkeyPatch, handler) -> None:
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("httpx.Client", factory)
+
+
+def _forbidden_log_blob() -> tuple[str, ...]:
+    return (
+        FAKE_TS_HOST,
+        "/api/chat",
+        SECRET_PROMPT,
+        SECRET_SYSTEM,
+        SECRET_THINKING,
+        SECRET_ERROR_BODY,
+        SECRET_CONTENT,
+    )
+
+
+@pytest.mark.parametrize("level", ["INFO", "DEBUG"])
+def test_real_httpx_client_does_not_log_private_ollama_url(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    level: str,
+) -> None:
+    from backend.core.logging import setup_logging
+
+    root = logging.getLogger()
+    httpx_logger = logging.getLogger("httpx")
+    httpcore_logger = logging.getLogger("httpcore")
+    previous = (root.level, httpx_logger.level, httpcore_logger.level)
+
+    payload = {
+        "done": True,
+        "message": {"content": SECRET_CONTENT, "thinking": SECRET_THINKING},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == FAKE_TS_HOST
+        assert request.url.path == "/api/chat"
+        if request.url.path == "/api/chat" and request.method == "POST":
+            body = request.content.decode("utf-8")
+            if SECRET_PROMPT in body and "force-error" not in body:
+                return httpx.Response(200, json=payload)
+            return httpx.Response(500, json={"error": SECRET_ERROR_BODY})
+        return httpx.Response(404, json={"error": SECRET_ERROR_BODY})
+
+    _ollama_settings(monkeypatch)
+    monkeypatch.setattr("backend.core.config.settings.ollama_base_url", FAKE_TS_URL)
+    _install_real_httpx_transport(monkeypatch, handler)
+    client = LLMClient(provider="ollama")
+
+    try:
+        setup_logging(level)
+        with caplog.at_level(logging.DEBUG):
+            text = client._generate_ollama(SECRET_PROMPT, SECRET_SYSTEM, None)
+            assert text == SECRET_CONTENT
+            with pytest.raises(LLMProviderError):
+                client._generate_ollama("force-error " + SECRET_PROMPT, SECRET_SYSTEM, None)
+        blob = caplog.text
+        for fragment in _forbidden_log_blob():
+            assert fragment not in blob
+        assert "category=http_status" in blob
+    finally:
+        root.setLevel(previous[0])
+        httpx_logger.setLevel(previous[1])
+        httpcore_logger.setLevel(previous[2])
+
+
+def test_setup_logging_pins_http_loggers_when_root_handlers_exist() -> None:
+    from backend.core.logging import setup_logging
+
+    root = logging.getLogger()
+    httpx_logger = logging.getLogger("httpx")
+    httpcore_logger = logging.getLogger("httpcore")
+    previous = (root.level, httpx_logger.level, httpcore_logger.level)
+    assert root.handlers
+    try:
+        setup_logging("DEBUG")
+        assert root.level == logging.DEBUG
+        assert httpx_logger.level == logging.WARNING
+        assert httpcore_logger.level == logging.WARNING
+        setup_logging("INFO")
+        assert root.level == logging.INFO
+        assert httpx_logger.level == logging.WARNING
+        assert httpcore_logger.level == logging.WARNING
+    finally:
+        root.setLevel(previous[0])
+        httpx_logger.setLevel(previous[1])
+        httpcore_logger.setLevel(previous[2])

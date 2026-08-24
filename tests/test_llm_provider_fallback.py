@@ -458,3 +458,77 @@ def test_fallback_logs_are_sanitized(isolated_session, monkeypatch: pytest.Monke
     assert "127.0.0.1" not in blob
     assert "/api/chat" not in blob
     assert "sk-" not in blob
+
+
+def test_candidate_persist_failure_does_not_call_next_provider(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    scripted = ScriptedProviders()
+    scripted.script("ollama", json.dumps(_grounded_llm_payload()))
+    scripted.script("gemini", json.dumps(_grounded_llm_payload()))
+    _patch_clients(monkeypatch, scripted, *_profile_modules())
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("synthetic database failure")
+
+    monkeypatch.setattr(
+        "backend.services.candidate_profile_agent.persist_candidate_profile",
+        _boom,
+    )
+    with pytest.raises(RuntimeError, match="synthetic database failure"):
+        build_candidate_profile_from_upload(
+            "alex.pdf",
+            build_simple_text_pdf(SAMPLE_RESUME_TEXT),
+            db=isolated_session,
+            user_id=TEST_USER_ID,
+            content_type="application/pdf",
+        )
+    assert scripted.calls == ["ollama"]
+    assert isolated_session.query(Candidate).count() == 0
+
+
+def test_job_intelligence_persist_failure_does_not_call_next_provider(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    job = _job(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", json.dumps(_payload()))
+    scripted.script("gemini", json.dumps(_payload()))
+    _patch_clients(monkeypatch, scripted, *_intel_modules())
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("synthetic database failure")
+
+    monkeypatch.setattr(
+        "backend.services.job_intelligence_service._persist_grounded",
+        _boom,
+    )
+    with pytest.raises(RuntimeError, match="synthetic database failure"):
+        extract_job_intelligence(isolated_session, job.public_id)
+    assert scripted.calls == ["ollama"]
+    assert isolated_session.query(JobIntelligenceRecord).count() == 0
+
+
+def test_materials_persist_failure_does_not_call_next_provider(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    job, _candidate = seed_materials_prerequisites(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", VALID_MATERIALS_JSON)
+    scripted.script("gemini", VALID_MATERIALS_JSON)
+    _patch_clients(monkeypatch, scripted, *_materials_modules())
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("synthetic database failure")
+
+    monkeypatch.setattr(
+        "backend.services.application_materials_agent._persist_grounded_draft",
+        _boom,
+    )
+    with pytest.raises(RuntimeError, match="synthetic database failure"):
+        generate_grounded_application_materials(isolated_session, job.public_id, TEST_USER_ID)
+    assert scripted.calls == ["ollama"]
+    assert isolated_session.query(ApplicationPackageRecord).count() == 0
