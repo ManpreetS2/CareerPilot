@@ -1,5 +1,11 @@
 /** Shared TypeScript types mirroring backend Pydantic schemas. */
 
+export type User = {
+  id: number;
+  email: string;
+  created_at: string;
+};
+
 export type Project = {
   name: string;
   description?: string | null;
@@ -57,6 +63,11 @@ export type TargetPreferences = {
   race_ethnicity?: string | null;
   veteran_status?: string | null;
   disability_status?: string | null;
+};
+
+export type CurrentProfile = {
+  candidate: CandidateProfile | null;
+  preferences: TargetPreferences | null;
 };
 
 export type JobStatus = "discovered" | "verified" | "flagged" | "stale";
@@ -122,6 +133,7 @@ export type ApplicationPackage = {
   eligibility_confirmed: boolean;
   eligibility_notes?: string | null;
   decision_notes?: string | null;
+  grounded?: boolean;
 };
 
 export type ApprovalDecision = "approved" | "edit_requested" | "rejected";

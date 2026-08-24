@@ -8,9 +8,14 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
+from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
-from backend.db.models import Candidate, TargetPreference
-from backend.schemas.schemas import ParseResumeResponse, TargetPreferences
+from backend.db.models import Candidate, TargetPreference, User
+from backend.schemas.schemas import CurrentProfile, ParseResumeResponse, TargetPreferences
+from backend.services.application_materials_agent import (
+    candidate_record_to_profile,
+    preference_record_to_schema,
+)
 from backend.services.candidate_profile_agent import (
     ANNUAL_SALARY_MAX,
     ANNUAL_SALARY_MIN,
@@ -29,6 +34,26 @@ from backend.services.llm_client import LLMConfigurationError
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["candidate"])
+
+
+@router.get("/profile", response_model=CurrentProfile)
+def get_current_profile(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CurrentProfile:
+    """Read-only current candidate and latest preferences. No provider call, no write."""
+
+    candidate = db.query(Candidate).filter(Candidate.user_id == user.id).first()
+    preference = (
+        db.query(TargetPreference)
+        .filter(TargetPreference.user_id == user.id)
+        .order_by(TargetPreference.id.desc())
+        .first()
+    )
+    return CurrentProfile(
+        candidate=candidate_record_to_profile(candidate) if candidate is not None else None,
+        preferences=preference_record_to_schema(preference) if preference is not None else None,
+    )
 
 
 def _http_for_candidate_error(exc: Exception) -> HTTPException:
@@ -55,7 +80,7 @@ def _http_for_candidate_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     if isinstance(exc, CandidateProfileError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    logger.exception("Unexpected candidate profile failure: %s", type(exc).__name__)
+    logger.error("Unexpected candidate profile failure type=%s", type(exc).__name__)
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Unable to process resume.",
@@ -66,6 +91,7 @@ def _http_for_candidate_error(exc: Exception) -> HTTPException:
 async def parse_resume(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ParseResumeResponse:
     """Parse an uploaded PDF into a grounded CandidateProfile and persist it."""
     # Read at most MAX+1 bytes so oversized uploads fail without buffering unbounded content.
@@ -81,6 +107,7 @@ async def parse_resume(
             filename,
             content,
             db=db,
+            user_id=user.id,
             content_type=content_type,
         )
         note = (
@@ -99,6 +126,7 @@ async def parse_resume(
 def save_preferences(
     preferences: TargetPreferences,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> TargetPreferences:
     """Validate preferences and persist them to SQLite."""
     if not preferences.target_roles:
@@ -114,8 +142,9 @@ def save_preferences(
             detail="Minimum base salary must be an annual USD amount between 10000 and 1000000.",
         )
 
-    candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    candidate = db.query(Candidate).filter(Candidate.user_id == user.id).first()
     record = TargetPreference(
+        user_id=user.id,
         candidate_id=candidate.id if candidate else None,
         target_roles=preferences.target_roles,
         preferred_locations=preferences.preferred_locations,

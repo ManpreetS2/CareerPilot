@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import { FileUp, Save, Upload } from "lucide-react";
 import { CandidateSummary } from "../components/CandidateSummary";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -67,6 +67,30 @@ export function ProfilePage() {
   const [prefsLoading, setPrefsLoading] = useState(false);
   const [prefsError, setPrefsError] = useState<unknown>(null);
   const [prefsSuccess, setPrefsSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTargetRoles(preferences?.target_roles?.join(", ") || "");
+    setLocation(preferences?.preferred_locations?.[0] || "");
+    setSalaryMin(
+      preferences?.salary_min == null || isLegacyHourlySalary(preferences.salary_min)
+        ? ""
+        : String(preferences.salary_min),
+    );
+    setWorkAuth(preferences?.work_authorization || "");
+    setRemotePreference(preferences?.remote_preference || "");
+    setLegalName(preferences?.legal_name || "");
+    setLinkedinUrl(preferences?.linkedin_url || "");
+    setGithubUrl(preferences?.github_url || "");
+    setPortfolioUrl(preferences?.portfolio_url || "");
+    setEarliestStartDate(preferences?.earliest_start_date || "");
+    setCurrentlyEnrolled(preferences?.currently_enrolled_in_program || "");
+    setExpectedGraduation(preferences?.expected_graduation || "");
+    setDegreePursuing(preferences?.degree_pursuing || "");
+    setGender(preferences?.gender || "");
+    setRaceEthnicity(preferences?.race_ethnicity || "");
+    setVeteranStatus(preferences?.veteran_status || "");
+    setDisabilityStatus(preferences?.disability_status || "");
+  }, [preferences]);
 
   const canBuildProfile = useMemo(
     () => Boolean(file) && !profileLoading,

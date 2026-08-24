@@ -1062,7 +1062,7 @@ def test_logs_contain_only_ids_attempts_and_counts(
 def test_scoring_uses_stored_intelligence_without_provider_or_mutation(
     isolated_session,
 ) -> None:
-    from tests.test_fit_scoring import _candidate
+    from tests.test_fit_scoring import TEST_USER_ID, _candidate
 
     _candidate(
         isolated_session,
@@ -1077,7 +1077,7 @@ def test_scoring_uses_stored_intelligence_without_provider_or_mutation(
         title="Backend Engineer",
         description="Python is required. Docker is preferred.",
     )
-    fallback = score_job(isolated_session, job.public_id)
+    fallback = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert "provisional" in fallback.rationale.lower()
     assert fallback.skill_score == 75.0
     extracted = extract_job_intelligence(
@@ -1107,7 +1107,7 @@ def test_scoring_uses_stored_intelligence_without_provider_or_mutation(
         "backend.services.job_intelligence_service.get_llm_client",
         side_effect=AssertionError("scoring must not call a provider"),
     ):
-        full = score_job(isolated_session, job.public_id)
+        full = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     assert "full Job Intelligence" in full.rationale
     assert full.skill_score == 75.0

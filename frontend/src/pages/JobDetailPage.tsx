@@ -73,6 +73,18 @@ export function JobDetailPage() {
           if (!cancelled) setIntelligenceLoading(false);
         }
         try {
+          const storedScore = await api.getStoredScore(jobId);
+          if (!cancelled) setMatch(storedScore);
+        } catch (err) {
+          if (!cancelled) {
+            if (err instanceof ApiClientError && err.status === 404) {
+              setMatch(null);
+            } else {
+              setScoreError(err);
+            }
+          }
+        }
+        try {
           const storedPrep = await api.getInterviewPrep(jobId);
           if (!cancelled) setInterviewPrep(storedPrep);
         } catch (err) {

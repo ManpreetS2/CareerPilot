@@ -7,13 +7,17 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
+from backend.db.models import User
 from backend.schemas.schemas import JobIntelligence, MatchScore
 from backend.services.analysis_service import (
     CandidateRequiredError,
     JobNotFoundError,
     RequirementsUnavailableError,
     ScoringError,
+    StoredScoreNotFoundError,
+    get_stored_match_score,
 )
 from backend.services.job_intelligence_service import (
     EmptyGroundedIntelligenceError,
@@ -84,6 +88,7 @@ def _is_intelligence_pipeline_error(exc: Exception) -> bool:
 def get_job_intelligence_route(
     job_id: str,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> JobIntelligence:
     """Return stored grounded requirements without invoking a provider."""
     try:
@@ -96,6 +101,7 @@ def get_job_intelligence_route(
 def extract_job_intelligence_route(
     job_id: str,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> JobIntelligence:
     """Explicitly extract, ground, and persist requirements for one job."""
     try:
@@ -104,11 +110,26 @@ def extract_job_intelligence_route(
         raise _http_for_intelligence_error(exc) from exc
 
 
+@router.get("/jobs/{job_id}/score", response_model=MatchScore)
+def get_stored_score_route(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> MatchScore:
+    """Return the latest stored fit score. Never scores, writes, or calls a provider."""
+    try:
+        return get_stored_match_score(db, job_id, user.id)
+    except StoredScoreNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
+        raise _http_for_scoring_error(exc) from exc
+
+
 @router.post("/jobs/{job_id}/score", response_model=MatchScore)
-def score_job_route(job_id: str, db: Session = Depends(get_db)) -> MatchScore:
+def score_job_route(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> MatchScore:
     """Calculate and persist an explainable fit score using the request session."""
     try:
-        return score_job_with_intelligence(db, job_id)
+        return score_job_with_intelligence(db, job_id, user.id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         if _is_intelligence_pipeline_error(exc):
             raise _http_for_intelligence_error(exc) from exc

@@ -27,6 +27,9 @@ from backend.services.candidate_profile_agent import build_candidate_profile_fro
 def main() -> int:
     parser = argparse.ArgumentParser(description="Live CareerPilot candidate profile test")
     parser.add_argument("pdf_path", type=Path, help="Path to a local resume PDF (not committed)")
+    parser.add_argument(
+        "--user-id", type=int, default=1, help="User id to attach the parsed candidate to"
+    )
     args = parser.parse_args()
 
     pdf_path: Path = args.pdf_path
@@ -37,7 +40,9 @@ def main() -> int:
     init_db()
     db = SessionLocal()
     try:
-        profile, extraction, report = build_candidate_profile_from_pdf(pdf_path, db=db)
+        profile, extraction, report = build_candidate_profile_from_pdf(
+            pdf_path, db=db, user_id=args.user_id
+        )
     except Exception as exc:  # noqa: BLE001 — CLI surface
         print(f"FAILED: {type(exc).__name__}")
         return 2

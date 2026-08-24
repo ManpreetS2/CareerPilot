@@ -8,7 +8,7 @@ export function MatchBadge({
   if (score == null) {
     return (
       <span className="status-pill bg-ink-100 text-ink-600 dark:bg-ink-800 dark:text-ink-200">
-        Score pending
+        Not scored
       </span>
     );
   }

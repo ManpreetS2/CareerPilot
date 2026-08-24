@@ -1,21 +1,12 @@
 """Approval Agent — human-in-the-loop review of tailored application materials.
 
-Materials themselves stay mocked (`_mock_materials`) until the real
-Application Material Agent replaces them — this module owns persistence and
-the approve/edit/reject decision, not generation quality. A package is
-generated once per job and then persisted; re-requesting it returns the same
-stored package rather than silently regenerating (and discarding) reviewed
-content. "One package per job" is enforced by a DB-level unique index
-(`ux_application_packages_job_id`, see db/models.py), not just the
-check-then-insert below — two concurrent generate calls for the same job
-race safely: whichever loses is caught and returns the winner's row instead
-of erroring or creating a duplicate.
-
-The unfinished grounded generator lives in
+Grounded generation lives in
 `backend.services.application_materials_agent.generate_grounded_application_materials`.
-Do not call it from this workflow until that student-owned function is
-implemented. `_mock_materials` below is the isolated legacy placeholder and
-the next replacement target for a single small integration change.
+This module owns stored-package reads, the production generate path, and the
+approve/edit/reject decision. A grounded package is created once per job per
+user; re-requesting it returns the stored package rather than silently
+regenerating reviewed content. Approved or edit-requested packages are never
+replaced except through an explicit stale-reviewed discard by the owner.
 """
 
 from __future__ import annotations
@@ -26,6 +17,25 @@ from sqlalchemy.orm import Session
 
 from backend.db.models import ApplicationPackageRecord, Candidate, JobRecord
 from backend.schemas.schemas import ApplicationPackage, ApprovalRequest, ApprovalResponse
+from backend.services.application_materials_agent import (
+    ApplicationMaterialsConflictError,
+    ApplicationMaterialsGenerateFn,
+    ApplicationMaterialsGenerator,
+    ApplicationMaterialsGroundingError,
+    ApplicationMaterialsParseError,
+    MissingCandidateError,
+    MissingFitScoreError,
+    MissingJobIntelligenceError,
+    StaleApplicationMaterialsError,
+    generate_grounded_application_materials,
+    is_grounded_package_record,
+    is_package_ready_for_apply,
+)
+from backend.services.llm_client import (
+    LLMConfigurationError,
+    LLMEmptyResponseError,
+    LLMProviderError,
+)
 
 _APPROVAL_MESSAGES = {
     "approved": "Application package approved. Ready for the next step once Form Fill lands.",
@@ -41,35 +51,13 @@ def _get_job_record(db: Session, job_id: str) -> JobRecord:
     return record
 
 
-def _get_current_candidate(db: Session) -> Candidate | None:
-    return db.query(Candidate).order_by(Candidate.id.desc()).first()
+def _get_current_candidate(db: Session, user_id: int) -> Candidate | None:
+    return db.query(Candidate).filter(Candidate.user_id == user_id).first()
 
 
-def _mock_materials(job: JobRecord) -> tuple[list[str], str, str, list[str]]:
-    """LEGACY PLACEHOLDER — next replacement target for grounded generation.
-
-    Isolated from `application_materials_agent`. Do not feed this fabricated
-    output through the new service. Replace this call site only after
-    `generate_grounded_application_materials` is implemented.
-    """
-    tailored_bullets = [
-        f"Built Python APIs relevant to {job.company}'s intern stack.",
-        "Wrote SQL-backed features with tests and documented edge cases.",
-        "Collaborated across frontend and backend on a shipped campus product.",
-    ]
-    cover_letter_draft = (
-        f"Dear {job.company} hiring team,\n\n"
-        f"I am applying for the {job.title} role. This is a placeholder draft.\n"
-    )
-    recruiter_message = (
-        f"Hi, I'm interested in the {job.title} role at {job.company}. "
-        "Happy to share a tailored resume."
-    )
-    source_traceability_notes = [
-        "Placeholder bullet — not yet grounded in a real candidate profile.",
-        "Real generation with source traceability lands with the Application Material Agent.",
-    ]
-    return tailored_bullets, cover_letter_draft, recruiter_message, source_traceability_notes
+class StoredMaterialsNotFoundError(Exception):
+    def __init__(self) -> None:
+        super().__init__("Stored application materials not found.")
 
 
 def _record_to_package(record: ApplicationPackageRecord, job_public_id: str) -> ApplicationPackage:
@@ -83,62 +71,108 @@ def _record_to_package(record: ApplicationPackageRecord, job_public_id: str) -> 
         eligibility_confirmed=record.eligibility_confirmed,
         eligibility_notes=record.eligibility_notes,
         decision_notes=record.decision_notes,
+        grounded=bool(getattr(record, "grounded", False)) and is_grounded_package_record(record),
     )
 
 
-def get_or_generate_application_package(db: Session, job_id: str) -> ApplicationPackage:
+def _owned_package(db: Session, job: JobRecord, user_id: int) -> ApplicationPackageRecord | None:
+    return (
+        db.query(ApplicationPackageRecord)
+        .filter(
+            ApplicationPackageRecord.job_id == job.id,
+            ApplicationPackageRecord.user_id == user_id,
+        )
+        .first()
+    )
+
+
+def get_stored_application_package(db: Session, job_id: str, user_id: int) -> ApplicationPackage:
+    """Return a stored grounded package. Never generates, writes, or calls a provider."""
     job = _get_job_record(db, job_id)
+    record = _owned_package(db, job, user_id)
+    if record is None or not is_grounded_package_record(record):
+        raise StoredMaterialsNotFoundError()
+    current = _get_current_candidate(db, user_id)
+    if current is not None and record.candidate_id != current.id:
+        reviewed = record.approval_status in {"approved", "edit_requested"}
+        raise StaleApplicationMaterialsError(reviewed=reviewed)
+    return _record_to_package(record, job_id)
 
-    existing = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.job_id == job.id).first()
-    if existing is not None:
-        return _record_to_package(existing, job_id)
 
-    bullets, cover_letter, recruiter_message, notes = _mock_materials(job)
-    candidate = _get_current_candidate(db)
-    record = ApplicationPackageRecord(
-        job_id=job.id,
-        candidate_id=candidate.id if candidate else None,
-        tailored_bullets=bullets,
-        cover_letter_draft=cover_letter,
-        recruiter_message=recruiter_message,
-        source_traceability_notes=notes,
-        approval_status="pending_review",
-    )
-    db.add(record)
+def get_or_generate_application_package(
+    db: Session,
+    job_id: str,
+    user_id: int,
+    *,
+    generator: ApplicationMaterialsGenerateFn | ApplicationMaterialsGenerator | None = None,
+) -> ApplicationPackage:
+    job = _get_job_record(db, job_id)
     try:
-        db.commit()
-    except IntegrityError:
-        # Lost a race with a concurrent generate call for the same job — the
-        # unique index is what actually enforces "one package per job" here;
-        # recover the winner's row instead of surfacing an error.
-        db.rollback()
-        existing = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.job_id == job.id).first()
-        if existing is not None:
-            return _record_to_package(existing, job_id)
-        raise
+        generate_grounded_application_materials(db, job_id, user_id, generator=generator)
+    except MissingJobIntelligenceError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except MissingCandidateError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except MissingFitScoreError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ApplicationMaterialsGroundingError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ApplicationMaterialsConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except StaleApplicationMaterialsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ApplicationMaterialsParseError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Application materials output was not valid structured JSON.",
+        ) from None
+    except LLMConfigurationError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Application materials generation is not configured.",
+        ) from None
+    except (LLMProviderError, LLMEmptyResponseError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The language model request failed.",
+        ) from None
 
-    # Built from the values just inserted rather than db.refresh(record):
-    # a session's default expire-on-commit behavior means reading record's
-    # attributes right after commit() would trigger an implicit reload
-    # anyway, so there's no free lunch from skipping an explicit refresh
-    # unless the response is built from what's already known in Python.
-    return ApplicationPackage(
-        job_id=job_id,
-        tailored_bullets=bullets,
-        cover_letter_draft=cover_letter,
-        recruiter_message=recruiter_message,
-        source_traceability_notes=notes,
-        approval_status="pending_review",
-        eligibility_confirmed=False,
-        eligibility_notes=None,
-        decision_notes=None,
-    )
+    record = _owned_package(db, job, user_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Application materials could not be stored.",
+        )
+    return _record_to_package(record, job_id)
 
 
-def apply_approval(db: Session, job_id: str, request: ApprovalRequest) -> ApprovalResponse:
+def discard_stale_reviewed_package(db: Session, job_id: str, user_id: int) -> dict[str, str]:
+    """Owner-only explicit reset of reviewed materials that belong to a previous profile.
+
+    Never calls a provider. Invalid state returns a sanitized conflict.
+    """
+    job = _get_job_record(db, job_id)
+    record = _owned_package(db, job, user_id)
+    current = _get_current_candidate(db, user_id)
+    if (
+        record is None
+        or current is None
+        or record.candidate_id == current.id
+        or record.approval_status not in {"approved", "edit_requested"}
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Reviewed materials for a previous profile are not available to discard.",
+        )
+    db.delete(record)
+    db.commit()
+    return {"status": "discarded"}
+
+
+def apply_approval(db: Session, job_id: str, user_id: int, request: ApprovalRequest) -> ApprovalResponse:
     job = _get_job_record(db, job_id)
 
-    record = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.job_id == job.id).first()
+    record = _owned_package(db, job, user_id)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -151,23 +185,18 @@ def apply_approval(db: Session, job_id: str, request: ApprovalRequest) -> Approv
             detail="Confirm work authorization, salary, and eligibility before approving.",
         )
 
+    if request.decision == "approved" and not is_package_ready_for_apply(db, record, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This package isn't grounded in your current candidate profile. "
+                "Regenerate application materials before approving."
+            ),
+        )
+
     record.approval_status = request.decision
-    # Only an approval decision carries eligibility weight (the validation
-    # above is what requires it to be true). Edit/reject never touch this
-    # field — a previously-recorded confirmation must never be silently
-    # downgraded to False as a side effect of an unrelated decision, e.g. a
-    # caller that omits eligibility_confirmed and gets the schema's False
-    # default.
     if request.decision == "approved":
         record.eligibility_confirmed = True
-    # Notes are freeform reviewer input, not a confirmation, so they're
-    # applied regardless of decision type — but only when the caller
-    # actually sent the field. `model_fields_set` distinguishes "field
-    # omitted from the request" (leave the stored value alone) from "field
-    # explicitly sent as empty/null" (clear it) — both would otherwise look
-    # identical as `None` once Pydantic applies its default, which is
-    # exactly what silently cleared a field on every unrelated decision
-    # before this fix.
     provided = request.model_fields_set
     if "eligibility_notes" in provided:
         record.eligibility_notes = request.eligibility_notes or None

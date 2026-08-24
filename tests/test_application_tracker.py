@@ -26,6 +26,7 @@ from backend.services.application_tracker_service import (
     update_tracking,
 )
 from backend.services.application_service import apply_approval, get_or_generate_application_package
+from tests.mvp_helpers import TEST_USER_ID, ensure_user, insert_candidate, insert_grounded_package
 from backend.services.interview_service import generate_and_store_interview_prep
 from backend.schemas.schemas import ApprovalRequest
 import pytest
@@ -47,49 +48,35 @@ def _job(session, *, public_id: str = "job-track", status: str = "discovered") -
     return record
 
 
-def _candidate(session) -> Candidate:
-    record = Candidate(
-        name="Jordan Avery",
-        email="jordan@example.com",
-        skills=["Python"],
-        projects=[{"name": "Demo", "description": "Python app", "technologies": ["Python"]}],
-        experience=[{"title": "Intern", "company": "Acme", "highlights": ["Wrote Python tests."]}],
-        education=[{"institution": "State University", "degree": "B.S.", "field": "Computer Science"}],
-        certifications=[],
-        strengths=["Backend"],
-        evidence_links=[],
-    )
-    session.add(record)
-    session.commit()
-    session.refresh(record)
-    return record
+def _candidate(session):
+    return insert_candidate(session, user_id=TEST_USER_ID)
+
 
 
 def test_tracker_get_is_read_only(isolated_session) -> None:
     job = _job(isolated_session)
-    item = get_tracking(isolated_session, job.public_id)
+    item = get_tracking(isolated_session, job.public_id, TEST_USER_ID)
     assert item.status is None
     assert isolated_session.query(ApplicationTrackerRecord).count() == 0
-    listed = list_applications(isolated_session)
+    listed = list_applications(isolated_session, TEST_USER_ID)
     assert listed[0].tracker_status is None
     assert isolated_session.query(ApplicationTrackerRecord).count() == 0
 
 
 def test_tracker_missing_job_404(isolated_session) -> None:
     with pytest.raises(TrackerJobNotFoundError):
-        get_tracking(isolated_session, "missing")
+        get_tracking(isolated_session, "missing", TEST_USER_ID)
     with pytest.raises(TrackerJobNotFoundError):
         update_tracking(
             isolated_session,
             "missing",
-            ApplicationTrackerUpdate(status="saved"),
-        )
+            ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
 
 
 def test_tracker_idempotent_creation(isolated_session) -> None:
     job = _job(isolated_session)
-    first = update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"))
-    second = update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"))
+    first = update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
+    second = update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
     assert first.status == "saved"
     assert second.status == "saved"
     assert isolated_session.query(ApplicationTrackerRecord).count() == 1
@@ -97,7 +84,7 @@ def test_tracker_idempotent_creation(isolated_session) -> None:
 
 def test_tracker_unique_conflict_recovery(isolated_session, monkeypatch) -> None:
     job = _job(isolated_session)
-    winner = ApplicationTrackerRecord(job_id=job.id, status="saved")
+    winner = ApplicationTrackerRecord(job_id=job.id, user_id=TEST_USER_ID, status="saved")
     isolated_session.add(winner)
     isolated_session.commit()
 
@@ -122,8 +109,7 @@ def test_tracker_unique_conflict_recovery(isolated_session, monkeypatch) -> None
     result = update_tracking(
         isolated_session,
         job.public_id,
-        ApplicationTrackerUpdate(status="pending_review"),
-    )
+        ApplicationTrackerUpdate(status="pending_review"), TEST_USER_ID)
     monkeypatch.undo()
     assert result.status == "pending_review"
     assert isolated_session.query(ApplicationTrackerRecord).count() == 1
@@ -131,9 +117,9 @@ def test_tracker_unique_conflict_recovery(isolated_session, monkeypatch) -> None
 
 def test_tracker_unique_index_rejects_direct_duplicate(isolated_session) -> None:
     job = _job(isolated_session)
-    isolated_session.add(ApplicationTrackerRecord(job_id=job.id, status="saved"))
+    isolated_session.add(ApplicationTrackerRecord(job_id=job.id, user_id=TEST_USER_ID, status="saved"))
     isolated_session.commit()
-    isolated_session.add(ApplicationTrackerRecord(job_id=job.id, status="applied"))
+    isolated_session.add(ApplicationTrackerRecord(job_id=job.id, user_id=TEST_USER_ID, status="applied"))
     with pytest.raises(IntegrityError):
         isolated_session.commit()
     isolated_session.rollback()
@@ -141,22 +127,18 @@ def test_tracker_unique_index_rejects_direct_duplicate(isolated_session) -> None
 
 def test_invalid_status_transition(isolated_session) -> None:
     job = _job(isolated_session)
-    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="applied"))
+    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="applied"), TEST_USER_ID)
     with pytest.raises(TrackerInvalidTransitionError, match="applied"):
-        update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"))
+        update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
 
 
 def test_tracker_status_change_does_not_mutate_approval_or_form_fill(isolated_session) -> None:
     job = _job(isolated_session)
-    package = get_or_generate_application_package(isolated_session, job.public_id)
-    assert package.approval_status == "pending_review"
-    apply_approval(
-        isolated_session,
-        job.public_id,
-        ApprovalRequest(decision="approved", eligibility_confirmed=True, notes="ok"),
-    )
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
+    apply_approval(isolated_session, job.public_id, TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True, notes="ok"))
     fill_count = isolated_session.query(FormFillAttemptRecord).count()
-    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="applied"))
+    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="applied"), TEST_USER_ID)
     refreshed = isolated_session.query(ApplicationPackageRecord).one()
     assert refreshed.approval_status == "approved"
     assert refreshed.eligibility_confirmed is True
@@ -164,7 +146,7 @@ def test_tracker_status_change_does_not_mutate_approval_or_form_fill(isolated_se
 
 
 def test_dashboard_empty_state_zero_counts(isolated_session) -> None:
-    summary = get_dashboard_summary(isolated_session)
+    summary = get_dashboard_summary(isolated_session, TEST_USER_ID)
     assert summary.profile_completion == 0
     assert summary.skills_count == 0
     assert summary.jobs_discovered == 0
@@ -181,6 +163,7 @@ def test_dashboard_real_aggregation(isolated_session) -> None:
     candidate = _candidate(isolated_session)
     isolated_session.add(
         TargetPreference(
+            user_id=TEST_USER_ID,
             candidate_id=candidate.id,
             target_roles=["Software Engineer Intern"],
             preferred_locations=["Remote"],
@@ -226,20 +209,14 @@ def test_dashboard_real_aggregation(isolated_session) -> None:
         )
     )
     isolated_session.commit()
-    get_or_generate_application_package(isolated_session, verified.public_id)
-    apply_approval(
-        isolated_session,
-        verified.public_id,
-        ApprovalRequest(decision="approved", eligibility_confirmed=True),
-    )
+    insert_grounded_package(isolated_session, verified, candidate=candidate)
+    apply_approval(isolated_session, verified.public_id, TEST_USER_ID, ApprovalRequest(decision="approved", eligibility_confirmed=True))
     update_tracking(
         isolated_session,
         verified.public_id,
-        ApplicationTrackerUpdate(status="ready_to_apply"),
-    )
+        ApplicationTrackerUpdate(status="ready_to_apply"), TEST_USER_ID)
     isolated_session.add(
-        InterviewPrepRecord(
-            job_id=verified.id,
+        InterviewPrepRecord(job_id=verified.id, user_id=TEST_USER_ID,
             likely_questions=["What is Python?"],
             talking_points=["Use stored Python evidence."],
             gaps_to_address=[],
@@ -247,7 +224,7 @@ def test_dashboard_real_aggregation(isolated_session) -> None:
     )
     isolated_session.commit()
 
-    summary = get_dashboard_summary(isolated_session)
+    summary = get_dashboard_summary(isolated_session, TEST_USER_ID)
     assert summary.jobs_discovered == 2
     assert summary.jobs_verified == 1
     assert summary.high_matches == 1
@@ -255,7 +232,7 @@ def test_dashboard_real_aggregation(isolated_session) -> None:
     assert summary.applications_ready == 1
     assert summary.applications_applied == 0
     assert summary.interviews == 0
-    assert summary.skills_count == 1
+    assert summary.skills_count == 2
     assert summary.profile_completion > 0
     assert summary.target_roles == ["Software Engineer Intern"]
     assert summary.preferred_location == "Remote"
@@ -330,42 +307,40 @@ def test_allowed_statuses_contract_matches_backend_transitions() -> None:
 def test_interview_prep_record_alone_does_not_increment_interviews(isolated_session) -> None:
     job = _job(isolated_session, public_id="prep-only", status="verified")
     isolated_session.add(
-        InterviewPrepRecord(
-            job_id=job.id,
+        InterviewPrepRecord(job_id=job.id, user_id=TEST_USER_ID,
             likely_questions=["What is Python?"],
             talking_points=["Use stored Python evidence."],
             gaps_to_address=[],
         )
     )
     isolated_session.commit()
-    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"))
-    summary = get_dashboard_summary(isolated_session)
+    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
+    summary = get_dashboard_summary(isolated_session, TEST_USER_ID)
     assert summary.interviews == 0
 
 
 def test_tracker_interviewing_increments_interviews_once(isolated_session) -> None:
     first = _job(isolated_session, public_id="int-a")
     second = _job(isolated_session, public_id="int-b")
-    update_tracking(isolated_session, first.public_id, ApplicationTrackerUpdate(status="interviewing"))
-    update_tracking(isolated_session, second.public_id, ApplicationTrackerUpdate(status="applied"))
+    update_tracking(isolated_session, first.public_id, ApplicationTrackerUpdate(status="interviewing"), TEST_USER_ID)
+    update_tracking(isolated_session, second.public_id, ApplicationTrackerUpdate(status="applied"), TEST_USER_ID)
     isolated_session.add(
-        InterviewPrepRecord(
-            job_id=second.id,
+        InterviewPrepRecord(job_id=second.id, user_id=TEST_USER_ID,
             likely_questions=["Unused prep"],
             talking_points=[],
             gaps_to_address=[],
         )
     )
     isolated_session.commit()
-    summary = get_dashboard_summary(isolated_session)
+    summary = get_dashboard_summary(isolated_session, TEST_USER_ID)
     assert summary.interviews == 1
 
 
 def test_dashboard_reads_do_not_mutate_rows(isolated_session) -> None:
     job = _job(isolated_session)
-    item = update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"))
-    first = get_dashboard_summary(isolated_session)
-    second = get_dashboard_summary(isolated_session)
+    item = update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
+    first = get_dashboard_summary(isolated_session, TEST_USER_ID)
+    second = get_dashboard_summary(isolated_session, TEST_USER_ID)
     refreshed = isolated_session.query(ApplicationTrackerRecord).one()
     assert first == second
     assert refreshed.status == "saved"
@@ -389,13 +364,13 @@ def test_generating_interview_prep_does_not_change_tracker_status(isolated_sessi
         )
     )
     isolated_session.commit()
-    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"))
-    generate_and_store_interview_prep(isolated_session, job.public_id)
-    tracking = get_tracking(isolated_session, job.public_id)
+    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
+    generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
+    tracking = get_tracking(isolated_session, job.public_id, TEST_USER_ID)
     assert tracking.status == "saved"
-    summary = get_dashboard_summary(isolated_session)
+    summary = get_dashboard_summary(isolated_session, TEST_USER_ID)
     assert summary.interviews == 0
-    generate_and_store_interview_prep(isolated_session, job.public_id)
-    assert get_tracking(isolated_session, job.public_id).status == "saved"
+    generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
+    assert get_tracking(isolated_session, job.public_id, TEST_USER_ID).status == "saved"
     assert isolated_session.query(InterviewPrepRecord).count() == 1
     _ = candidate

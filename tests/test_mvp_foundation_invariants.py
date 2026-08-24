@@ -60,8 +60,13 @@ def test_approval_and_form_fill_routes_unchanged(isolated_client) -> None:
             )
         )
         db.commit()
+        from tests.mvp_helpers import insert_grounded_package, seed_materials_prerequisites
 
-    generated = client.post("/api/jobs/gate-job/generate-materials")
+        job = db.query(JobRecord).filter_by(public_id="gate-job").one()
+        _job, candidate = seed_materials_prerequisites(db, public_id="gate-job")
+        insert_grounded_package(db, job, candidate=candidate)
+
+    generated = client.get("/api/jobs/gate-job/materials")
     assert generated.status_code == 200
     assert generated.json()["approval_status"] == "pending_review"
 
@@ -78,11 +83,23 @@ def test_approval_and_form_fill_routes_unchanged(isolated_client) -> None:
     assert approved.status_code == 200
     assert approved.json()["approval_status"] == "approved"
 
+    # example.com isn't a supported ATS, so this reports a normal "failed"
+    # result rather than raising — the package/candidate gate above is what
+    # is under test here, not ATS platform detection. (Before the
+    # grounded-package gate was wired up, insert_grounded_package's default
+    # candidate=None meant this request 409'd earlier at the missing-
+    # candidate check, before ever reaching the platform check — masking
+    # what this test is actually meant to cover.)
     fill = client.post("/api/jobs/gate-job/fill-application")
-    assert fill.status_code == 409
+    assert fill.status_code == 200
+    body = fill.json()
+    assert body["ats_platform"] == "unsupported"
+    assert body["status"] == "failed"
     with SessionLocal() as db:
         assert db.query(ApplicationPackageRecord).count() == 1
-        assert db.query(FormFillAttemptRecord).count() == 0
+        attempts = db.query(FormFillAttemptRecord).all()
+        assert len(attempts) == 1
+        assert attempts[0].status == "failed"
 
 
 def test_llm_generate_is_blocked_in_automated_tests(monkeypatch) -> None:

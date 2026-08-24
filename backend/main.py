@@ -11,8 +11,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import applications, candidate, health, interview, jobs, scoring, tracker
-from backend.core.config import settings
+from backend.api.routes import applications, auth, candidate, health, interview, jobs, scoring, tracker
+from backend.core.config import settings, validate_runtime_settings
+from backend.core.csrf import OriginCSRFMiddleware
 from backend.core.logging import setup_logging
 from backend.db.init_db import init_db
 
@@ -20,8 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(settings.log_level)
+    validate_runtime_settings()
     init_db()
     logger.info("CareerPilot API started")
     yield
@@ -36,20 +38,16 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    # Unpacked extensions get a chrome-extension:// origin whose id varies
-    # per install (no fixed manifest key) — matched by regex rather than an
-    # exact origin. Local-only dev server, single machine, single user.
-    allow_origin_regex=r"^chrome-extension://.*",
+    allow_origins=settings.cors_allow_origins,
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(OriginCSRFMiddleware)
 
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(candidate.router)
 app.include_router(jobs.router)
 app.include_router(scoring.router)
@@ -73,25 +71,51 @@ async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONR
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
+_SENSITIVE_LOC = {
+    "password",
+    "token",
+    "secret",
+    "authorization",
+    "cookie",
+    "api_key",
+    "apikey",
+    "session",
+}
+
+
+def _sanitize_validation_errors(errors: list[dict]) -> list[dict]:
+    sanitized: list[dict] = []
+    for err in errors:
+        item = dict(err)
+        item.pop("input", None)
+        loc = [str(part).lower() for part in item.get("loc", ())]
+        sensitive = any(key in part for part in loc for key in _SENSITIVE_LOC)
+        ctx = item.get("ctx")
+        if isinstance(ctx, dict):
+            cleaned: dict[str, object] = {}
+            for key, value in ctx.items():
+                if isinstance(value, BaseException):
+                    cleaned[key] = type(value).__name__
+                elif sensitive or key.lower() in _SENSITIVE_LOC:
+                    cleaned[key] = "[redacted]"
+                else:
+                    cleaned[key] = value
+            item["ctx"] = cleaned
+        sanitized.append(item)
+    return sanitized
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     _request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    # Ensure every error entry is JSON-serializable (Pydantic ctx may include Exception).
-    safe_errors = []
-    for err in exc.errors():
-        item = dict(err)
-        ctx = item.get("ctx")
-        if isinstance(ctx, dict):
-            item["ctx"] = {
-                key: (str(value) if isinstance(value, BaseException) else value)
-                for key, value in ctx.items()
-            }
-        safe_errors.append(item)
-    return JSONResponse(status_code=422, content={"detail": safe_errors})
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _sanitize_validation_errors(exc.errors())},
+    )
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("Unhandled server error: %s", exc)
+    logger.error("Unhandled server error type=%s", type(exc).__name__)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})

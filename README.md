@@ -48,50 +48,53 @@ CareerPilot_Ai/
 
 ## Current status
 
-**Completed and merged**
+CareerPilot is an authenticated local product. Signup, login, logout, and `GET /api/auth/me` exist. Private records (candidate, preferences, scores, materials, tracker rows, interview prep, form-fill attempts) are scoped to the signed-in user. Jobs and job intelligence remain shared public data.
 
-- Candidate Profile Agent (grounded resume parse, no invented experience)
-- Job Scout (Adzuna/RemoteOK/manual URL + persistence)
-- Job Verification (still-open and suspicious-posting checks)
-- Job Intelligence extraction (grounded structured requirements)
-- Fit & Gap scoring (deterministic, explainable, no LLM)
-- Approval Agent (human-in-the-loop review, eligibility confirmation)
-- Greenhouse/Lever assisted form fill (server-side preview, never submits)
-- Browser extension autofill for the live tab (never submits)
-- Candidate reusable application answers / preferences
+**Completed in this repo**
 
-**Foundation in this repo (runnable, not fully generated)**
+- Signup / login / logout / `/api/auth/me` with an HttpOnly session cookie (`careerpilot_session`)
+- CSRF origin checks for cookie-authenticated state changes
+- CORS from exact `ALLOWED_ORIGINS` plus an optional exact `EXTENSION_ORIGIN`
+- `COOKIE_SECURE` required when `APP_ENV=production`
+- Extension session header accepted only on the exact autofill route from the configured extension origin
+- `GET /api/profile` — read-only current candidate and latest preferences
+- Grounded candidate profile, job scout/verification/intelligence, fit scoring, materials, approval, assisted apply, tracker, and interview prep
+- Application materials are generated from stored evidence, not a placeholder
 
-- Application Tracker with explicit status updates and real dashboard metrics
-- Deterministic Interview Preparation baseline from stored Job Intelligence, Fit & Gap, and candidate evidence
-- Application Materials Agent **contract and tests**, with one unfinished student-owned function
+Opening Jobs, Job Detail, Applications, or Application Detail never scores a job, extracts requirements, or generates materials by itself. Calculate Fit and Generate Materials stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation. Assisted Apply and the extension never submit forms.
 
-**Student-owned next implementation**
+**Legacy local data**
 
-Complete grounded materials generation in:
+Rows created before auth (`user_id` NULL) are **not** auto-assigned. To attach them to one existing account, run the dry-run CLI first:
 
-`backend.services.application_materials_agent.generate_grounded_application_materials`
+```bash
+python scripts/claim_legacy_ownership.py --user-id <id>
+python scripts/claim_legacy_ownership.py --user-id <id> --apply --confirm
+```
 
-That function currently fails closed: it loads stored context, performs no persistence, calls no provider, and raises a sanitized not-implemented error. Production `POST /api/jobs/{job_id}/generate-materials` still uses the isolated legacy placeholder in `application_service._mock_materials` until the student function is implemented and connected with one small integration change.
-
-Do not describe application-materials LLM generation as complete.
+Writing the production file `data/careerpilot.db` also requires `--confirm-production-database`. The command never runs during startup, imports, tests, or CI.
 
 **Still out of scope**
 
-- Auth / accounts / multi-user access
 - Deployment / production hosting
+- Password reset
+- Email verification
+- Login rate limiting
+- Live-provider verification in CI
+- Mock-interview feedback
+- Reminders
 - Automatic job application submission
-- Live LLM interview-question generation (injectable boundary only)
+
 
 ## Privacy and safety
 
 - Automated tests use isolated in-memory SQLite. They must never create or mutate `data/careerpilot.db`.
-- Logs use IDs and counts, not resume text, prompt contents, or raw provider output.
+- Logs use IDs, counts, and exception types, not passwords, tokens, resumes, prompts, generated materials, or raw exception text that may contain those values.
+- Validation errors never echo submitted `input` values.
 - No candidate skill, employer, metric, or education claim may be invented without stored evidence.
 - Assisted apply and the browser extension **never click submit**. The human reviews and submits.
-- Page load for Fit Score and Interview Prep is read-only. Generation runs only on an explicit user action.
-- Tracker GET endpoints are read-only and do not create rows.
-- There is no authentication and no deployment yet.
+- Page load for Jobs, Job Detail, Applications, Application Detail, Fit Score, and Interview Prep is read-only. Scoring and generation run only on an explicit user action.
+- Private records are user-scoped. Shared job titles may be visible to every signed-in user; scores, recommendations, packages, tracker state, approval, and interview evidence are not.
 
 ## Setup
 
@@ -122,6 +125,12 @@ cp .env.example .env
 ```
 
 Add `GEMINI_API_KEY` (and optional Anthropic/OpenAI keys) to `.env` for live resume parse / Job Intelligence extraction. Never commit `.env`.
+
+Auth settings in `.env`:
+
+- `ALLOWED_ORIGINS` — comma-separated exact `http://` or `https://` frontend origins. No `*`, path, query, or fragment. Credentialed CORS never uses a wildcard.
+- `COOKIE_SECURE=false` for local http. `APP_ENV=production` refuses to start unless `COOKIE_SECURE=true`.
+- `EXTENSION_ORIGIN` — blank, or one exact `chrome-extension://<extension-id>` origin. The session header is accepted only on the autofill route from that origin.
 
 Database tables are created on API startup, or manually:
 
@@ -210,14 +219,22 @@ Developer B ownership remains: Job Scout, Job Verification, Form Fill, browser-e
 
 | Method | Path | Notes |
 | --- | --- | --- |
+| `POST` | `/api/auth/signup` | Create account and set session cookie |
+| `POST` | `/api/auth/login` | Log in |
+| `POST` | `/api/auth/logout` | Revoke session |
+| `GET` | `/api/auth/me` | Current user |
+| `GET` | `/api/profile` | Current candidate and latest preferences (read-only) |
 | `POST` | `/api/parse-resume` | Grounded candidate profile |
 | `POST` | `/api/preferences` | Reusable application answers |
 | `POST` | `/api/scout-jobs` | Live job discovery |
 | `POST` | `/api/jobs/ingest-url` | Manual posting URL |
 | `POST` | `/api/jobs/verify` | Verification sweep |
 | `GET`/`POST` | `/api/jobs/{job_id}/intelligence` | Stored / extract Job Intelligence |
+| `GET` | `/api/jobs/{job_id}/score` | Stored fit score (read-only; 404 if missing) |
+| `GET` | `/api/jobs/scores` | Stored scores for the Jobs page (read-only) |
 | `POST` | `/api/jobs/{job_id}/score` | Fit & Gap (explicit) |
-| `POST` | `/api/jobs/{job_id}/generate-materials` | Legacy placeholder until student function lands |
+| `GET` | `/api/jobs/{job_id}/materials` | Stored grounded materials (read-only; 404 if missing) |
+| `POST` | `/api/jobs/{job_id}/generate-materials` | Grounded materials (explicit) |
 | `POST` | `/api/jobs/{job_id}/approve` | Approval Agent |
 | `POST` | `/api/jobs/{job_id}/fill-application` | Assisted apply preview (never submits) |
 | `GET` | `/api/extension/autofill` | Browser extension field values |

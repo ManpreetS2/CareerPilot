@@ -154,8 +154,12 @@ def test_split_name_extra_whitespace() -> None:
     assert _split_name("  Jordan   Quill  ") == ("Jordan", "Quill")
 
 
+TEST_USER_ID = 1
+
+
 def _candidate(**overrides) -> Candidate:
     defaults = dict(
+        user_id=TEST_USER_ID,
         name="Jordan Quill",
         email="jordan@example.com",
         phone="+1-555-0100",
@@ -357,6 +361,15 @@ def _job(session, *, public_id: str = "manual-abc123", url: str = "https://examp
 
 
 def _seed_candidate(session) -> Candidate:
+    from backend.db.models import User
+
+    if session.get(User, TEST_USER_ID) is None:
+        session.add(User(id=TEST_USER_ID, email="user1@example.com", hashed_password="x"))
+        session.commit()
+    previous = session.query(Candidate).filter(Candidate.user_id == TEST_USER_ID).first()
+    if previous is not None:
+        previous.user_id = None
+        session.commit()
     candidate = _candidate()
     session.add(candidate)
     session.commit()
@@ -364,15 +377,36 @@ def _seed_candidate(session) -> Candidate:
     return candidate
 
 
-def _approved_package(session, job: JobRecord, candidate: Candidate | None) -> ApplicationPackageRecord:
+def _extension_auth_headers(client) -> dict[str, str]:
+    from backend.core.config import settings
+
+    token = client.cookies.get(settings.session_cookie_name)
+    assert token, "expected an authenticated test client session cookie"
+    return {settings.session_header_name: token}
+
+
+def _approved_package(
+    session, job: JobRecord, candidate: Candidate | None, *, grounded: bool = True
+) -> ApplicationPackageRecord:
+    """`grounded=True` by default: a realistically-approved package went
+    through the real grounded-generation pipeline, which is_grounded_package_record
+    now also requires to have real (non-blank) bullets, cover letter,
+    recruiter message, and traceability notes — so all four are populated
+    here, not left empty. Tests that specifically exercise the
+    grounded-package gate (is_package_ready_for_apply) pass grounded=False
+    to build the exact "ungrounded but somehow approved" legacy row the
+    gate exists to reject."""
     record = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=TEST_USER_ID,
         candidate_id=candidate.id if candidate else None,
-        tailored_bullets=[],
+        tailored_bullets=["Built Python APIs relevant to this role."],
         cover_letter_draft="Dear hiring team,",
-        source_traceability_notes=[],
+        recruiter_message="Happy to discuss my background.",
+        source_traceability_notes=["Python <- candidate skills"],
         approval_status="approved",
         eligibility_confirmed=True,
+        grounded=grounded,
     )
     session.add(record)
     session.commit()
@@ -381,14 +415,14 @@ def _approved_package(session, job: JobRecord, candidate: Candidate | None) -> A
 
 def test_run_assisted_apply_missing_job_404s(isolated_session) -> None:
     with pytest.raises(HTTPException) as exc_info:
-        run_assisted_apply(isolated_session, "does-not-exist")
+        run_assisted_apply(isolated_session, "does-not-exist", TEST_USER_ID)
     assert exc_info.value.status_code == 404
 
 
 def test_run_assisted_apply_without_package_409s(isolated_session) -> None:
     _job(isolated_session)
     with pytest.raises(HTTPException) as exc_info:
-        run_assisted_apply(isolated_session, "manual-abc123")
+        run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
     assert exc_info.value.status_code == 409
 
 
@@ -397,6 +431,7 @@ def test_run_assisted_apply_unapproved_package_409s(isolated_session) -> None:
     candidate = _seed_candidate(isolated_session)
     record = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=TEST_USER_ID,
         candidate_id=candidate.id,
         tailored_bullets=[],
         source_traceability_notes=[],
@@ -406,7 +441,7 @@ def test_run_assisted_apply_unapproved_package_409s(isolated_session) -> None:
     isolated_session.commit()
 
     with pytest.raises(HTTPException) as exc_info:
-        run_assisted_apply(isolated_session, "manual-abc123")
+        run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
     assert exc_info.value.status_code == 409
     assert "approved" in exc_info.value.detail.lower()
 
@@ -415,9 +450,74 @@ def test_run_assisted_apply_without_candidate_409s(isolated_session) -> None:
     job = _job(isolated_session)
     _approved_package(isolated_session, job, candidate=None)
     with pytest.raises(HTTPException) as exc_info:
-        run_assisted_apply(isolated_session, "manual-abc123")
+        run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
     assert exc_info.value.status_code == 409
     assert "candidate" in exc_info.value.detail.lower()
+
+
+# ---------------------------------------------------------------------------
+# Regression coverage: the shared grounded-package gate
+# (is_package_ready_for_apply) rejects a legacy row that's marked approved
+# but was never actually grounded — both Assisted Apply paths (server-side
+# Playwright preview via run_assisted_apply, and the browser extension via
+# get_autofill_data) reuse the same gate.
+# ---------------------------------------------------------------------------
+
+
+def test_run_assisted_apply_rejects_an_ungrounded_approved_legacy_package(isolated_session) -> None:
+    job = _job(isolated_session, url="https://job-boards.greenhouse.io/acme/jobs/1")
+    candidate = _seed_candidate(isolated_session)
+    _approved_package(isolated_session, job, candidate, grounded=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
+    assert exc_info.value.status_code == 409
+    assert "grounded" in exc_info.value.detail.lower()
+    assert isolated_session.query(FormFillAttemptRecord).count() == 0
+
+
+def test_get_autofill_data_rejects_an_ungrounded_approved_legacy_package(isolated_session) -> None:
+    job = _job(isolated_session, url="https://job-boards.greenhouse.io/acme/jobs/1")
+    candidate = _seed_candidate(isolated_session)
+    _approved_package(isolated_session, job, candidate, grounded=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1", TEST_USER_ID)
+    assert exc_info.value.status_code == 409
+    assert "grounded" in exc_info.value.detail.lower()
+
+
+def test_extension_autofill_route_rejects_an_ungrounded_approved_legacy_package(isolated_client) -> None:
+    """Same check via the real HTTP route the extension calls, not just the
+    service function directly."""
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(db, url="https://job-boards.greenhouse.io/acme/jobs/1")
+        candidate = _seed_candidate(db)
+        _approved_package(db, job, candidate, grounded=False)
+
+    headers = _extension_auth_headers(client)
+    client.cookies.clear()
+    response = client.get(
+        "/api/extension/autofill",
+        params={"url": "https://job-boards.greenhouse.io/acme/jobs/1"},
+        headers=headers,
+    )
+    assert response.status_code == 409
+
+
+def test_run_assisted_apply_rejects_a_wrong_candidate_package(isolated_session) -> None:
+    """A package approved against a candidate profile that's since been
+    superseded by a fresh resume upload must not reach Form Fill against
+    the new, current candidate's data."""
+    job = _job(isolated_session, url="https://job-boards.greenhouse.io/acme/jobs/1")
+    stale_candidate = _seed_candidate(isolated_session)
+    _approved_package(isolated_session, job, stale_candidate, grounded=True)
+    _seed_candidate(isolated_session)  # a fresh resume upload supersedes stale_candidate as "current"
+
+    with pytest.raises(HTTPException) as exc_info:
+        run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
+    assert exc_info.value.status_code == 409
 
 
 def test_run_assisted_apply_unsupported_platform_persists_failed_result(isolated_session) -> None:
@@ -425,7 +525,7 @@ def test_run_assisted_apply_unsupported_platform_persists_failed_result(isolated
     candidate = _seed_candidate(isolated_session)
     _approved_package(isolated_session, job, candidate)
 
-    result = run_assisted_apply(isolated_session, "manual-abc123")
+    result = run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
 
     assert result.status == "failed"
     assert result.ats_platform == "unsupported"
@@ -438,8 +538,8 @@ def test_run_assisted_apply_multiple_attempts_are_not_upserted(isolated_session)
     candidate = _seed_candidate(isolated_session)
     _approved_package(isolated_session, job, candidate)
 
-    run_assisted_apply(isolated_session, "manual-abc123")
-    run_assisted_apply(isolated_session, "manual-abc123")
+    run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
+    run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
 
     assert isolated_session.query(FormFillAttemptRecord).count() == 2
 
@@ -825,7 +925,7 @@ def test_run_assisted_apply_full_success_path(isolated_session, monkeypatch) -> 
     isolated_session.commit()
     _approved_package(isolated_session, job, candidate)
 
-    result = run_assisted_apply(isolated_session, "manual-abc123")
+    result = run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
 
     assert result.status == "needs_review"  # resume + custom question always flagged
     assert "email" in _names(result.filled_fields)
@@ -845,7 +945,7 @@ def test_run_assisted_apply_persists_filled_and_flagged_fields(isolated_session,
     candidate = _seed_candidate(isolated_session)
     _approved_package(isolated_session, job, candidate)
 
-    run_assisted_apply(isolated_session, "manual-abc123")
+    run_assisted_apply(isolated_session, "manual-abc123", TEST_USER_ID)
 
     record = isolated_session.query(FormFillAttemptRecord).first()
     assert record.ats_platform == "lever"
@@ -916,7 +1016,7 @@ def test_get_autofill_data_returns_field_values(isolated_session) -> None:
     candidate = _seed_candidate(isolated_session)
     _approved_package(isolated_session, job, candidate)
 
-    result = get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1")
+    result = get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1", TEST_USER_ID)
 
     assert result.job_id == "manual-abc123"
     assert result.platform == "greenhouse"
@@ -926,7 +1026,7 @@ def test_get_autofill_data_returns_field_values(isolated_session) -> None:
 
 def test_get_autofill_data_unknown_url_404s(isolated_session) -> None:
     with pytest.raises(HTTPException) as exc_info:
-        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/nope/jobs/1")
+        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/nope/jobs/1", TEST_USER_ID)
     assert exc_info.value.status_code == 404
 
 
@@ -935,6 +1035,7 @@ def test_get_autofill_data_requires_approval(isolated_session) -> None:
     candidate = _seed_candidate(isolated_session)
     record = ApplicationPackageRecord(
         job_id=job.id,
+        user_id=TEST_USER_ID,
         candidate_id=candidate.id,
         tailored_bullets=[],
         source_traceability_notes=[],
@@ -944,7 +1045,7 @@ def test_get_autofill_data_requires_approval(isolated_session) -> None:
     isolated_session.commit()
 
     with pytest.raises(HTTPException) as exc_info:
-        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1")
+        get_autofill_data(isolated_session, "https://job-boards.greenhouse.io/acme/jobs/1", TEST_USER_ID)
     assert exc_info.value.status_code == 409
 
 
@@ -955,8 +1056,12 @@ def test_extension_autofill_route_returns_data(isolated_client) -> None:
         candidate = _seed_candidate(db)
         _approved_package(db, job, candidate)
 
+    headers = _extension_auth_headers(client)
+    client.cookies.clear()
     response = client.get(
-        "/api/extension/autofill", params={"url": "https://job-boards.greenhouse.io/acme/jobs/1"}
+        "/api/extension/autofill",
+        params={"url": "https://job-boards.greenhouse.io/acme/jobs/1"},
+        headers=headers,
     )
     assert response.status_code == 200
     body = response.json()
@@ -966,8 +1071,25 @@ def test_extension_autofill_route_returns_data(isolated_client) -> None:
 
 def test_extension_autofill_route_unknown_url_404s(isolated_client) -> None:
     client, _SessionLocal = isolated_client
-    response = client.get("/api/extension/autofill", params={"url": "https://example.com/nope"})
+    headers = _extension_auth_headers(client)
+    client.cookies.clear()
+    response = client.get(
+        "/api/extension/autofill",
+        params={"url": "https://example.com/nope"},
+        headers=headers,
+    )
     assert response.status_code == 404
+
+
+def test_extension_autofill_rejects_cookie_only_auth(isolated_client) -> None:
+    """Ordinary session cookies must not authenticate the extension route —
+    only the narrowly scoped extension header is accepted there."""
+    client, _SessionLocal = isolated_client
+    response = client.get(
+        "/api/extension/autofill",
+        params={"url": "https://example.com/nope"},
+    )
+    assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------

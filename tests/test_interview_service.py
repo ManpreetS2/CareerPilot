@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.mvp_helpers import TEST_USER_ID, ensure_user, insert_candidate
+
 from backend.db.models import (
     Candidate,
     InterviewPrepRecord,
@@ -39,22 +41,9 @@ def _job(session, *, public_id: str = "job-interview") -> JobRecord:
     return record
 
 
-def _candidate(session) -> Candidate:
-    record = Candidate(
-        name="Jordan Avery",
-        email="jordan@example.com",
-        skills=["Python", "SQL"],
-        projects=[{"name": "Campus Planner", "technologies": ["Python"], "description": "Python API"}],
-        experience=[{"title": "Intern", "company": "Northstar Labs", "highlights": ["Wrote SQL reports."]}],
-        education=[],
-        certifications=[],
-        strengths=[],
-        evidence_links=[],
-    )
-    session.add(record)
-    session.commit()
-    session.refresh(record)
-    return record
+def _candidate(session):
+    return insert_candidate(session, user_id=TEST_USER_ID)
+
 
 
 def _intelligence(session, job: JobRecord) -> JobIntelligenceRecord:
@@ -77,21 +66,21 @@ def _intelligence(session, job: JobRecord) -> JobIntelligenceRecord:
 
 def test_interview_missing_job(isolated_session) -> None:
     with pytest.raises(InterviewJobNotFoundError):
-        get_interview_prep(isolated_session, "missing")
+        get_interview_prep(isolated_session, "missing", TEST_USER_ID)
     with pytest.raises(InterviewJobNotFoundError):
-        generate_and_store_interview_prep(isolated_session, "missing")
+        generate_and_store_interview_prep(isolated_session, "missing", TEST_USER_ID)
 
 
 def test_interview_missing_intelligence(isolated_session) -> None:
     job = _job(isolated_session)
     with pytest.raises(InterviewIntelligenceMissingError):
-        generate_and_store_interview_prep(isolated_session, job.public_id)
+        generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
     assert isolated_session.query(InterviewPrepRecord).count() == 0
 
 
 def test_interview_get_is_read_only(isolated_session) -> None:
     job = _job(isolated_session)
-    assert get_interview_prep(isolated_session, job.public_id) is None
+    assert get_interview_prep(isolated_session, job.public_id, TEST_USER_ID) is None
     assert isolated_session.query(InterviewPrepRecord).count() == 0
 
 
@@ -114,7 +103,7 @@ def test_interview_generation_uses_grounded_topics_only(isolated_session) -> Non
     )
     isolated_session.commit()
 
-    prep = generate_and_store_interview_prep(isolated_session, job.public_id)
+    prep = generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
     blob = " ".join(prep.likely_questions)
     assert "Python fundamentals" in blob
     assert "SQL joins" in blob
@@ -128,7 +117,7 @@ def test_interview_generation_uses_grounded_topics_only(isolated_session) -> Non
     assert "not a current candidate strength" in gaps
     assert isolated_session.query(InterviewPrepRecord).count() == 1
 
-    again = generate_and_store_interview_prep(isolated_session, job.public_id)
+    again = generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
     assert again.job_id == prep.job_id
     assert isolated_session.query(InterviewPrepRecord).count() == 1
 
@@ -137,7 +126,7 @@ def test_missing_skills_are_gaps_not_strengths_without_fit_score(isolated_sessio
     _candidate(isolated_session)
     job = _job(isolated_session)
     _intelligence(isolated_session, job)
-    prep = generate_and_store_interview_prep(isolated_session, job.public_id)
+    prep = generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
     talking = " ".join(prep.talking_points).lower()
     gaps = " ".join(prep.gaps_to_address).lower()
     assert "kubernetes" in gaps
@@ -155,7 +144,7 @@ def test_llm_improver_boundary_is_not_used_by_default(isolated_session) -> None:
         called["n"] += 1
         raise AssertionError("improver must not run")
 
-    generate_and_store_interview_prep(isolated_session, job.public_id)
+    generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
     assert called["n"] == 0
     with pytest.raises(Exception, match="not implemented"):
         unfinished_llm_interview_improver(None, None)  # type: ignore[arg-type]

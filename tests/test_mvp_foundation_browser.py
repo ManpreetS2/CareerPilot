@@ -7,7 +7,10 @@ from scripts.test_mvp_foundation_browser import run_browser_workflow
 
 def test_mvp_foundation_browser_workflow() -> None:
     result = run_browser_workflow()
-    assert result["checks"] >= 8
+    assert result["checks"] >= 12
     assert result["tracker_patches"] == 1
-    assert result["interview_posts"] == 1
+    assert result["interview_posts"] == 2
+    assert result["score_posts"] == 1
+    assert result["materials_posts"] == 1
+    assert result["intelligence_posts"] == 0
     assert result["external_requests"] == 0

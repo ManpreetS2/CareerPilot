@@ -4,6 +4,24 @@ import type { CandidateProfile, TargetPreferences } from "./types";
 const CANDIDATE_KEY = "careerpilot.candidate";
 const PREFERENCES_KEY = "careerpilot.preferences";
 const SELECTED_JOB_KEY = "careerpilot.selectedJobId";
+const SESSION_EVENT = "careerpilot-session-changed";
+
+let activeUserId: number | null = null;
+
+function emitSessionChange() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(SESSION_EVENT));
+  }
+}
+
+export function bindSessionUser(userId: number | null) {
+  activeUserId = userId;
+  emitSessionChange();
+}
+
+function scopedKey(base: string): string {
+  return activeUserId == null ? base : `${base}.u${activeUserId}`;
+}
 
 /** Prototype hourly values were small positives (e.g. 35). Annual salaries are >= 10000. */
 export const LEGACY_HOURLY_SALARY_CEILING = 9999;
@@ -31,11 +49,13 @@ export function sanitizeStoredPreferences(
 }
 
 export function saveCandidate(candidate: CandidateProfile) {
-  localStorage.setItem(CANDIDATE_KEY, JSON.stringify(candidate));
+  localStorage.setItem(scopedKey(CANDIDATE_KEY), JSON.stringify(candidate));
+  emitSessionChange();
 }
 
 export function savePreferences(preferences: TargetPreferences) {
-  localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
+  localStorage.setItem(scopedKey(PREFERENCES_KEY), JSON.stringify(preferences));
+  emitSessionChange();
 }
 
 /** @deprecated Prefer saveCandidate / savePreferences independently. */
@@ -48,28 +68,64 @@ export function saveCandidateSession(
 }
 
 export function saveSelectedJobId(jobId: string) {
-  localStorage.setItem(SELECTED_JOB_KEY, jobId);
+  localStorage.setItem(scopedKey(SELECTED_JOB_KEY), jobId);
+}
+
+export function applyServerProfile(
+  candidate: CandidateProfile | null,
+  preferences: TargetPreferences | null,
+) {
+  if (candidate) {
+    localStorage.setItem(scopedKey(CANDIDATE_KEY), JSON.stringify(candidate));
+  } else {
+    localStorage.removeItem(scopedKey(CANDIDATE_KEY));
+  }
+  if (preferences) {
+    const cleaned = sanitizeStoredPreferences(preferences) ?? preferences;
+    localStorage.setItem(scopedKey(PREFERENCES_KEY), JSON.stringify(cleaned));
+  } else {
+    localStorage.removeItem(scopedKey(PREFERENCES_KEY));
+  }
+  emitSessionChange();
+}
+
+export function clearCurrentUserSensitiveCache() {
+  localStorage.removeItem(scopedKey(CANDIDATE_KEY));
+  localStorage.removeItem(scopedKey(PREFERENCES_KEY));
+  localStorage.removeItem(scopedKey(SELECTED_JOB_KEY));
+  emitSessionChange();
+}
+
+/** Clears only the current user's sensitive cache. Other users' keys stay. */
+export function clearCandidateSession() {
+  clearCurrentUserSensitiveCache();
 }
 
 export function getSelectedJobId(): string | null {
-  return localStorage.getItem(SELECTED_JOB_KEY);
+  return localStorage.getItem(scopedKey(SELECTED_JOB_KEY));
 }
 
 export function useCandidateSession() {
   const [candidate, setCandidate] = useState<CandidateProfile | null>(() =>
-    readJson<CandidateProfile>(CANDIDATE_KEY),
+    readJson<CandidateProfile>(scopedKey(CANDIDATE_KEY)),
   );
   const [preferences, setPreferences] = useState<TargetPreferences | null>(() =>
-    sanitizeStoredPreferences(readJson<TargetPreferences>(PREFERENCES_KEY)),
+    sanitizeStoredPreferences(readJson<TargetPreferences>(scopedKey(PREFERENCES_KEY))),
   );
 
   useEffect(() => {
-    const onStorage = () => {
-      setCandidate(readJson<CandidateProfile>(CANDIDATE_KEY));
-      setPreferences(sanitizeStoredPreferences(readJson<TargetPreferences>(PREFERENCES_KEY)));
+    const onChange = () => {
+      setCandidate(readJson<CandidateProfile>(scopedKey(CANDIDATE_KEY)));
+      setPreferences(
+        sanitizeStoredPreferences(readJson<TargetPreferences>(scopedKey(PREFERENCES_KEY))),
+      );
     };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener("storage", onChange);
+    window.addEventListener(SESSION_EVENT, onChange);
+    return () => {
+      window.removeEventListener("storage", onChange);
+      window.removeEventListener(SESSION_EVENT, onChange);
+    };
   }, []);
 
   return {

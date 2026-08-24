@@ -1031,25 +1031,31 @@ def load_job(db: Session, public_id: str) -> JobRecord:
     return record
 
 
-def load_latest_candidate(db: Session) -> Candidate:
-    record = db.query(Candidate).order_by(Candidate.id.desc()).first()
+def load_latest_candidate(db: Session, user_id: int) -> Candidate:
+    record = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     if record is None:
         raise CandidateRequiredError()
     return record
 
 
 def load_preferences(db: Session, candidate: Candidate) -> TargetPreference | None:
-    linked = (
-        db.query(TargetPreference)
-        .filter(TargetPreference.candidate_id == candidate.id)
-        .order_by(TargetPreference.id.desc())
-        .first()
-    )
-    if linked is not None:
-        return linked
+    """Scoped to this user's own preferences — no fallback to an
+    unattributed row. That fallback used to exist for a single-tenant app
+    where "no linked preferences" and "no preferences at all" were
+    indistinguishable; with real accounts, falling back to *any* unowned
+    preferences row would leak one user's answers into another user's
+    scoring.
+
+    Filters on TargetPreference.user_id, not candidate_id: a user can save
+    preferences before ever uploading a resume (no Candidate row yet), so
+    candidate_id is null on that row even though user_id is always set —
+    filtering on candidate_id alone would silently orphan those answers
+    forever once the Candidate is created later, since nothing backfills
+    candidate_id onto the earlier row.
+    """
     return (
         db.query(TargetPreference)
-        .filter(TargetPreference.candidate_id.is_(None))
+        .filter(TargetPreference.user_id == candidate.user_id)
         .order_by(TargetPreference.id.desc())
         .first()
     )
@@ -1194,11 +1200,84 @@ def persist_score(
     )
 
 
-def score_job(db: Session, job_public_id: str, *, as_of: date | None = None) -> MatchScore:
+def score_job(db: Session, job_public_id: str, user_id: int, *, as_of: date | None = None) -> MatchScore:
     """Request-scoped scoring entrypoint. Never opens SessionLocal."""
     job = load_job(db, job_public_id)
-    candidate = load_latest_candidate(db)
+    candidate = load_latest_candidate(db, user_id)
     preferences = load_preferences(db, candidate)
     requirements = load_requirements(db, job)
     breakdown = compute_breakdown(job, candidate, preferences, requirements, as_of=as_of)
     return persist_score(db, job, candidate, breakdown)
+
+
+class StoredScoreNotFoundError(Exception):
+    def __init__(self) -> None:
+        super().__init__("Stored fit score not found.")
+
+
+def _record_to_match_score(record: MatchScoreRecord, job_public_id: str) -> MatchScore:
+    return MatchScore(
+        job_id=job_public_id,
+        overall_score=record.overall_score,
+        skill_score=record.skill_score,
+        experience_score=record.experience_score,
+        education_score=record.education_score,
+        location_score=record.location_score,
+        preference_score=record.preference_score,
+        matched_skills=list(record.matched_skills or []),
+        partial_matches=list(record.partial_matches or []),
+        missing_skills=list(record.missing_skills or []),
+        recommendation=record.recommendation,  # type: ignore[arg-type]
+        rationale=record.rationale,
+    )
+
+
+def get_stored_match_score(db: Session, job_public_id: str, user_id: int) -> MatchScore:
+    """Return the latest stored score for the current user's candidate. Never writes."""
+    job = db.query(JobRecord).filter(JobRecord.public_id == job_public_id).first()
+    if job is None:
+        raise JobNotFoundError()
+    candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
+    if candidate is None:
+        raise StoredScoreNotFoundError()
+    record = (
+        db.query(MatchScoreRecord)
+        .filter(
+            MatchScoreRecord.job_id == job.id,
+            MatchScoreRecord.candidate_id == candidate.id,
+        )
+        .order_by(MatchScoreRecord.id.desc())
+        .first()
+    )
+    if record is None:
+        raise StoredScoreNotFoundError()
+    logger.info("stored_score read job_pk=%s candidate_pk=%s", job.id, candidate.id)
+    return _record_to_match_score(record, job_public_id)
+
+
+def list_stored_match_scores(db: Session, user_id: int) -> list[MatchScore]:
+    """Latest stored score per job for the current user's candidate. Never writes."""
+    candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
+    if candidate is None:
+        logger.info("stored_scores listed count=0 reason=no_candidate")
+        return []
+    from sqlalchemy import func
+
+    latest = (
+        db.query(
+            MatchScoreRecord.job_id.label("job_id"),
+            func.max(MatchScoreRecord.id).label("max_id"),
+        )
+        .filter(MatchScoreRecord.candidate_id == candidate.id)
+        .group_by(MatchScoreRecord.job_id)
+        .subquery()
+    )
+    rows = (
+        db.query(MatchScoreRecord, JobRecord)
+        .join(latest, MatchScoreRecord.id == latest.c.max_id)
+        .join(JobRecord, JobRecord.id == MatchScoreRecord.job_id)
+        .all()
+    )
+    scores = [_record_to_match_score(record, job.public_id) for record, job in rows]
+    logger.info("stored_scores listed count=%s candidate_pk=%s", len(scores), candidate.id)
+    return scores
