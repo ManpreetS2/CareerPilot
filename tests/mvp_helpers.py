@@ -233,4 +233,3 @@ def insert_grounded_package(
     session.commit()
     session.refresh(record)
     return record
-
