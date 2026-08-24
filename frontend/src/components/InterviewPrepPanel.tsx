@@ -1,7 +1,9 @@
-import { MessagesSquare } from "lucide-react";
+import { useState } from "react";
+import { MessagesSquare, Sparkles } from "lucide-react";
 import { ErrorBanner } from "./ErrorBanner";
 import { LoadingState } from "./LoadingState";
-import type { InterviewPrep } from "../lib/types";
+import { api, ApiClientError } from "../lib/api";
+import type { InterviewAnswerFeedback, InterviewPrep } from "../lib/types";
 
 function TextList({ items, empty }: { items: string[]; empty: string }) {
   if (items.length === 0) {
@@ -16,13 +18,104 @@ function TextList({ items, empty }: { items: string[]; empty: string }) {
   );
 }
 
+function AnswerPractice({ jobId, questions }: { jobId: string; questions: string[] }) {
+  const [question, setQuestion] = useState(questions[0] ?? "");
+  const [answer, setAnswer] = useState("");
+  const [feedback, setFeedback] = useState<InterviewAnswerFeedback | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  async function handleSubmit() {
+    if (!question || !answer.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    setFeedback(null);
+    try {
+      const result = await api.getInterviewAnswerFeedback(jobId, question, answer);
+      setFeedback(result);
+    } catch (err) {
+      setError(err instanceof ApiClientError ? err : err);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (questions.length === 0) return null;
+
+  return (
+    <div className="border-t border-[var(--line)] pt-4">
+      <h3 className="flex items-center gap-2 text-sm font-semibold">
+        <Sparkles className="h-4 w-4 text-accent-600 dark:text-accent-300" aria-hidden />
+        Practice an answer
+      </h3>
+      <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+        Pick one of the questions above, type how you'd answer it, and get brief feedback on how
+        it's delivered. Feedback is generated fresh each time and never saved.
+      </p>
+
+      <div className="mt-3 space-y-3">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-ink-500">Question</span>
+          <select
+            className="input"
+            value={question}
+            onChange={(event) => {
+              setQuestion(event.target.value);
+              setFeedback(null);
+            }}
+          >
+            {questions.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-ink-500">Your answer</span>
+          <textarea
+            className="input min-h-[6rem] resize-y"
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+            placeholder="Type how you'd answer this out loud…"
+          />
+        </label>
+
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => void handleSubmit()}
+          disabled={submitting || !answer.trim()}
+          aria-busy={submitting}
+        >
+          {submitting ? "Getting feedback…" : "Get feedback"}
+        </button>
+
+        <ErrorBanner error={error} />
+
+        {feedback ? (
+          <div
+            role="status"
+            className="card border-accent-300/60 bg-accent-50/70 p-4 text-sm text-accent-900 dark:border-accent-800 dark:bg-accent-950/30 dark:text-accent-100"
+          >
+            {feedback.feedback}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function InterviewPrepPanel({
+  jobId,
   prep,
   loading,
   generating,
   error,
   onPrepare,
 }: {
+  jobId: string;
   prep: InterviewPrep | null;
   loading: boolean;
   generating: boolean;
@@ -87,6 +180,7 @@ export function InterviewPrepPanel({
             <h3 className="text-sm font-semibold">Gaps to address</h3>
             <TextList items={prep.gaps_to_address} empty="No stored gaps." />
           </div>
+          <AnswerPractice jobId={jobId} questions={prep.likely_questions} />
         </div>
       ) : null}
     </section>

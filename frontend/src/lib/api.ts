@@ -8,6 +8,7 @@ import type {
   DashboardSummary,
   FormFillResult,
   HealthResponse,
+  InterviewAnswerFeedback,
   InterviewPrep,
   Job,
   JobIntelligence,
@@ -176,16 +177,28 @@ export const api = {
   getInterviewPrep: (jobId: string) =>
     request<InterviewPrep>(`/api/jobs/${jobId}/interview-prep`),
 
+  getInterviewAnswerFeedback: (jobId: string, question: string, answer: string) =>
+    request<InterviewAnswerFeedback>(`/api/jobs/${jobId}/interview-prep/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, answer }),
+    }),
+
   listApplications: () => request<ApplicationListItem[]>("/api/applications"),
 
   getTracking: (jobId: string) =>
     request<ApplicationTrackerItem>(`/api/applications/${jobId}/tracking`),
 
-  updateTracking: (jobId: string, status: TrackerStatus, note?: string | null) =>
+  updateTracking: (
+    jobId: string,
+    status: TrackerStatus,
+    note?: string | null,
+    reminderDate?: string | null,
+  ) =>
     request<ApplicationTrackerItem>(`/api/applications/${jobId}/tracking`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, note: note ?? null }),
+      body: JSON.stringify({ status, note: note ?? null, reminder_date: reminderDate ?? null }),
     }),
 
   getDashboardSummary: () => request<DashboardSummary>("/api/dashboard/summary"),

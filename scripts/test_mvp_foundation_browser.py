@@ -518,11 +518,16 @@ def run_browser_workflow() -> dict[str, int]:
                 checks += 1
 
                 page.get_by_role("button", name="Prepare interview").click()
+                # .first, not a bare locator: the same question text is now also an
+                # <option> in the "Practice an answer" question <select> rendered below
+                # the likely-questions list, which would otherwise trip Playwright's
+                # strict-mode uniqueness check. The <li> renders before the <select> in
+                # DOM order, so .first is the list item.
                 expect(
                     page.get_by_text(
                         "What would you expect to discuss about Python fundamentals for this role?",
                         exact=True,
-                    )
+                    ).first
                 ).to_be_visible()
                 if len(interview_posts) != before_interview_posts + 1:
                     raise AssertionError("Prepare Interview did not issue exactly one POST.")

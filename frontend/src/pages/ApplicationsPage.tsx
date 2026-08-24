@@ -60,18 +60,49 @@ export function ApplicationsPage() {
   }, []);
 
   async function handleStatusChange(jobId: string, nextStatus: TrackerStatus) {
+    // Pass the already-known reminder date through — updateTracking always
+    // sends reminder_date in the request body (same shape the note field
+    // already uses), so a status-only change would otherwise silently wipe
+    // out a reminder the user set earlier.
+    const current = items.find((item) => item.job_id === jobId);
     setUpdatingId(jobId);
     setError(null);
     try {
-      const updated = await api.updateTracking(jobId, nextStatus);
-      setItems((current) =>
-        current.map((item) =>
+      const updated = await api.updateTracking(jobId, nextStatus, undefined, current?.reminder_date);
+      setItems((prev) =>
+        prev.map((item) =>
           item.job_id === jobId
             ? {
                 ...item,
                 tracker_status: updated.status ?? nextStatus,
+                reminder_date: updated.reminder_date ?? item.reminder_date,
                 updated_at: updated.updated_at ?? item.updated_at,
                 allowed_statuses: updated.allowed_statuses ?? item.allowed_statuses,
+              }
+            : item,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof ApiClientError ? err : err);
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  async function handleReminderDateChange(jobId: string, nextDate: string | null) {
+    const current = items.find((item) => item.job_id === jobId);
+    if (!current?.tracker_status) return; // no tracker row yet — set a status first
+    setUpdatingId(jobId);
+    setError(null);
+    try {
+      const updated = await api.updateTracking(jobId, current.tracker_status, undefined, nextDate);
+      setItems((prev) =>
+        prev.map((item) =>
+          item.job_id === jobId
+            ? {
+                ...item,
+                reminder_date: updated.reminder_date ?? nextDate,
+                updated_at: updated.updated_at ?? item.updated_at,
               }
             : item,
         ),
@@ -139,29 +170,47 @@ export function ApplicationsPage() {
               </div>
 
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <label className="flex min-w-[12rem] flex-col gap-1 text-sm">
-                  <span className="text-ink-500">Tracking status</span>
-                  <select
-                    className="input"
-                    aria-label={`Tracking status for ${item.title} at ${item.company}`}
-                    value={item.tracker_status ?? ""}
-                    disabled={updatingId === item.job_id}
-                    onChange={(event) => {
-                      const value = event.target.value as TrackerStatus;
-                      if (!value || value === item.tracker_status) return;
-                      void handleStatusChange(item.job_id, value);
-                    }}
-                  >
-                    <option value="" disabled>
-                      Set status…
-                    </option>
-                    {statusOptions(item).map((status) => (
-                      <option key={status} value={status}>
-                        {status.replaceAll("_", " ")}
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="flex min-w-[12rem] flex-col gap-1 text-sm">
+                    <span className="text-ink-500">Tracking status</span>
+                    <select
+                      className="input"
+                      aria-label={`Tracking status for ${item.title} at ${item.company}`}
+                      value={item.tracker_status ?? ""}
+                      disabled={updatingId === item.job_id}
+                      onChange={(event) => {
+                        const value = event.target.value as TrackerStatus;
+                        if (!value || value === item.tracker_status) return;
+                        void handleStatusChange(item.job_id, value);
+                      }}
+                    >
+                      <option value="" disabled>
+                        Set status…
                       </option>
-                    ))}
-                  </select>
-                </label>
+                      {statusOptions(item).map((status) => (
+                        <option key={status} value={status}>
+                          {status.replaceAll("_", " ")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex min-w-[10rem] flex-col gap-1 text-sm">
+                    <span className="text-ink-500">Follow-up reminder</span>
+                    <input
+                      type="date"
+                      className="input"
+                      aria-label={`Follow-up reminder date for ${item.title} at ${item.company}`}
+                      value={item.reminder_date ?? ""}
+                      disabled={updatingId === item.job_id || !item.tracker_status}
+                      title={
+                        item.tracker_status ? undefined : "Set a tracking status first"
+                      }
+                      onChange={(event) => {
+                        void handleReminderDateChange(item.job_id, event.target.value || null);
+                      }}
+                    />
+                  </label>
+                </div>
                 <Link
                   to={`/applications/${item.job_id}`}
                   className="btn-ghost px-2 py-1.5 text-accent-700 dark:text-accent-300"

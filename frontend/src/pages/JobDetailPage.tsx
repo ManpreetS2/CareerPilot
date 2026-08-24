@@ -306,6 +306,7 @@ export function JobDetailPage() {
       />
 
       <InterviewPrepPanel
+        jobId={jobId}
         prep={interviewPrep?.job_id === jobId ? interviewPrep : null}
         loading={interviewLoading}
         generating={interviewGenerating}

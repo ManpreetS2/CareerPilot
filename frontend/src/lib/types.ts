@@ -182,6 +182,13 @@ export type InterviewPrep = {
   gaps_to_address: string[];
 };
 
+/** Ephemeral — one practice round, never persisted server-side. */
+export type InterviewAnswerFeedback = {
+  question: string;
+  answer: string;
+  feedback: string;
+};
+
 export type TrackerStatus =
   | "saved"
   | "pending_review"
@@ -197,6 +204,8 @@ export type ApplicationTrackerItem = {
   job_id: string;
   status?: TrackerStatus | null;
   note?: string | null;
+  /** ISO date string (YYYY-MM-DD), e.g. from an <input type="date">. */
+  reminder_date?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   allowed_statuses?: TrackerStatus[];
@@ -210,6 +219,7 @@ export type ApplicationListItem = {
   recommendation?: "apply" | "consider" | "skip" | null;
   approval_status?: ApplicationPackage["approval_status"] | null;
   tracker_status?: TrackerStatus | null;
+  reminder_date?: string | null;
   updated_at?: string | null;
   allowed_statuses?: TrackerStatus[];
 };
