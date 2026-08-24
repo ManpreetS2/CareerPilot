@@ -1,6 +1,7 @@
 """Candidate Profile Agent — grounded resume extraction for Day 2.
 
-Pipeline: PDF → text (pdfplumber, OCR fallback) → Gemini JSON →
+Pipeline: PDF → text (pdfplumber, OCR fallback) → LLM JSON →
+Pydantic validate → evidence grounding → SQLite persistence.
 Pydantic validate → evidence grounding → SQLite persistence.
 
 Never invent candidate facts. Prefer dropping unsupported claims over
@@ -9,6 +10,7 @@ preserving hallucinations. Do not log resume contents.
 
 from __future__ import annotations
 
+import inspect
 import io
 import json
 import logging
@@ -39,6 +41,12 @@ from backend.services.llm_client import (
     LLMProviderError,
     get_llm_client,
 )
+from backend.services.llm_provider_sequence import (
+    configured_provider_names,
+    invoke_provider_generate,
+    uses_injected_generator,
+)
+from backend.services.llm_structured_schemas import candidate_profile_llm_schema
 
 logger = logging.getLogger(__name__)
 
@@ -1219,8 +1227,9 @@ def extract_candidate_profile_with_llm(
     *,
     llm: LLMClient | None = None,
     generate_fn: Callable[[str, str | None], str] | None = None,
+    provider: str | None = None,
 ) -> dict[str, Any]:
-    """Ask Gemini (or injected generator) for strict CandidateProfile JSON.
+    """Ask one LLM provider (or injected generator) for CandidateProfile JSON.
 
     Structured-output attempts (exactly two): empty / malformed / non-object /
     schema-invalid JSON may retry once. Provider failures exhausted inside
@@ -1230,12 +1239,13 @@ def extract_candidate_profile_with_llm(
         raise InvalidResumeError("Resume text is empty.")
 
     system_prompt, user_prompt = build_extraction_prompts(resume_text)
+    schema = candidate_profile_llm_schema()
 
     def _generate(prompt: str, system: str | None) -> str:
         if generate_fn is not None:
             return generate_fn(prompt, system)
-        client = llm or get_llm_client("gemini")
-        return client.generate(prompt, system_prompt=system)
+        client = llm or get_llm_client(provider or "gemini")
+        return invoke_provider_generate(client, prompt, system, schema)
 
     last_error: Exception | None = None
     for attempt in range(2):
@@ -1538,12 +1548,13 @@ def build_candidate_profile_from_pdf(
 ) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
     """Full Day 2 pipeline for a PDF on disk."""
     extraction = extract_resume_text(pdf_path)
-    raw = extract_candidate_profile_with_llm(
-        extraction.text, llm=llm, generate_fn=generate_fn
+    return _complete_profile_from_text(
+        extraction,
+        db=db,
+        user_id=user_id,
+        llm=llm,
+        generate_fn=generate_fn,
     )
-    profile, report = validate_and_ground_profile(raw, extraction.text)
-    stored = persist_candidate_profile(profile, db, user_id)
-    return stored, extraction, report
 
 
 def build_candidate_profile_from_upload(
@@ -1559,9 +1570,62 @@ def build_candidate_profile_from_upload(
     """Validate upload bytes and process entirely in memory (no temp PDF files)."""
     validate_pdf_upload(filename, content, content_type=content_type)
     extraction = extract_resume_text(content)
-    raw = extract_candidate_profile_with_llm(
-        extraction.text, llm=llm, generate_fn=generate_fn
+    return _complete_profile_from_text(
+        extraction,
+        db=db,
+        user_id=user_id,
+        llm=llm,
+        generate_fn=generate_fn,
     )
-    profile, report = validate_and_ground_profile(raw, extraction.text)
-    stored = persist_candidate_profile(profile, db, user_id)
-    return stored, extraction, report
+
+
+def _complete_profile_from_text(
+    extraction: ExtractionResult,
+    *,
+    db: Session,
+    user_id: int,
+    llm: LLMClient | None,
+    generate_fn: Callable[[str, str | None], str] | None,
+) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
+    """Extract, ground, and persist using one provider at a time."""
+
+    def _run(provider: str | None = None) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
+        kwargs: dict[str, Any] = {"llm": llm, "generate_fn": generate_fn}
+        try:
+            parameters = inspect.signature(extract_candidate_profile_with_llm).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if "provider" in parameters:
+            kwargs["provider"] = provider
+        raw = extract_candidate_profile_with_llm(extraction.text, **kwargs)
+        profile, report = validate_and_ground_profile(raw, extraction.text)
+        stored = persist_candidate_profile(profile, db, user_id)
+        return stored, extraction, report
+
+    if uses_injected_generator(generate_fn, llm):
+        return _run()
+
+    last_error: Exception | None = None
+    for provider in configured_provider_names():
+        try:
+            return _run(provider)
+        except InvalidResumeError:
+            raise
+        except (
+            ProfileExtractionError,
+            ProfileGroundingError,
+            LLMProviderError,
+            LLMEmptyResponseError,
+            LLMConfigurationError,
+        ) as exc:
+            last_error = exc
+            logger.warning(
+                "candidate provider sequence failed category=%s",
+                type(exc).__name__,
+            )
+            continue
+    if last_error is not None:
+        raise last_error
+    raise ProfileExtractionError(
+        "The AI extraction service could not process this resume. Please try again."
+    )

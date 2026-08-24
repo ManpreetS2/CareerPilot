@@ -29,7 +29,7 @@ Resume
 | Frontend | React + TypeScript + Vite + Tailwind CSS |
 | Database | SQLite via SQLAlchemy (`data/careerpilot.db`, gitignored) |
 | Schemas | Shared Pydantic models |
-| LLM | Thin `LLMClient` for Gemini, Anthropic, and OpenAI |
+| LLM | Thin `LLMClient` for Ollama, Gemini, Anthropic, and OpenAI. Candidate profile, Job Intelligence, and application materials try providers in `LLM_PROVIDER_ORDER` (parse → validate → ground → persist). Fit scoring stays deterministic. |
 | Browser extension | Unpacked Chrome extension for Greenhouse/Lever autofill |
 
 ```
@@ -124,7 +124,33 @@ python -m playwright install chromium
 cp .env.example .env
 ```
 
-Add `GEMINI_API_KEY` (and optional Anthropic/OpenAI keys) to `.env` for live resume parse / Job Intelligence extraction. Never commit `.env`.
+Add `GEMINI_API_KEY` (and optional Anthropic/OpenAI keys) to `.env` for Gemini fallback. Never commit `.env`.
+
+Ollama is optional but recommended on the host PC:
+
+```
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3:14b
+LLM_PROVIDER_ORDER=ollama,gemini
+```
+
+Teammate devices do **not** install Ollama or pull `qwen3:14b`. They run CareerPilot locally and send inference to the host through Tailscale Serve, using a placeholder like this only in their own gitignored `.env`:
+
+```
+OLLAMA_BASE_URL=https://<host-device>.<tailnet>.ts.net
+OLLAMA_MODEL=qwen3:14b
+LLM_PROVIDER_ORDER=ollama,gemini
+```
+
+Rules:
+
+- Only the host installs Ollama and pulls `qwen3:14b`.
+- Keep Ollama bound to `127.0.0.1:11434`. Never set `OLLAMA_HOST=0.0.0.0`.
+- Use Tailscale Serve to proxy that loopback port inside the tailnet. Never use Tailscale Funnel. Never port-forward or firewall-open port 11434.
+- The host must stay powered on, awake, running Ollama, and connected to Tailscale.
+- Each developer keeps a separate gitignored `.env` and a separate Gemini key. Never send an API key through Git or chat.
+- If the host is unavailable, Gemini is attempted next. Without a configured Gemini key, fallback cannot succeed.
+- CareerPilot never pulls models automatically.
 
 Auth settings in `.env`:
 
@@ -206,8 +232,25 @@ CI (`.github/workflows/ci.yml`) runs pytest, frontend typecheck and production b
 Optional live LLM smoke test (not part of CI):
 
 ```bash
-python -m backend.utils.prompt_harness --provider gemini --prompt "Reply with one sentence confirming CareerPilot can reach the LLM."
+python -m backend.utils.prompt_harness --provider ollama --prompt "Reply with one sentence confirming CareerPilot can reach the LLM."
+python scripts/smoke_ollama.py
 ```
+
+`scripts/smoke_ollama.py` checks `/api/tags` and one tiny schema-constrained reply. It does not run in CI, does not pull models, does not write application data, and does not print the endpoint, prompts, or secrets.
+
+Optional host live check against a temporary database (also not CI):
+
+```bash
+python scripts/live_ollama_gemini_check.py
+```
+
+## Ollama troubleshooting
+
+- Host not serving: confirm Ollama is running and `http://127.0.0.1:11434/api/tags` works on the host only.
+- Teammate cannot reach the host: install the official Tailscale client, join the same invited tailnet, and put the private Serve URL only in that device's gitignored `.env`.
+- Same-machine Serve URL may return 403; that is a Tailscale identity check, not public exposure. The teammate should verify `/api/tags` from their own device.
+- Gemini fallback used: the host was offline, timed out, or returned unusable structured output. Check that a Gemini key exists on that machine.
+- Never expose Ollama on the public internet.
 
 ## Two-developer Git workflow
 

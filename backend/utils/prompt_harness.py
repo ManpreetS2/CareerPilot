@@ -39,7 +39,6 @@ def run_prompt(
         "prompt_chars": len(prompt),
         "system_prompt_chars": len(system_prompt) if system_prompt else 0,
         "response_chars": len(text),
-        "response_preview": text[:400],
     }
     path = _write_log(record)
     record["log_path"] = str(path)
@@ -65,7 +64,7 @@ def _write_log(record: dict[str, Any]) -> Path:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CareerPilot prompt test harness")
-    parser.add_argument("--provider", default=None, help="gemini | anthropic | openai")
+    parser.add_argument("--provider", default=None, help="ollama | gemini | anthropic | openai")
     parser.add_argument(
         "--prompt",
         default="Reply with one sentence confirming the CareerPilot prompt harness works.",
@@ -81,6 +80,6 @@ if __name__ == "__main__":
         provider=args.provider,
         system_prompt=args.system_prompt,
     )
-    print(result["text"])
-    print(f"\nprovider={result['provider']} model={result['model']} latency_ms={result['latency_ms']}")
+    print(f"provider={result['provider']} model={result['model']} latency_ms={result['latency_ms']}")
+    print(f"response_chars={result['response_chars']}")
     print(f"metadata: {result['log_path']}")

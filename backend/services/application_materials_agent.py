@@ -65,6 +65,12 @@ from backend.services.llm_client import (
     LLMProviderError,
     get_llm_client,
 )
+from backend.services.llm_provider_sequence import (
+    configured_provider_names,
+    invoke_provider_generate,
+    uses_injected_generator,
+)
+from backend.services.llm_structured_schemas import application_materials_llm_schema
 
 logger = logging.getLogger(__name__)
 
@@ -1433,7 +1439,12 @@ def _draft_from_record(record: ApplicationPackageRecord, job_id: str) -> Applica
 
 
 def _default_materials_generator(prompt: str, system_prompt: str | None = None) -> str:
-    return get_llm_client().generate(prompt, system_prompt=system_prompt)
+    return invoke_provider_generate(
+        get_llm_client(),
+        prompt,
+        system_prompt,
+        application_materials_llm_schema(),
+    )
 
 
 def _invoke_materials_generator(
@@ -1442,6 +1453,57 @@ def _invoke_materials_generator(
     system_prompt: str,
 ) -> str:
     return generator(prompt, system_prompt)
+
+
+def _structured_output_from_generator(
+    invoke: ApplicationMaterialsGenerateFn | ApplicationMaterialsGenerator,
+    context: ApplicationMaterialsContext,
+    user_prompt: str,
+    system_prompt: str,
+) -> ApplicationMaterialsStructuredOutput:
+    parsed: ApplicationMaterialsStructuredOutput | None = None
+    last_parse_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            raw = _invoke_materials_generator(invoke, user_prompt, system_prompt)
+        except LLMEmptyResponseError:
+            last_parse_error = ApplicationMaterialsParseError()
+            logger.info(
+                "application_materials structured_attempt=%s outcome=empty job_pk=%s",
+                attempt + 1,
+                context.job_pk,
+            )
+            continue
+        except LLMProviderError:
+            logger.info(
+                "application_materials structured_attempt=%s outcome=provider_exhausted job_pk=%s",
+                attempt + 1,
+                context.job_pk,
+            )
+            raise
+        except LLMConfigurationError:
+            raise
+        except TypeError:
+            logger.info(
+                "application_materials structured_attempt=%s outcome=generator_typeerror job_pk=%s",
+                attempt + 1,
+                context.job_pk,
+            )
+            raise ApplicationMaterialsParseError() from None
+        try:
+            parsed = parse_application_materials_json(raw)
+            break
+        except ApplicationMaterialsParseError as exc:
+            last_parse_error = exc
+            logger.info(
+                "application_materials structured_attempt=%s outcome=invalid_structured_output job_pk=%s",
+                attempt + 1,
+                context.job_pk,
+            )
+            continue
+    if parsed is None:
+        raise last_parse_error or ApplicationMaterialsParseError()
+    return parsed
 
 
 def _persist_grounded_draft(
@@ -1549,64 +1611,57 @@ def generate_grounded_application_materials(
         return _draft_from_record(existing, job_id)
 
     system_prompt, user_prompt = build_application_materials_prompt(context)
-    invoke = generator if generator is not None else _default_materials_generator
 
-    parsed: ApplicationMaterialsStructuredOutput | None = None
-    last_parse_error: Exception | None = None
-    for attempt in range(2):
+    def _complete_with(invoke: ApplicationMaterialsGenerateFn | ApplicationMaterialsGenerator) -> ApplicationMaterialsDraft:
+        parsed = _structured_output_from_generator(invoke, context, user_prompt, system_prompt)
+        report = ground_application_materials(parsed, context)
+        logger.info(
+            "application_materials grounding accepted=%s rejected=%s invented_candidate=%s invented_job=%s numeric=%s job_pk=%s",
+            report.accepted_claim_count,
+            report.rejected_claim_count,
+            report.invented_candidate_claims,
+            report.invented_job_requirements,
+            report.numeric_literals_rejected,
+            context.job_pk,
+        )
+        if not report.grounded:
+            raise ApplicationMaterialsGroundingError()
+        draft = draft_from_structured_output(parsed, context, report)
+        record = _persist_grounded_draft(db, context, draft, existing=existing)
+        return _draft_from_record(record, job_id)
+
+    if uses_injected_generator(generator):
+        return _complete_with(generator)  # type: ignore[arg-type]
+
+    last_error: Exception | None = None
+    schema = application_materials_llm_schema()
+    for provider in configured_provider_names():
+        def _provider_generate(
+            prompt: str,
+            system_prompt: str | None = None,
+            *,
+            _provider: str = provider,
+        ) -> str:
+            return invoke_provider_generate(
+                get_llm_client(_provider), prompt, system_prompt, schema
+            )
+
         try:
-            raw = _invoke_materials_generator(invoke, user_prompt, system_prompt)
-        except LLMEmptyResponseError:
-            last_parse_error = ApplicationMaterialsParseError()
+            return _complete_with(_provider_generate)
+        except (
+            ApplicationMaterialsParseError,
+            ApplicationMaterialsGroundingError,
+            LLMProviderError,
+            LLMEmptyResponseError,
+            LLMConfigurationError,
+        ) as exc:
+            last_error = exc
             logger.info(
-                "application_materials structured_attempt=%s outcome=empty job_pk=%s",
-                attempt + 1,
+                "application_materials provider sequence failed category=%s job_pk=%s",
+                type(exc).__name__,
                 context.job_pk,
             )
             continue
-        except LLMProviderError:
-            logger.info(
-                "application_materials structured_attempt=%s outcome=provider_exhausted job_pk=%s",
-                attempt + 1,
-                context.job_pk,
-            )
-            raise
-        except LLMConfigurationError:
-            raise
-        except TypeError:
-            logger.info(
-                "application_materials structured_attempt=%s outcome=generator_typeerror job_pk=%s",
-                attempt + 1,
-                context.job_pk,
-            )
-            raise ApplicationMaterialsParseError() from None
-        try:
-            parsed = parse_application_materials_json(raw)
-            break
-        except ApplicationMaterialsParseError as exc:
-            last_parse_error = exc
-            logger.info(
-                "application_materials structured_attempt=%s outcome=invalid_structured_output job_pk=%s",
-                attempt + 1,
-                context.job_pk,
-            )
-            continue
-    if parsed is None:
-        raise last_parse_error or ApplicationMaterialsParseError()
-
-    report = ground_application_materials(parsed, context)
-    logger.info(
-        "application_materials grounding accepted=%s rejected=%s invented_candidate=%s invented_job=%s numeric=%s job_pk=%s",
-        report.accepted_claim_count,
-        report.rejected_claim_count,
-        report.invented_candidate_claims,
-        report.invented_job_requirements,
-        report.numeric_literals_rejected,
-        context.job_pk,
-    )
-    if not report.grounded:
-        raise ApplicationMaterialsGroundingError()
-
-    draft = draft_from_structured_output(parsed, context, report)
-    record = _persist_grounded_draft(db, context, draft, existing=existing)
-    return _draft_from_record(record, job_id)
+    if last_error is not None:
+        raise last_error
+    raise ApplicationMaterialsParseError()
