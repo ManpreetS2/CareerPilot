@@ -122,9 +122,74 @@ def test_settings_reject_wildcard_and_non_exact_origins() -> None:
     validate_origin_settings(
         Settings(
             allowed_origins="http://localhost:5173,https://127.0.0.1:5173",
-            extension_origin="chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
+            extension_origin="chrome-extension://abcdefghijklmnopabcdefghijklmnop",
         )
     )
+
+
+VALID_EXTENSION_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+
+_INVALID_EXTENSION_ORIGINS = (
+    "",
+    "   ",
+    "chrome-extension://",
+    "chrome-extension://abc",
+    "chrome-extension://abcdefghijklmnopabcdefghijklmno",  # 31 chars
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnopq",  # 33 chars
+    "chrome-extension://evil.com",
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnop:80",
+    "chrome-extension://USER@abcdefghijklmnopabcdefghijklmnop",
+    "chrome-extension://ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP",
+    "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",  # letters beyond a-p
+    "chrome-extension://*",
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnop/path",
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnop?x=1",
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnop#fragment",
+    " chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnop ",
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnop,chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+    "https://abcdefghijklmnopabcdefghijklmnop",
+)
+
+
+@pytest.mark.parametrize("origin", _INVALID_EXTENSION_ORIGINS)
+def test_extension_origin_must_be_exact_32_char_a_to_p_id(origin: str) -> None:
+    from backend.core.config import _validate_extension_origin
+
+    with pytest.raises(RuntimeError, match="chrome-extension"):
+        _validate_extension_origin(origin)
+
+
+def test_extension_origin_accepts_exact_full_string_match() -> None:
+    from backend.core.config import _validate_extension_origin, validate_origin_settings
+
+    _validate_extension_origin(VALID_EXTENSION_ORIGIN)
+    validate_origin_settings(
+        Settings(
+            allowed_origins="http://localhost:5173",
+            extension_origin=VALID_EXTENSION_ORIGIN,
+        )
+    )
+
+
+def test_blank_extension_origin_still_disables_extension_cors() -> None:
+    from backend.core.config import validate_origin_settings
+
+    cfg = Settings(allowed_origins="http://localhost:5173", extension_origin="")
+    validate_origin_settings(cfg)
+    assert VALID_EXTENSION_ORIGIN not in cfg.cors_allow_origins
+    assert all(not item.startswith("chrome-extension://") for item in cfg.cors_allow_origins)
+
+
+def test_invalid_extension_origin_is_not_normalized_or_ignored() -> None:
+    from backend.core.config import validate_origin_settings
+
+    padded = f" {VALID_EXTENSION_ORIGIN} "
+    with pytest.raises(RuntimeError, match="chrome-extension"):
+        validate_origin_settings(
+            Settings(allowed_origins="http://localhost:5173", extension_origin=padded)
+        )
 
 
 def _assert_secret_absent(response, caplog, secret: str) -> None:

@@ -1,5 +1,6 @@
 """Application settings loaded from environment variables."""
 
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -9,7 +10,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENV_FILE = _REPO_ROOT / ".env"
 
 _WEB_SCHEMES = {"http", "https"}
-_EXTENSION_SCHEME = "chrome-extension"
+_EXTENSION_ORIGIN_RE = re.compile(r"^chrome-extension://[a-p]{32}$")
 
 
 class Settings(BaseSettings):
@@ -68,8 +69,8 @@ class Settings(BaseSettings):
     @property
     def cors_allow_origins(self) -> list[str]:
         origins = [item.strip() for item in self.allowed_origins.split(",") if item.strip()]
-        if self.extension_origin.strip():
-            origins.append(self.extension_origin.strip())
+        if self.extension_origin:
+            origins.append(self.extension_origin)
         return origins
 
     @property
@@ -91,9 +92,8 @@ def validate_origin_settings(cfg: Settings | None = None) -> None:
         )
     for origin in [item.strip() for item in raw_allowed.split(",") if item.strip()]:
         _validate_web_origin(origin)
-    extension = raw_extension.strip()
-    if extension:
-        _validate_extension_origin(extension)
+    if raw_extension:
+        _validate_extension_origin(raw_extension)
     if "*" in cfg.cors_allow_origins:
         raise RuntimeError("Credentialed CORS cannot use a wildcard origin.")
 
@@ -113,15 +113,12 @@ def _validate_web_origin(origin: str) -> None:
 
 
 def _validate_extension_origin(origin: str) -> None:
-    parsed = urlparse(origin)
-    if parsed.scheme != _EXTENSION_SCHEME or not parsed.netloc:
-        raise RuntimeError(
-            "EXTENSION_ORIGIN must be blank or one exact chrome-extension://<id> origin."
-        )
-    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
-        raise RuntimeError(
-            "EXTENSION_ORIGIN must not include a path, query, or fragment."
-        )
+    if _EXTENSION_ORIGIN_RE.fullmatch(origin):
+        return
+    raise RuntimeError(
+        "EXTENSION_ORIGIN must be blank or one exact chrome-extension:// origin "
+        "with a 32-character id using only lowercase a-p."
+    )
 
 
 def validate_runtime_settings() -> None:

@@ -79,6 +79,90 @@ def _table_has_user_id(engine: Engine, table: str) -> bool:
     return any(col["name"] == "user_id" for col in inspector.get_columns(table))
 
 
+def _table_has_column(engine: Engine, table: str, column: str) -> bool:
+    inspector = inspect(engine)
+    if table not in inspector.get_table_names():
+        return False
+    return any(col["name"] == column for col in inspector.get_columns(table))
+
+
+def _ownership_graph_errors(session: Session, user_id: int) -> list[str]:
+    """Refuse ownerless children whose private parents belong to someone else.
+
+    A row is claimable only when every private parent is ownerless (and would
+    be included in this same claim) or already owned by the target user.
+    """
+
+    errors: list[str] = []
+    bind = session.get_bind()
+    if _table_has_column(bind, "target_preferences", "candidate_id") and _table_has_user_id(
+        bind, "candidates"
+    ):
+        bad = session.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM target_preferences AS child
+                LEFT JOIN candidates AS parent ON parent.id = child.candidate_id
+                WHERE child.user_id IS NULL
+                  AND child.candidate_id IS NOT NULL
+                  AND (
+                        parent.id IS NULL
+                        OR (parent.user_id IS NOT NULL AND parent.user_id != :uid)
+                      )
+                """
+            ),
+            {"uid": user_id},
+        ).scalar_one()
+        if bad:
+            errors.append(
+                "ownerless target_preferences reference a candidate owned by a different user"
+            )
+
+    if _table_has_column(bind, "application_packages", "candidate_id") and _table_has_user_id(
+        bind, "candidates"
+    ):
+        bad = session.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM application_packages AS child
+                LEFT JOIN candidates AS parent ON parent.id = child.candidate_id
+                WHERE child.user_id IS NULL
+                  AND child.candidate_id IS NOT NULL
+                  AND (
+                        parent.id IS NULL
+                        OR (parent.user_id IS NOT NULL AND parent.user_id != :uid)
+                      )
+                """
+            ),
+            {"uid": user_id},
+        ).scalar_one()
+        if bad:
+            errors.append(
+                "ownerless application_packages reference a candidate owned by a different user"
+            )
+
+    if _table_has_user_id(bind, "form_fill_attempts") and _table_has_user_id(
+        bind, "application_packages"
+    ):
+        bad = session.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM form_fill_attempts AS child
+                JOIN application_packages AS parent ON parent.job_id = child.job_id
+                WHERE child.user_id IS NULL
+                  AND parent.user_id IS NOT NULL
+                  AND parent.user_id != :uid
+                """
+            ),
+            {"uid": user_id},
+        ).scalar_one()
+        if bad:
+            errors.append(
+                "ownerless form_fill_attempts reference a package owned by a different user"
+            )
+    return errors
+
+
 def _unique_conflict(session: Session, table: str, user_id: int) -> str | None:
     if table == "candidates":
         owned = session.execute(
@@ -152,6 +236,10 @@ def inspect_claim(session: Session, user_id: int) -> ClaimPlan:
             plan.errors.append(conflict)
             item.claimable = 0
         plan.tables.append(item)
+    plan.errors.extend(_ownership_graph_errors(session, user_id))
+    if plan.errors:
+        for item in plan.tables:
+            item.claimable = 0
     return plan
 
 
@@ -160,14 +248,18 @@ def apply_claim(session: Session, user_id: int) -> ClaimPlan:
     if plan.errors:
         return plan
     bind = session.get_bind()
-    for item in plan.tables:
-        if item.claimable == 0 or not _table_has_user_id(bind, item.table):
-            continue
-        session.execute(
-            text(f"UPDATE {item.table} SET user_id = :uid WHERE user_id IS NULL"),
-            {"uid": user_id},
-        )
-    session.commit()
+    try:
+        for item in plan.tables:
+            if item.claimable == 0 or not _table_has_user_id(bind, item.table):
+                continue
+            session.execute(
+                text(f"UPDATE {item.table} SET user_id = :uid WHERE user_id IS NULL"),
+                {"uid": user_id},
+            )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     return inspect_claim(session, user_id)
 
 
