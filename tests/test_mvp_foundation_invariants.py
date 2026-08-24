@@ -84,10 +84,15 @@ def test_approval_and_form_fill_routes_unchanged(isolated_client) -> None:
     assert approved.json()["approval_status"] == "approved"
 
     fill = client.post("/api/jobs/gate-job/fill-application")
-    assert fill.status_code == 409
+    assert fill.status_code == 200
+    body = fill.json()
+    assert body["ats_platform"] == "unsupported"
+    assert body["status"] == "failed"
     with SessionLocal() as db:
         assert db.query(ApplicationPackageRecord).count() == 1
-        assert db.query(FormFillAttemptRecord).count() == 0
+        attempts = db.query(FormFillAttemptRecord).all()
+        assert len(attempts) == 1
+        assert attempts[0].status == "failed"
 
 
 def test_llm_generate_is_blocked_in_automated_tests(monkeypatch) -> None:

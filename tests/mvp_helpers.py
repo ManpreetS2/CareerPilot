@@ -168,6 +168,8 @@ def seed_materials_prerequisites(
 def insert_grounded_package(
     session, job: JobRecord, *, candidate: Candidate | None = None
 ) -> ApplicationPackageRecord:
+    if candidate is None:
+        candidate = session.query(Candidate).order_by(Candidate.id.desc()).first()
     payload = json.loads(VALID_MATERIALS_JSON)
     record = ApplicationPackageRecord(
         job_id=job.id,

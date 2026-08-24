@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.core.config import settings
-from backend.db.models import JobIntelligenceRecord, JobRecord, MatchScoreRecord
+from backend.db.models import Candidate, JobIntelligenceRecord, JobRecord, MatchScoreRecord
 
 PRODUCTION_SQLITE = (ROOT / "data" / "careerpilot.db").resolve()
 logger = logging.getLogger("score_all_jobs")
@@ -61,9 +61,9 @@ def run_batch_scoring(
             "failed": 0,
             "written": 0,
             "refused": 1,
+            "eligible": 0,
+            "would_score": 0,
         }
-
-    from backend.services.analysis_service import score_job
 
     engine = create_engine(
         database_url,
@@ -76,6 +76,8 @@ def run_batch_scoring(
     skipped_already_scored = 0
     skipped_missing_intelligence = 0
     failed = 0
+    eligible = 0
+    would_score = 0
     try:
         with SessionLocal() as db:
             query = db.query(JobRecord)
@@ -85,33 +87,45 @@ def run_batch_scoring(
             if limit is not None:
                 jobs = jobs[: max(0, limit)]
             selected = len(jobs)
-            for job in jobs:
-                has_intelligence = (
-                    db.query(JobIntelligenceRecord.id)
-                    .filter(JobIntelligenceRecord.job_id == job.id)
-                    .first()
-                    is not None
-                )
-                has_score = (
-                    db.query(MatchScoreRecord.id).filter(MatchScoreRecord.job_id == job.id).first()
-                    is not None
-                )
-                if only_unscored and has_score:
-                    skipped_already_scored += 1
-                    continue
-                if not has_intelligence:
-                    skipped_missing_intelligence += 1
-                    continue
-                if dry_run:
-                    scored += 1
-                    continue
-                try:
-                    score_job(db, job.public_id)
-                    scored += 1
-                except Exception:
-                    db.rollback()
-                    failed += 1
-                    logger.info("batch_score job_failed job_pk=%s", job.id)
+            current_candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+            if current_candidate is None:
+                logger.info("batch_score skipped reason=no_current_candidate selected=%s", selected)
+            else:
+                if not dry_run:
+                    from backend.services.analysis_service import score_job
+                for job in jobs:
+                    has_intelligence = (
+                        db.query(JobIntelligenceRecord.id)
+                        .filter(JobIntelligenceRecord.job_id == job.id)
+                        .first()
+                        is not None
+                    )
+                    has_score = (
+                        db.query(MatchScoreRecord.id)
+                        .filter(
+                            MatchScoreRecord.job_id == job.id,
+                            MatchScoreRecord.candidate_id == current_candidate.id,
+                        )
+                        .first()
+                        is not None
+                    )
+                    if only_unscored and has_score:
+                        skipped_already_scored += 1
+                        continue
+                    if not has_intelligence:
+                        skipped_missing_intelligence += 1
+                        continue
+                    if dry_run:
+                        eligible += 1
+                        would_score += 1
+                        continue
+                    try:
+                        score_job(db, job.public_id)
+                        scored += 1
+                    except Exception:
+                        db.rollback()
+                        failed += 1
+                        logger.info("batch_score job_failed job_pk=%s", job.id)
     finally:
         engine.dispose()
 
@@ -125,9 +139,12 @@ def run_batch_scoring(
         "written": written,
         "refused": 0,
         "dry_run": int(dry_run),
+        "eligible": eligible,
+        "would_score": would_score,
     }
     print(
-        "selected={selected} scored={scored} skipped_already_scored={skipped_already_scored} "
+        "selected={selected} scored={scored} eligible={eligible} would_score={would_score} "
+        "skipped_already_scored={skipped_already_scored} "
         "skipped_missing_intelligence={skipped_missing_intelligence} failed={failed} "
         "written={written} dry_run={dry_run}".format(**result)
     )

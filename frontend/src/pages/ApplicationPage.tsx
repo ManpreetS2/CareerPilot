@@ -30,6 +30,9 @@ export function ApplicationPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [scoring, setScoring] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [materialsState, setMaterialsState] = useState<
+    "missing" | "current" | "stale_pending" | "stale_reviewed"
+  >("missing");
 
   useEffect(() => {
     if (!jobId) {
@@ -60,13 +63,31 @@ export function ApplicationPage() {
       setJob(jobResult.value);
       if (materialsResult.status === "fulfilled") {
         setMaterials(materialsResult.value);
+        setMaterialsState("current");
         setEligibilityConfirmed(materialsResult.value.eligibility_confirmed);
         setEligibilityNotes(materialsResult.value.eligibility_notes || "");
         setDecisionNotes(materialsResult.value.decision_notes || "");
       } else {
         setMaterials(null);
         const reason = (materialsResult as PromiseRejectedResult).reason;
-        if (!(reason instanceof ApiClientError && reason.status === 404)) {
+        const detailText =
+          reason instanceof ApiClientError
+            ? `${reason.message} ${typeof reason.detail === "string" ? reason.detail : ""}`.toLowerCase()
+            : "";
+        if (reason instanceof ApiClientError && reason.status === 404) {
+          setMaterialsState("missing");
+        } else if (
+          reason instanceof ApiClientError &&
+          reason.status === 409 &&
+          detailText.includes("previous candidate")
+        ) {
+          setMaterialsState(
+            detailText.includes("reviewed") || detailText.includes("were not replaced")
+              ? "stale_reviewed"
+              : "stale_pending",
+          );
+        } else {
+          setMaterialsState("missing");
           setError(reason);
         }
       }
@@ -100,6 +121,7 @@ export function ApplicationPage() {
     try {
       const next = await api.generateMaterials(jobId);
       setMaterials(next);
+      setMaterialsState("current");
       setEligibilityConfirmed(next.eligibility_confirmed);
       setEligibilityNotes(next.eligibility_notes || "");
       setDecisionNotes(next.decision_notes || "");
@@ -254,16 +276,28 @@ export function ApplicationPage() {
       <section className="card p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h2 className="font-display text-2xl font-semibold">Tailored materials</h2>
-          <button
-            type="button"
-            className="btn-primary"
-            data-testid="generate-materials"
-            disabled={generating}
-            onClick={() => void generateMaterials()}
-          >
-            <Wand2 className={`h-4 w-4 ${generating ? "animate-pulse" : ""}`} aria-hidden />
-            {generating ? "Generating…" : materials ? "Regenerate materials" : "Generate materials"}
-          </button>
+          {materialsState === "current" ? (
+            <p className="text-sm text-ink-500">Saved materials for the current profile.</p>
+          ) : materialsState === "stale_reviewed" ? (
+            <p className="text-sm text-ink-500">
+              Reviewed materials belong to a previous candidate profile and were not replaced.
+            </p>
+          ) : (
+            <button
+              type="button"
+              className="btn-primary"
+              data-testid="generate-materials"
+              disabled={generating}
+              onClick={() => void generateMaterials()}
+            >
+              <Wand2 className={`h-4 w-4 ${generating ? "animate-pulse" : ""}`} aria-hidden />
+              {generating
+                ? "Generating…"
+                : materialsState === "stale_pending"
+                  ? "Generate materials for the current profile"
+                  : "Generate materials"}
+            </button>
+          )}
         </div>
         {!materials ? (
           <p className="mt-3 text-sm text-ink-500">

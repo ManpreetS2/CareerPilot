@@ -131,14 +131,16 @@ def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolat
     committed yet from its point of view), but a winner row is already
     committed by the time this session's insert runs — it must recover the
     winner's data instead of raising or creating a duplicate row."""
-    job, _candidate = seed_materials_prerequisites(isolated_session)
+    job, candidate = seed_materials_prerequisites(isolated_session)
     winner = ApplicationPackageRecord(
         job_id=job.id,
+        candidate_id=candidate.id,
         tailored_bullets=["winner bullet"],
         cover_letter_draft="winner letter",
         recruiter_message="winner message",
         source_traceability_notes=["winner note"],
         approval_status="pending_review",
+        grounded=True,
     )
     isolated_session.add(winner)
     isolated_session.commit()

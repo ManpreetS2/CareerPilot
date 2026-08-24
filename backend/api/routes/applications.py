@@ -19,6 +19,7 @@ from backend.services.application_service import (
     get_or_generate_application_package,
     get_stored_application_package,
 )
+from backend.services.application_materials_agent import StaleApplicationMaterialsError
 from backend.services.form_fill_service import get_autofill_data, run_assisted_apply
 
 router = APIRouter(prefix="/api", tags=["applications"])
@@ -31,6 +32,8 @@ def get_materials(job_id: str, db: Session = Depends(get_db)) -> ApplicationPack
         return get_stored_application_package(db, job_id)
     except StoredMaterialsNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except StaleApplicationMaterialsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.post("/jobs/{job_id}/generate-materials", response_model=ApplicationPackage)

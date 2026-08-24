@@ -225,7 +225,6 @@ def run_browser_workflow() -> dict[str, int]:
         backend_env["OPENAI_API_KEY"] = ""
         backend_env["ADZUNA_APP_ID"] = ""
         backend_env["ADZUNA_APP_KEY"] = ""
-        backend_env["CAREERPILOT_BROWSER_FAKE_MATERIALS"] = "1"
         frontend_env = os.environ.copy()
         frontend_env["VITE_API_BASE_URL"] = f"http://127.0.0.1:{backend_port}"
         backend_log_handle = backend_log.open("w", encoding="utf-8")
@@ -235,7 +234,7 @@ def run_browser_workflow() -> dict[str, int]:
                 _python_bin(),
                 "-m",
                 "uvicorn",
-                "backend.main:app",
+                "backend.testing.browser_app:app",
                 "--host",
                 "127.0.0.1",
                 "--port",

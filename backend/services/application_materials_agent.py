@@ -110,6 +110,47 @@ _JOB_REQ_FRAME_RE = re.compile(
     r"required|preferred|must have|looking for)\b",
     re.I,
 )
+_JOB_INTEREST_FRAME_RE = re.compile(
+    r"\b(?:applying to|interested in|this (?:role|position|job|posting)|"
+    r"the (?:role|position|job) at|for the .{0,40}\brole\b)\b",
+    re.I,
+)
+_CANDIDATE_EMPLOYMENT_RE = re.compile(
+    r"\b(?:my (?:experience|background|time) (?:at|as)|worked at|working at|"
+    r"interned at|served as|i (?:previously )?worked at)\b",
+    re.I,
+)
+_CANDIDATE_SELF_TITLE_RE = re.compile(
+    r"\b(?:i(?:'m| am| was)|my background as|served as)\s+(?:a |an )?",
+    re.I,
+)
+_MAX_BULLETS = 8
+_MAX_NOTES = 8
+_MAX_BULLET_CHARS = 400
+_MAX_COVER_CHARS = 4000
+_MAX_RECRUITER_CHARS = 1500
+_MAX_NOTE_CHARS = 400
+_WORD_NUMBERS = {
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+    "eleven": "11",
+    "twelve": "12",
+    "dozen": "12",
+}
+_WORD_MAGNITUDES = {
+    "dozens": "12",
+    "hundreds": "hundreds",
+    "thousands": "thousands",
+    "millions": "millions",
+}
+_QUANTITY_UNITS = r"(?:years?|months?|internships?|apis?|users?|customers?|dollars?)"
 _STRENGTH_RE = re.compile(
     r"\b(?:expertise|expert|proficient|skilled|mastery|strengths?|experienced|"
     r"i (?:have|had|used|built|led|launched|ran|managed)|my (?:experience|background)|"
@@ -265,10 +306,25 @@ class ApplicationMaterialsGroundingError(ApplicationMaterialsError):
 
 
 class ApplicationMaterialsConflictError(ApplicationMaterialsError):
-    def __init__(self) -> None:
+    def __init__(self, detail: str | None = None) -> None:
         super().__init__(
-            "Existing application materials are approved or awaiting edits and were not replaced."
+            detail
+            or "Existing application materials are approved or awaiting edits and were not replaced."
         )
+
+
+class StaleApplicationMaterialsError(ApplicationMaterialsError):
+    def __init__(self, *, reviewed: bool = False) -> None:
+        if reviewed:
+            super().__init__(
+                "Reviewed application materials belong to a previous candidate profile "
+                "and were not replaced."
+            )
+        else:
+            super().__init__(
+                "Stored application materials belong to a previous candidate profile. "
+                "Generate materials for the current profile."
+            )
 
 
 class ApplicationMaterialsNotImplementedError(ApplicationMaterialsError):
@@ -526,9 +582,44 @@ def parse_application_materials_json(raw: str) -> ApplicationMaterialsStructured
     if unknown:
         raise ApplicationMaterialsParseError()
     try:
-        return ApplicationMaterialsStructuredOutput.model_validate(payload)
+        parsed = ApplicationMaterialsStructuredOutput.model_validate(payload)
     except ValidationError as exc:
         raise ApplicationMaterialsParseError() from exc
+    _assert_useful_structured_output(parsed)
+    return parsed
+
+
+def _nonblank_items(values: list[str] | None) -> list[str]:
+    return [item.strip() for item in (values or []) if str(item).strip()]
+
+
+def _assert_useful_structured_output(parsed: ApplicationMaterialsStructuredOutput) -> None:
+    bullets = _nonblank_items(parsed.tailored_bullets)
+    notes = _nonblank_items(parsed.source_traceability_notes)
+    cover = (parsed.cover_letter_draft or "").strip()
+    recruiter = (parsed.recruiter_message or "").strip()
+    if not bullets or not cover or not recruiter or not notes:
+        raise ApplicationMaterialsParseError()
+    if len(bullets) > _MAX_BULLETS or len(notes) > _MAX_NOTES:
+        raise ApplicationMaterialsParseError()
+    if len(cover) > _MAX_COVER_CHARS or len(recruiter) > _MAX_RECRUITER_CHARS:
+        raise ApplicationMaterialsParseError()
+    if any(len(item) > _MAX_BULLET_CHARS for item in bullets):
+        raise ApplicationMaterialsParseError()
+    if any(len(item) > _MAX_NOTE_CHARS for item in notes):
+        raise ApplicationMaterialsParseError()
+    parsed.tailored_bullets = bullets
+    parsed.cover_letter_draft = cover
+    parsed.recruiter_message = recruiter
+    parsed.source_traceability_notes = notes
+
+
+def _package_has_useful_content(record: ApplicationPackageRecord) -> bool:
+    bullets = _nonblank_items(list(record.tailored_bullets or []))
+    notes = _nonblank_items(list(record.source_traceability_notes or []))
+    cover = (record.cover_letter_draft or "").strip()
+    recruiter = (record.recruiter_message or "").strip()
+    return bool(bullets and cover and recruiter and notes)
 
 
 def _corpus_from_strings(values: list[str]) -> str:
@@ -673,6 +764,39 @@ def _extract_numeric_facts(text: str) -> list[tuple[str, str]]:
     take(re.compile(r"(\d+(?:\.\d+)?)\s*months?\b", re.I), "months")
     take(re.compile(r"\b((?:19|20)\d{2}-(?:0[1-9]|1[0-2]))\b"), "date")
     take(re.compile(r"\b((?:19|20)\d{2})\b"), "date")
+
+    word_alt = "|".join(re.escape(word) for word in sorted(_WORD_NUMBERS, key=len, reverse=True))
+    for match in re.finditer(rf"\b({word_alt})\s+({_QUANTITY_UNITS})\b", text, flags=re.I):
+        if _spans_overlap(match.span(), occupied):
+            continue
+        occupied.append(match.span())
+        unit = match.group(2).lower()
+        value = _WORD_NUMBERS[match.group(1).lower()]
+        if unit.startswith("year"):
+            kind = "years"
+        elif unit.startswith("month"):
+            kind = "months"
+        else:
+            kind = "count"
+        facts.append((kind, value))
+
+    magnitude_alt = "|".join(
+        re.escape(word) for word in sorted(_WORD_MAGNITUDES, key=len, reverse=True)
+    )
+    for match in re.finditer(rf"\b({magnitude_alt})\s+of\s+[A-Za-z]+\b", text, flags=re.I):
+        if _spans_overlap(match.span(), occupied):
+            continue
+        occupied.append(match.span())
+        facts.append(("count", _WORD_MAGNITUDES[match.group(1).lower()]))
+
+    for match in re.finditer(
+        r"\b(?:million[- ]dollar|millions? of dollars?)\b", text, flags=re.I
+    ):
+        if _spans_overlap(match.span(), occupied):
+            continue
+        occupied.append(match.span())
+        facts.append(("usd", "millions"))
+
     for match in re.finditer(r"\b\d+(?:\.\d+)?\b", text):
         if _spans_overlap(match.span(), occupied):
             continue
@@ -862,12 +986,15 @@ def ground_application_materials(
         if item.strip()
     }
     missing_keys = {item.lower() for item in missing_skills}
-    known_names: list[str] = []
+    candidate_names: list[str] = []
     for item in contexts:
-        known_names.extend(item.names)
-    known_names.extend(context.candidate.skills)
-    known_names.extend(context.candidate.certifications)
-    known_names.extend(context.candidate.strengths)
+        if item.kind != "job":
+            candidate_names.extend(item.names)
+    candidate_names.extend(context.candidate.skills)
+    candidate_names.extend(context.candidate.certifications)
+    candidate_names.extend(context.candidate.strengths)
+    stored_titles = [exp.title for exp in context.candidate.experience if exp.title]
+    job_title = (context.job.title or "").strip()
 
     by_id = {item.evidence_id: item for item in contexts}
 
@@ -918,16 +1045,28 @@ def ground_application_materials(
             if any(_skill_in_text(skill, unit) for skill in parent.bound_skills):
                 named_parents.add(parent.evidence_id)
 
+        job_framed = bool(_JOB_REQ_FRAME_RE.search(unit))
+        job_interest = bool(_JOB_INTEREST_FRAME_RE.search(unit))
+        employment_claim = bool(_CANDIDATE_EMPLOYMENT_RE.search(unit))
+        strength_context = kind == "strength" or bool(_STRENGTH_RE.search(unit))
+        gap_context = bool(_GAP_RE.search(unit))
+        job_quantity = job_framed and not strength_context
+
         unit_facts = _extract_numeric_facts(unit)
         common_owners: set[str] | None = None
         for fact in unit_facts:
+            if job_quantity:
+                if fact not in job_ctx.facts:
+                    reject("numeric", job=True, numeric=True)
+                common_owners = set()
+                continue
             owners = {parent.evidence_id for parent in parents if fact in parent.facts}
             if not owners:
                 reject("numeric", candidate=True, numeric=True)
                 common_owners = set()
                 continue
             common_owners = owners if common_owners is None else common_owners & owners
-        if unit_facts:
+        if unit_facts and not job_quantity:
             if common_owners is None:
                 common_owners = set()
             if named_parents:
@@ -940,13 +1079,9 @@ def ground_application_materials(
 
         if len(named_parents) > 1:
             reject("cross_entry", candidate=True)
-        elif named_parents and unit_facts and common_owners is not None:
+        elif named_parents and unit_facts and common_owners is not None and not job_quantity:
             if named_parents and common_owners and not (named_parents <= common_owners or named_parents & common_owners):
                 reject("cross_entry", candidate=True)
-
-        job_framed = bool(_JOB_REQ_FRAME_RE.search(unit))
-        strength_context = kind == "strength" or bool(_STRENGTH_RE.search(unit))
-        gap_context = bool(_GAP_RE.search(unit))
 
         for skill in _closed_skills_in_text(unit):
             in_profile = skill in global_skills or any(
@@ -975,13 +1110,37 @@ def ground_application_materials(
                 elif not in_job or strength_context:
                     reject("skill", candidate=True)
 
+        def _job_name_allowed() -> bool:
+            return (job_interest or job_framed) and not employment_claim
+
+        def _matches_job_name(value: str) -> bool:
+            if _phrase_in_text(value, job_ctx.text):
+                return True
+            return any(
+                _phrase_in_text(value, name) or _phrase_in_text(name, value)
+                for name in job_ctx.names
+                if name.strip()
+            )
+
         for match in _AT_RE.finditer(unit):
             org = match.group(1).strip()
             if org.lower() in _GENERIC_PROPER_TOKENS or org.split()[0].lower() in {"this", "the", "our", "your", "a", "an"}:
                 continue
-            known = any(_phrase_in_text(org, name) or _phrase_in_text(name, org) for name in known_names)
-            if not known:
-                reject("invented_employer", candidate=True)
+            known = any(_phrase_in_text(org, name) or _phrase_in_text(name, org) for name in candidate_names)
+            if known:
+                continue
+            if _job_name_allowed() and _matches_job_name(org):
+                continue
+            reject("invented_employer", candidate=True)
+
+        if job_title:
+            self_title = re.search(
+                rf"\b(?:i(?:'m| am| was)|my background as|served as)\s+(?:a |an )?{re.escape(job_title)}\b",
+                unit,
+                flags=re.I,
+            )
+            if self_title and not any(_phrase_in_text(job_title, title) for title in stored_titles):
+                reject("invented_title", candidate=True)
 
         if _TITLE_INFLATION_RE.search(unit):
             title_ok = any(
@@ -990,8 +1149,6 @@ def ground_application_materials(
                 for parent in parents
                 if parent.kind == "experience"
             )
-            stored_titles = [exp.title for exp in context.candidate.experience if exp.title]
-            stored_titles.append(context.job.title)
             if not any(_phrase_in_text(title, unit) for title in stored_titles if title):
                 if not title_ok:
                     reject("invented_title", candidate=True)
@@ -1054,9 +1211,9 @@ def ground_application_materials(
             if not any(_claim_supported(match.group(0), parent.text) for parent in parents):
                 reject("invented_accomplishment", candidate=True)
 
-        leftover = _leftover_proper_tokens(unit, known_names, all_closed_skills)
+        leftover = _leftover_proper_tokens(unit, candidate_names, all_closed_skills)
         for token in leftover:
-            if job_framed and _phrase_in_text(token, job_ctx.text):
+            if _job_name_allowed() and _matches_job_name(token):
                 continue
             reject("invented_employer", candidate=True)
 
@@ -1148,9 +1305,9 @@ def is_grounded_package_record(record: ApplicationPackageRecord | None) -> bool:
         return False
     if _looks_like_placeholder(record):
         return False
-    if getattr(record, "grounded", False):
-        return True
-    return False
+    if not getattr(record, "grounded", False):
+        return False
+    return _package_has_useful_content(record)
 
 
 _PROTECTED_APPROVAL_STATUSES = frozenset({"approved", "edit_requested"})
@@ -1176,10 +1333,7 @@ def _invoke_materials_generator(
     prompt: str,
     system_prompt: str,
 ) -> str:
-    try:
-        return generator(prompt, system_prompt)
-    except TypeError:
-        return generator(prompt)  # type: ignore[misc, call-arg]
+    return generator(prompt, system_prompt)
 
 
 def _persist_grounded_draft(
@@ -1189,9 +1343,12 @@ def _persist_grounded_draft(
     existing: ApplicationPackageRecord | None = None,
 ) -> ApplicationPackageRecord:
     payload = draft_to_persistence_payload(draft)
+    same_candidate = existing is not None and existing.candidate_id == context.candidate_pk
     if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
-        raise ApplicationMaterialsConflictError()
-    if existing is not None and is_grounded_package_record(existing):
+        if same_candidate:
+            raise ApplicationMaterialsConflictError()
+        raise StaleApplicationMaterialsError(reviewed=True)
+    if existing is not None and is_grounded_package_record(existing) and same_candidate:
         return existing
     if existing is not None:
         existing.candidate_id = context.candidate_pk
@@ -1223,13 +1380,19 @@ def _persist_grounded_draft(
             .filter(ApplicationPackageRecord.job_id == context.job_pk)
             .first()
         )
-        if winner is None:
-            raise
-        logger.info(
-            "application_materials persist recovered unique_conflict job_pk=%s",
-            context.job_pk,
+        if (
+            winner is not None
+            and is_grounded_package_record(winner)
+            and winner.candidate_id == context.candidate_pk
+        ):
+            logger.info(
+                "application_materials persist recovered unique_conflict job_pk=%s",
+                context.job_pk,
+            )
+            return winner
+        raise ApplicationMaterialsConflictError(
+            "Stored application materials could not be recovered safely after a write conflict."
         )
-        return winner
     except Exception:
         db.rollback()
         raise
@@ -1254,12 +1417,15 @@ def generate_grounded_application_materials(
         .filter(ApplicationPackageRecord.job_id == context.job_pk)
         .first()
     )
+    same_candidate = existing is not None and existing.candidate_id == context.candidate_pk
     if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
-        if is_grounded_package_record(existing):
+        if same_candidate and is_grounded_package_record(existing):
             logger.info("application_materials reused protected_package job_pk=%s", context.job_pk)
             return _draft_from_record(existing, job_id)
+        if not same_candidate:
+            raise StaleApplicationMaterialsError(reviewed=True)
         raise ApplicationMaterialsConflictError()
-    if is_grounded_package_record(existing):
+    if same_candidate and is_grounded_package_record(existing):
         logger.info("application_materials reused stored_package job_pk=%s", context.job_pk)
         assert existing is not None
         return _draft_from_record(existing, job_id)
@@ -1289,6 +1455,13 @@ def generate_grounded_application_materials(
             raise
         except LLMConfigurationError:
             raise
+        except TypeError:
+            logger.info(
+                "application_materials structured_attempt=%s outcome=generator_typeerror job_pk=%s",
+                attempt + 1,
+                context.job_pk,
+            )
+            raise ApplicationMaterialsParseError() from None
         try:
             parsed = parse_application_materials_json(raw)
             break

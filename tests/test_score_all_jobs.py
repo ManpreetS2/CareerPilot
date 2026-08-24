@@ -72,3 +72,51 @@ def test_batch_execution_is_idempotent(tmp_path) -> None:
             assert db.query(MatchScoreRecord).count() == 1
     finally:
         engine.dispose()
+
+
+def test_batch_only_unscored_is_scoped_to_current_candidate(tmp_path) -> None:
+    url, SessionLocal, engine = _temp_db(tmp_path)
+    try:
+        from tests.mvp_helpers import insert_candidate, insert_score
+
+        with SessionLocal() as db:
+            job, first = seed_materials_prerequisites(db, public_id="job-a", with_score=False)
+            insert_score(db, job, first)
+            insert_candidate(db)
+        result = run_batch_scoring(database_url=url, dry_run=False, only_unscored=True)
+        assert result["scored"] >= 1
+        from backend.db.models import MatchScoreRecord
+
+        with SessionLocal() as db:
+            assert db.query(MatchScoreRecord).count() == 2
+    finally:
+        engine.dispose()
+
+
+def test_batch_dry_run_reports_eligible_not_scored(tmp_path) -> None:
+    url, SessionLocal, engine = _temp_db(tmp_path)
+    try:
+        with SessionLocal() as db:
+            seed_materials_prerequisites(db, public_id="job-a", with_score=False)
+        result = run_batch_scoring(database_url=url, dry_run=True, only_unscored=True)
+        assert result["written"] == 0
+        assert result["scored"] == 0
+        assert result.get("eligible") or result.get("would_score")
+        from backend.db.models import MatchScoreRecord
+
+        with SessionLocal() as db:
+            assert db.query(MatchScoreRecord).count() == 0
+    finally:
+        engine.dispose()
+
+
+def test_batch_without_current_candidate_skips_before_scoring(tmp_path) -> None:
+    url, SessionLocal, engine = _temp_db(tmp_path)
+    try:
+        with SessionLocal() as db:
+            insert_job(db, public_id="job-a")
+        result = run_batch_scoring(database_url=url, dry_run=False, only_unscored=True)
+        assert result["written"] == 0
+        assert result["scored"] == 0
+    finally:
+        engine.dispose()

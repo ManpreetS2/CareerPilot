@@ -25,6 +25,7 @@ from backend.services.application_materials_agent import (
     MissingCandidateError,
     MissingFitScoreError,
     MissingJobIntelligenceError,
+    StaleApplicationMaterialsError,
     generate_grounded_application_materials,
     is_grounded_package_record,
 )
@@ -82,6 +83,10 @@ def get_stored_application_package(db: Session, job_id: str) -> ApplicationPacka
     )
     if record is None or not is_grounded_package_record(record):
         raise StoredMaterialsNotFoundError()
+    current = _get_current_candidate(db)
+    if current is not None and record.candidate_id != current.id:
+        reviewed = record.approval_status in {"approved", "edit_requested"}
+        raise StaleApplicationMaterialsError(reviewed=reviewed)
     return _record_to_package(record, job_id)
 
 
@@ -103,6 +108,8 @@ def get_or_generate_application_package(
     except ApplicationMaterialsGroundingError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ApplicationMaterialsConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except StaleApplicationMaterialsError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ApplicationMaterialsParseError:
         raise HTTPException(
