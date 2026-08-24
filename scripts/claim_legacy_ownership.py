@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import bindparam, create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import Session, sessionmaker
@@ -29,6 +29,46 @@ CLAIMABLE = (
     ("application_tracker", "user_id", True),
     ("interview_prep", "user_id", True),
 )
+
+_GUARDED_UPDATES = {
+    "candidates": "UPDATE candidates SET user_id = :uid WHERE user_id IS NULL",
+    "target_preferences": """
+        UPDATE target_preferences SET user_id = :uid
+        WHERE user_id IS NULL
+          AND (
+            candidate_id IS NULL
+            OR EXISTS (
+              SELECT 1 FROM candidates AS parent
+              WHERE parent.id = target_preferences.candidate_id
+                AND (parent.user_id IS NULL OR parent.user_id = :uid)
+            )
+          )
+    """,
+    "application_packages": """
+        UPDATE application_packages SET user_id = :uid
+        WHERE user_id IS NULL
+          AND (
+            candidate_id IS NULL
+            OR EXISTS (
+              SELECT 1 FROM candidates AS parent
+              WHERE parent.id = application_packages.candidate_id
+                AND (parent.user_id IS NULL OR parent.user_id = :uid)
+            )
+          )
+    """,
+    "form_fill_attempts": """
+        UPDATE form_fill_attempts SET user_id = :uid
+        WHERE user_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM application_packages AS parent
+            WHERE parent.job_id = form_fill_attempts.job_id
+              AND parent.user_id IS NOT NULL
+              AND parent.user_id != :uid
+          )
+    """,
+    "application_tracker": "UPDATE application_tracker SET user_id = :uid WHERE user_id IS NULL",
+    "interview_prep": "UPDATE interview_prep SET user_id = :uid WHERE user_id IS NULL",
+}
 
 
 @dataclass
@@ -163,6 +203,160 @@ def _ownership_graph_errors(session: Session, user_id: int) -> list[str]:
     return errors
 
 
+class ClaimApplyError(Exception):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+def _is_lock_error(exc: BaseException) -> bool:
+    parts = [str(exc)]
+    orig = getattr(exc, "orig", None)
+    if orig is not None:
+        parts.append(str(orig))
+    blob = " ".join(parts).lower()
+    return "database is locked" in blob or "database is busy" in blob
+
+
+def _begin_immediate(session: Session) -> None:
+    bind = session.get_bind()
+    dialect = getattr(bind.dialect, "name", "")
+    if dialect != "sqlite":
+        raise ClaimApplyError("Apply mode refuses unsupported database dialect.")
+    if session.in_transaction():
+        session.rollback()
+    connection = session.connection()
+    dbapi = connection.connection.dbapi_connection
+    if getattr(dbapi, "in_transaction", False):
+        dbapi.rollback()
+    session.info["_claim_prev_isolation"] = dbapi.isolation_level
+    dbapi.isolation_level = None
+    try:
+        dbapi.execute("BEGIN IMMEDIATE")
+    except Exception:
+        previous = session.info.pop("_claim_prev_isolation", None)
+        if previous is not None:
+            dbapi.isolation_level = previous
+        raise
+
+
+def _end_immediate(session: Session) -> None:
+    previous = session.info.pop("_claim_prev_isolation", None)
+    if previous is None:
+        return
+    try:
+        connection = session.connection()
+        dbapi = connection.connection.dbapi_connection
+        dbapi.isolation_level = previous
+    except Exception:
+        pass
+
+
+def _null_row_ids(session: Session, table: str) -> list[int]:
+    return [int(row[0]) for row in session.execute(text(f"SELECT id FROM {table} WHERE user_id IS NULL"))]
+
+
+def _claimed_graph_errors(session: Session, user_id: int, pending_ids: dict[str, list[int]]) -> list[str]:
+    """Refuse commit if newly claimed children point at a foreign private parent."""
+
+    errors: list[str] = []
+    bind = session.get_bind()
+    pref_ids = pending_ids.get("target_preferences") or []
+    if pref_ids and _table_has_column(bind, "target_preferences", "candidate_id") and _table_has_user_id(
+        bind, "candidates"
+    ):
+        bad = session.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM target_preferences AS child
+                LEFT JOIN candidates AS parent ON parent.id = child.candidate_id
+                WHERE child.id IN :ids
+                  AND child.user_id = :uid
+                  AND child.candidate_id IS NOT NULL
+                  AND (
+                        parent.id IS NULL
+                        OR parent.user_id IS NULL
+                        OR parent.user_id != :uid
+                      )
+                """
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"uid": user_id, "ids": pref_ids},
+        ).scalar_one()
+        if bad:
+            errors.append(
+                "claimed target_preferences reference a candidate owned by a different user"
+            )
+
+    package_ids = pending_ids.get("application_packages") or []
+    if package_ids and _table_has_column(bind, "application_packages", "candidate_id") and _table_has_user_id(
+        bind, "candidates"
+    ):
+        bad = session.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM application_packages AS child
+                LEFT JOIN candidates AS parent ON parent.id = child.candidate_id
+                WHERE child.id IN :ids
+                  AND child.user_id = :uid
+                  AND child.candidate_id IS NOT NULL
+                  AND (
+                        parent.id IS NULL
+                        OR parent.user_id IS NULL
+                        OR parent.user_id != :uid
+                      )
+                """
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"uid": user_id, "ids": package_ids},
+        ).scalar_one()
+        if bad:
+            errors.append(
+                "claimed application_packages reference a candidate owned by a different user"
+            )
+
+    attempt_ids = pending_ids.get("form_fill_attempts") or []
+    if attempt_ids and _table_has_user_id(bind, "form_fill_attempts") and _table_has_user_id(
+        bind, "application_packages"
+    ):
+        bad = session.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM form_fill_attempts AS child
+                JOIN application_packages AS parent ON parent.job_id = child.job_id
+                WHERE child.id IN :ids
+                  AND child.user_id = :uid
+                  AND parent.user_id IS NOT NULL
+                  AND parent.user_id != :uid
+                """
+            ).bindparams(bindparam("ids", expanding=True)),
+            {"uid": user_id, "ids": attempt_ids},
+        ).scalar_one()
+        if bad:
+            errors.append(
+                "claimed form_fill_attempts reference a package owned by a different user"
+            )
+    return errors
+
+
+def _apply_guarded_updates(session: Session, user_id: int, plan: ClaimPlan) -> None:
+    bind = session.get_bind()
+    for item in plan.tables:
+        if item.claimable == 0 or not _table_has_user_id(bind, item.table):
+            continue
+        sql = _GUARDED_UPDATES.get(item.table)
+        if sql is None:
+            raise ClaimApplyError("ownership claim did not complete")
+        result = session.execute(text(sql), {"uid": user_id})
+        changed = int(result.rowcount or 0)
+        if changed != item.claimable:
+            raise ClaimApplyError("ownership claim changed during apply")
+
+
+def _refused_plan(user_id: int, message: str) -> ClaimPlan:
+    plan = ClaimPlan(user_id=user_id)
+    plan.errors.append(message)
+    return plan
+
+
 def _unique_conflict(session: Session, table: str, user_id: int) -> str | None:
     if table == "candidates":
         owned = session.execute(
@@ -244,22 +438,42 @@ def inspect_claim(session: Session, user_id: int) -> ClaimPlan:
 
 
 def apply_claim(session: Session, user_id: int) -> ClaimPlan:
-    plan = inspect_claim(session, user_id)
-    if plan.errors:
-        return plan
-    bind = session.get_bind()
+    started_immediate = False
     try:
-        for item in plan.tables:
-            if item.claimable == 0 or not _table_has_user_id(bind, item.table):
-                continue
-            session.execute(
-                text(f"UPDATE {item.table} SET user_id = :uid WHERE user_id IS NULL"),
-                {"uid": user_id},
-            )
+        _begin_immediate(session)
+        started_immediate = True
+        plan = inspect_claim(session, user_id)
+        if plan.errors:
+            session.rollback()
+            return plan
+        if plan.claimable_total:
+            pending_ids = {
+                item.table: _null_row_ids(session, item.table)
+                for item in plan.tables
+                if item.claimable
+            }
+            _apply_guarded_updates(session, user_id, plan)
+            final_errors = _claimed_graph_errors(session, user_id, pending_ids)
+            if final_errors:
+                session.rollback()
+                plan.errors.extend(final_errors)
+                for item in plan.tables:
+                    item.claimable = 0
+                return plan
         session.commit()
-    except Exception:
-        session.rollback()
-        raise
+    except Exception as exc:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        if isinstance(exc, ClaimApplyError):
+            return _refused_plan(user_id, exc.message)
+        if _is_lock_error(exc):
+            return _refused_plan(user_id, "could not obtain a write lock for the ownership claim")
+        return _refused_plan(user_id, "ownership claim did not complete")
+    finally:
+        if started_immediate:
+            _end_immediate(session)
     return inspect_claim(session, user_id)
 
 
