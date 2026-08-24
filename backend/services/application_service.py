@@ -28,6 +28,7 @@ from backend.services.application_materials_agent import (
     StaleApplicationMaterialsError,
     generate_grounded_application_materials,
     is_grounded_package_record,
+    is_package_ready_for_apply,
 )
 from backend.services.llm_client import (
     LLMConfigurationError,
@@ -154,6 +155,19 @@ def apply_approval(db: Session, job_id: str, request: ApprovalRequest) -> Approv
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Confirm work authorization, salary, and eligibility before approving.",
+        )
+
+    # Same gate _load_approved_application() enforces before either Assisted
+    # Apply path can use a package — checked again here so a blank,
+    # placeholder, ungrounded, or wrong-candidate package can never be
+    # approved in the first place, not just caught later at apply time.
+    if request.decision == "approved" and not is_package_ready_for_apply(db, record):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This package isn't grounded in your current candidate profile. "
+                "Regenerate application materials before approving."
+            ),
         )
 
     record.approval_status = request.decision

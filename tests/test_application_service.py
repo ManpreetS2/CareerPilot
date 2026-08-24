@@ -231,7 +231,8 @@ def test_approve_without_eligibility_confirmation_is_rejected(isolated_session) 
 
 def test_approve_with_eligibility_confirmation_succeeds(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     result = apply_approval(
         isolated_session,
         "manual-abc123",
@@ -272,9 +273,110 @@ def test_approve_missing_job_404s(isolated_session) -> None:
     assert exc_info.value.status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# Regression coverage: the shared grounded-package gate (is_package_ready_for_apply)
+# ---------------------------------------------------------------------------
+
+
+def test_approve_rejects_an_ungrounded_package(isolated_session) -> None:
+    """Regression test for a real gap: a package with grounded=False could
+    still be approved and then pass _load_approved_application() in Form
+    Fill. apply_approval() must reject the approval itself, not rely on
+    Form Fill to catch it later."""
+    job = _job(isolated_session)
+    candidate = _candidate(isolated_session)
+    record = ApplicationPackageRecord(
+        job_id=job.id,
+        candidate_id=candidate.id,
+        tailored_bullets=["A bullet."],
+        cover_letter_draft="Dear team,",
+        source_traceability_notes=[],
+        approval_status="pending_review",
+        grounded=False,
+    )
+    isolated_session.add(record)
+    isolated_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        apply_approval(
+            isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True)
+        )
+    assert exc_info.value.status_code == 409
+    isolated_session.refresh(record)
+    assert record.approval_status == "pending_review"  # unchanged, not silently approved
+
+
+def test_approve_rejects_a_blank_package(isolated_session) -> None:
+    """grounded=True alone isn't enough — a package with no real content
+    (empty bullets and no cover letter) must not be approvable either."""
+    job = _job(isolated_session)
+    candidate = _candidate(isolated_session)
+    record = ApplicationPackageRecord(
+        job_id=job.id,
+        candidate_id=candidate.id,
+        tailored_bullets=[],
+        cover_letter_draft=None,
+        source_traceability_notes=[],
+        approval_status="pending_review",
+        grounded=True,
+    )
+    isolated_session.add(record)
+    isolated_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        apply_approval(
+            isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True)
+        )
+    assert exc_info.value.status_code == 409
+
+
+def test_approve_rejects_a_wrong_candidate_package(isolated_session) -> None:
+    """A package generated against a candidate profile that's since been
+    superseded by a fresh resume upload must not be approvable against the
+    new, current candidate."""
+    job = _job(isolated_session)
+    stale_candidate = _candidate(isolated_session, name="Stale Candidate")
+    insert_grounded_package(isolated_session, job, candidate=stale_candidate)
+    _candidate(isolated_session, name="Current Candidate")  # now the current candidate
+
+    with pytest.raises(HTTPException) as exc_info:
+        apply_approval(
+            isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True)
+        )
+    assert exc_info.value.status_code == 409
+
+
+def test_reject_and_edit_requested_remain_allowed_on_an_ungrounded_package(isolated_session) -> None:
+    """The gate only blocks approval — a reviewer must still be able to
+    reject or request edits on a bad package (the corrective action for
+    exactly this situation)."""
+    job = _job(isolated_session)
+    candidate = _candidate(isolated_session)
+    record = ApplicationPackageRecord(
+        job_id=job.id,
+        candidate_id=candidate.id,
+        tailored_bullets=["A bullet."],
+        cover_letter_draft="Dear team,",
+        source_traceability_notes=[],
+        approval_status="pending_review",
+        grounded=False,
+    )
+    isolated_session.add(record)
+    isolated_session.commit()
+
+    rejected = apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected"))
+    assert rejected.approval_status == "rejected"
+
+    record.approval_status = "pending_review"
+    isolated_session.commit()
+    edited = apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested"))
+    assert edited.approval_status == "edit_requested"
+
+
 def test_reapproving_stays_confirmed(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True))
     result = apply_approval(
         isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True)
@@ -291,7 +393,8 @@ def test_reapproving_stays_confirmed(isolated_session) -> None:
 
 def test_edit_request_after_approval_does_not_clear_eligibility_confirmed(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True))
 
     # Edit request with the schema's default eligibility_confirmed=False —
@@ -305,7 +408,8 @@ def test_edit_request_after_approval_does_not_clear_eligibility_confirmed(isolat
 
 def test_reject_after_approval_does_not_clear_eligibility_confirmed(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="approved", eligibility_confirmed=True))
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="rejected"))
 
@@ -319,7 +423,8 @@ def test_omitting_notes_fields_does_not_clear_previously_set_values(isolated_ses
     leave whatever was already stored alone — omitted and explicitly-empty
     are different things, even though Pydantic defaults both to None/""."""
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(
         isolated_session,
         "manual-abc123",
@@ -363,7 +468,8 @@ def test_edit_request_never_sets_eligibility_confirmed_true(isolated_session) ->
 
 def test_eligibility_notes_can_be_set_then_cleared(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(
         isolated_session,
         "manual-abc123",
@@ -418,7 +524,8 @@ def test_decision_notes_can_be_cleared(isolated_session) -> None:
 
 def test_notes_round_trip_unicode_and_special_characters(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     tricky = "Needs H-1B sponsorship — café résumé 日本語 <script>alert(1)</script> \"quoted\""
     apply_approval(
         isolated_session,
@@ -432,7 +539,8 @@ def test_notes_round_trip_unicode_and_special_characters(isolated_session) -> No
 
 def test_full_decision_lifecycle_preserves_expected_state(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
 
     apply_approval(isolated_session, "manual-abc123", ApprovalRequest(decision="edit_requested", notes="fix intro"))
     package = get_stored_application_package(isolated_session, "manual-abc123")

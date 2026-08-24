@@ -149,7 +149,8 @@ def test_invalid_status_transition(isolated_session) -> None:
 
 def test_tracker_status_change_does_not_mutate_approval_or_form_fill(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(
         isolated_session,
         job.public_id,

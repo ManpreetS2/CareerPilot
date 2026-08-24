@@ -1310,6 +1310,28 @@ def is_grounded_package_record(record: ApplicationPackageRecord | None) -> bool:
     return _package_has_useful_content(record)
 
 
+def is_package_ready_for_apply(db: Session, package: ApplicationPackageRecord | None) -> bool:
+    """The shared gate for anything that treats a package as safe to act on
+    for real: approving it, or handing it to either Assisted Apply path
+    (server-side Playwright and the browser extension both load through
+    _load_approved_application, which calls this too). Adds one more
+    requirement on top of is_grounded_package_record (which already covers
+    not-a-placeholder, the grounded flag, and real non-blank content via
+    _package_has_useful_content): candidate_id must be set and still match
+    the current candidate profile, so a package generated before a fresh
+    resume upload can't be approved or applied against stale data.
+    """
+    if not is_grounded_package_record(package):
+        return False
+    assert package is not None  # is_grounded_package_record already excluded None
+    if package.candidate_id is None:
+        return False
+    current_candidate = db.query(Candidate).order_by(Candidate.id.desc()).first()
+    if current_candidate is None or package.candidate_id != current_candidate.id:
+        return False
+    return True
+
+
 _PROTECTED_APPROVAL_STATUSES = frozenset({"approved", "edit_requested"})
 
 

@@ -47,6 +47,7 @@ from backend.db.models import (
     TargetPreference,
 )
 from backend.schemas.schemas import AutofillFields, AutofillResponse, FilledField, FlaggedField, FormFillResult
+from backend.services.application_materials_agent import is_package_ready_for_apply
 
 logger = logging.getLogger(__name__)
 
@@ -612,6 +613,20 @@ def _load_approved_application(db: Session, job: JobRecord) -> tuple[Application
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="No candidate profile is associated with this application.",
+        )
+
+    # Defense in depth: apply_approval() gates this same thing before
+    # letting a package become "approved" at all, but a legacy row approved
+    # before that gate existed (or any other way an ungrounded row ends up
+    # marked approved) must still be rejected here — this is the last stop
+    # before either Assisted Apply path acts on real candidate data.
+    if not is_package_ready_for_apply(db, package):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This application's materials are not grounded in your current profile. "
+                "Regenerate and re-approve before assisted apply can run."
+            ),
         )
     return package, candidate
 
