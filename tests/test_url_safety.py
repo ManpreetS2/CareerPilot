@@ -114,6 +114,103 @@ def test_accepts_a_normal_public_https_url(monkeypatch) -> None:
     assert_safe_outbound_url("https://example.com/jobs/1")  # must not raise
 
 
+def test_accepts_explicit_port_443_with_allowed_hosts(monkeypatch) -> None:
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+    assert_safe_outbound_url(
+        "https://job-boards.greenhouse.io:443/instead/jobs/1",
+        allowed_hosts=frozenset({"job-boards.greenhouse.io"}),
+    )
+
+
+def test_out_of_range_port_raises_unsafe_url_error_not_valueerror(monkeypatch) -> None:
+    """https://...:65536 makes urllib.parse.ParseResult.port raise ValueError.
+    The SSRF guard must convert that into UnsafeURLError so callers never see
+    a raw traceback or HTTP 500."""
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+    with pytest.raises(UnsafeURLError) as exc_info:
+        assert_safe_outbound_url("https://example.com:65536/jobs/1")
+    assert exc_info.type is UnsafeURLError
+    assert "65536" not in str(exc_info.value)
+
+
+def test_rejects_nonstandard_valid_port_8443(monkeypatch) -> None:
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+    with pytest.raises(UnsafeURLError, match="non-default port"):
+        assert_safe_outbound_url("https://example.com:8443/jobs/1")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://[::1:jobs",
+        "https://[::1/jobs",
+        "https://[::ffff:127.0.0.1:443/jobs",
+        "https://[https://example.com/jobs",
+        "https://[::1]:65536/jobs",
+        "https://[::1]:abc/jobs",
+    ],
+)
+def test_malformed_bracketed_ipv6_or_netloc_raises_unsafe_url_error(url: str) -> None:
+    with pytest.raises(UnsafeURLError):
+        assert_safe_outbound_url(url)
+
+
+def test_fetch_rejects_out_of_range_port_before_any_request(monkeypatch) -> None:
+    called = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        called["n"] += 1
+        return httpx.Response(200, text="should never run")
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: _client_with_transport(handler))
+    with pytest.raises(UnsafeURLError):
+        fetch_url_safely(
+            "https://job-boards.greenhouse.io:65536/instead/jobs/1",
+            user_agent="test",
+            timeout_seconds=5,
+            allowed_hosts=frozenset({"job-boards.greenhouse.io"}),
+        )
+    assert called["n"] == 0
+
+
+def test_allowed_hosts_rejects_suffix_trick_without_dns(monkeypatch) -> None:
+    with pytest.raises(UnsafeURLError, match="not supported"):
+        assert_safe_outbound_url(
+            "https://job-boards.greenhouse.io.evil.example/instead/jobs/1",
+            allowed_hosts=frozenset({"job-boards.greenhouse.io"}),
+        )
+
+
+def test_fetch_with_allowed_hosts_rejects_redirect_to_different_host(monkeypatch) -> None:
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"location": "https://evil.example.com/next"})
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: _client_with_transport(handler))
+    with pytest.raises(UnsafeURLError):
+        fetch_url_safely(
+            "https://jobs.lever.co/acme/abc-123",
+            user_agent="test",
+            timeout_seconds=5,
+            allowed_hosts=frozenset({"jobs.lever.co"}),
+        )
+
+
+def test_fetch_client_disables_trust_env(monkeypatch) -> None:
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+    captured: dict = {}
+
+    class RecordingClient(_RealClient):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            super().__init__(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="ok")))
+
+    monkeypatch.setattr(httpx, "Client", RecordingClient)
+    fetch_url_safely("https://example.com/ok", user_agent="test", timeout_seconds=5)
+    assert captured.get("trust_env") is False
+
+
 def test_rejects_a_hostname_where_any_resolved_address_is_private(monkeypatch) -> None:
     """A hostname can round-robin between multiple addresses — one public,
     one private. Every returned address must be checked, not just the

@@ -71,6 +71,10 @@ SCAM_PATTERN_PHRASES = (
 
 MIN_DESCRIPTION_LENGTH = 40
 
+_GENERIC_REACH_FAILURE = (
+    "Could not reach the posting URL to verify whether it is still live."
+)
+
 
 def _client() -> httpx.Client:
     return httpx.Client(
@@ -131,8 +135,8 @@ def check_still_open(url: str) -> tuple[bool | None, str]:
         )
     except UnsafeURLError as exc:
         return None, f"Posting URL is not safe to verify: {exc}"
-    except httpx.HTTPError as exc:
-        return None, f"Could not reach posting URL: {exc}"
+    except httpx.HTTPError:
+        return None, _GENERIC_REACH_FAILURE
 
     if response.status_code in (404, 410):
         return False, f"Posting URL returned HTTP {response.status_code} (not found/gone)."

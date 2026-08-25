@@ -241,10 +241,10 @@ def test_ingest_job_url_rejects_a_redirect_into_a_private_address(monkeypatch) -
 
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
     with pytest.raises(UnsafeURLError):
-        ingest_job_url("https://example.com/jobs/1")
+        ingest_job_url("https://jobs.lever.co/acme/abc-123")
 
 
-def test_ingest_job_url_succeeds_for_a_safe_https_url(monkeypatch) -> None:
+def test_ingest_job_url_succeeds_for_a_safe_lever_https_url(monkeypatch) -> None:
     monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -255,7 +255,7 @@ def test_ingest_job_url_succeeds_for_a_safe_https_url(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
-    result = ingest_job_url("https://example.com/jobs/1")
+    result = ingest_job_url("https://jobs.lever.co/acme/abc-123")
     assert result["title"] == "Backend Intern"
     assert result["description"] == "Great role."
 
@@ -271,4 +271,4 @@ def test_ingest_job_url_wraps_a_real_http_error_as_job_scout_error(monkeypatch) 
 
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
     with pytest.raises(JobScoutError):
-        ingest_job_url("https://example.com/gone")
+        ingest_job_url("https://jobs.lever.co/acme/missing")

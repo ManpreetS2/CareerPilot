@@ -5,9 +5,11 @@ deduplication, and SQLite persistence. Owned by Developer B (Day 2).
 from __future__ import annotations
 
 import html
+import json
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from urllib.parse import urlparse, urlunparse
 
@@ -18,7 +20,7 @@ from backend.db.database import SessionLocal
 from backend.db.models import JobRecord
 from backend.schemas.schemas import Job
 from backend.services.job_service import record_to_job
-from backend.services.url_safety import fetch_url_safely
+from backend.services.url_safety import UnsafeURLError, assert_safe_outbound_url, fetch_url_safely
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,199 @@ _ANY_TAG_RE = re.compile(r"<[^>]+>")
 MANUAL_INGEST_PLACEHOLDER_DESCRIPTION = (
     "Manually added via job URL. Description not auto-extracted — verify and edit."
 )
+
+GREENHOUSE_API_BASE = "https://boards-api.greenhouse.io/v1"
+GREENHOUSE_POSTING_HOSTS = frozenset({"boards.greenhouse.io", "job-boards.greenhouse.io"})
+GREENHOUSE_API_HOSTS = frozenset({"boards-api.greenhouse.io"})
+LEVER_POSTING_HOSTS = frozenset({"jobs.lever.co"})
+_MIN_INGEST_DESCRIPTION_LENGTH = 40
+_GREENHOUSE_JOB_PATH_RE = re.compile(r"^/([^/]+)/jobs/(\d+)/?$")
+_BOARD_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+@dataclass(frozen=True)
+class GreenhousePostingRef:
+    board_token: str
+    job_id: str
+
+
+def parse_greenhouse_posting_url(url: str) -> GreenhousePostingRef | None:
+    """Parse a supported Greenhouse posting URL into board token and job ID."""
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError:
+        return None
+    if parsed.query or parsed.fragment:
+        return None
+    host = (parsed.hostname or "").lower()
+    if host not in GREENHOUSE_POSTING_HOSTS:
+        return None
+    match = _GREENHOUSE_JOB_PATH_RE.match(parsed.path or "")
+    if not match:
+        return None
+    board_token, job_id = match.group(1), match.group(2)
+    if not job_id.isdigit() or not _BOARD_TOKEN_RE.fullmatch(board_token):
+        return None
+    return GreenhousePostingRef(board_token=board_token, job_id=job_id)
+
+
+def _board_token_company_name(board_token: str) -> str:
+    return board_token.replace("-", " ").title()
+
+
+def validate_manual_ingest_url(url: str) -> str:
+    """Validate a manual-ingest URL against the supported-host and SSRF policy."""
+    normalized = url.strip()
+    if parse_greenhouse_posting_url(normalized) is not None:
+        assert_safe_outbound_url(normalized, allowed_hosts=GREENHOUSE_POSTING_HOSTS)
+        return normalized
+    host = (urlparse(normalized).hostname or "").lower()
+    if host in LEVER_POSTING_HOSTS:
+        assert_safe_outbound_url(normalized, allowed_hosts=LEVER_POSTING_HOSTS)
+        return normalized
+    raise UnsafeURLError("Job URL host is not supported for manual ingest.")
+
+
+def _greenhouse_posting_dedupe_key(url: str | None) -> str | None:
+    if not url:
+        return None
+    ref = parse_greenhouse_posting_url(url)
+    if ref is None:
+        return None
+    return f"greenhouse|{ref.board_token}|{ref.job_id}"
+
+
+def _merge_description(existing: str | None, new: str | None) -> str:
+    existing_text = (existing or "").strip()
+    new_text = (new or "").strip()
+    if not new_text:
+        return existing_text
+    if new_text == MANUAL_INGEST_PLACEHOLDER_DESCRIPTION:
+        if existing_text and existing_text != MANUAL_INGEST_PLACEHOLDER_DESCRIPTION:
+            return existing_text
+        return new_text
+    if (
+        existing_text
+        and existing_text != MANUAL_INGEST_PLACEHOLDER_DESCRIPTION
+        and len(existing_text) >= _MIN_INGEST_DESCRIPTION_LENGTH
+        and len(new_text) < _MIN_INGEST_DESCRIPTION_LENGTH
+    ):
+        return existing_text
+    return new_text
+
+
+def _resolve_greenhouse_public_url(
+    absolute_url: str | None,
+    validated_input_url: str,
+    ref: GreenhousePostingRef,
+) -> str:
+    """Accept API absolute_url only when it is safe and matches the same posting."""
+    if not absolute_url or not str(absolute_url).strip():
+        return validated_input_url
+    candidate = str(absolute_url).strip()
+    parsed_ref = parse_greenhouse_posting_url(candidate)
+    if parsed_ref is None:
+        return validated_input_url
+    if parsed_ref.board_token != ref.board_token or parsed_ref.job_id != ref.job_id:
+        return validated_input_url
+    try:
+        assert_safe_outbound_url(candidate, allowed_hosts=GREENHOUSE_POSTING_HOSTS)
+    except UnsafeURLError:
+        return validated_input_url
+    return candidate
+
+
+def _fetch_greenhouse_api(board_token: str, job_id: str) -> dict:
+    api_url = f"{GREENHOUSE_API_BASE}/boards/{board_token}/jobs/{job_id}"
+    try:
+        response = fetch_url_safely(
+            api_url,
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=GREENHOUSE_API_HOSTS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except UnsafeURLError:
+        raise
+    except httpx.HTTPStatusError:
+        raise JobScoutError("Could not load job posting from Greenhouse.") from None
+    except httpx.TimeoutException:
+        raise JobScoutError("Greenhouse job request timed out.") from None
+    except httpx.HTTPError:
+        raise JobScoutError("Could not load job posting from Greenhouse.") from None
+    except json.JSONDecodeError:
+        raise JobScoutError("Greenhouse returned an unreadable job posting.") from None
+    if not isinstance(payload, dict):
+        raise JobScoutError("Greenhouse returned an unreadable job posting.")
+    return payload
+
+
+def _ingest_greenhouse_url(validated_url: str, ref: GreenhousePostingRef) -> dict:
+    payload = _fetch_greenhouse_api(ref.board_token, ref.job_id)
+    if str(payload.get("id")) != ref.job_id:
+        raise JobScoutError("Greenhouse job posting did not match the requested job.")
+
+    title = _clean_line(payload.get("title"))
+    description = _clean_description(payload.get("content"))
+    if len(description) < _MIN_INGEST_DESCRIPTION_LENGTH:
+        raise JobScoutError("Greenhouse posting did not include enough description text.")
+
+    location = _clean_line((payload.get("location") or {}).get("name")) or None
+    public_url = _resolve_greenhouse_public_url(payload.get("absolute_url"), validated_url, ref)
+
+    company_name = _clean_line(payload.get("company_name"))
+    company = company_name or _board_token_company_name(ref.board_token)
+
+    return {
+        "title": title[:255] or "Untitled role",
+        "company": company,
+        "url": public_url,
+        "description": description,
+        "location": location,
+        "date_posted": _parse_iso_date(payload.get("first_published")),
+        "ats": "greenhouse",
+    }
+
+
+def _ingest_lever_url(url: str) -> dict:
+    try:
+        response = fetch_url_safely(
+            url,
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=LEVER_POSTING_HOSTS,
+        )
+        response.raise_for_status()
+    except UnsafeURLError:
+        raise
+    except httpx.HTTPStatusError:
+        raise JobScoutError("Could not fetch job URL.") from None
+    except httpx.TimeoutException:
+        raise JobScoutError("Job URL request timed out.") from None
+    except httpx.HTTPError:
+        raise JobScoutError("Could not fetch job URL.") from None
+
+    body = response.text
+    title_match = _TITLE_RE.search(body)
+    description_match = _DESCRIPTION_RE.search(body)
+
+    title = html.unescape(title_match.group(1)).strip() if title_match else url
+    title = _WHITESPACE_RE.sub(" ", title)
+    description = (
+        _WHITESPACE_RE.sub(" ", html.unescape(description_match.group(1)).strip())
+        if description_match
+        else MANUAL_INGEST_PLACEHOLDER_DESCRIPTION
+    )
+
+    final_url = str(response.request.url)
+    return {
+        "title": title[:255] or url,
+        "company": _guess_company(final_url),
+        "url": final_url,
+        "description": description,
+        "ats": "lever",
+    }
 
 
 def _fix_mojibake(text: str) -> str:
@@ -169,47 +364,24 @@ def _guess_company(url: str) -> str:
 
 
 def ingest_job_url(url: str) -> dict:
-    """Fetch a single job posting URL and return a best-effort raw record.
+    """Fetch a single supported job posting URL and return a source-backed record.
 
-    The free feed has no scraper for arbitrary ATS pages, so this pulls only
-    what's cheaply and reliably available (page <title>, meta description) —
-    users can edit the rest once verification lands (Day 3).
-
-    Unlike scout_adzuna/scout_remoteok, `url` here comes from the user, not a
-    hardcoded trusted API endpoint — fetch_url_safely (not the plain _client()
-    the other two use) rejects non-https, credentialed, localhost, and
-    private/loopback/link-local targets before the server ever requests them,
-    and validates each redirect hop the same way. See url_safety.py.
+    Greenhouse postings are loaded from the public boards API. Lever postings
+    use a bounded HTML fetch. User-supplied URLs are validated through the
+    shared url_safety guard before any server-side request is made.
     """
-    try:
-        response = fetch_url_safely(
-            url, user_agent=settings.http_user_agent, timeout_seconds=settings.http_timeout_seconds
-        )
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise JobScoutError(f"Could not fetch job URL: {exc}") from exc
+    normalized = url.strip()
+    greenhouse_ref = parse_greenhouse_posting_url(normalized)
+    if greenhouse_ref is not None:
+        validated = validate_manual_ingest_url(normalized)
+        return _ingest_greenhouse_url(validated, greenhouse_ref)
 
-    body = response.text
-    title_match = _TITLE_RE.search(body)
-    description_match = _DESCRIPTION_RE.search(body)
+    host = (urlparse(normalized).hostname or "").lower()
+    if host in LEVER_POSTING_HOSTS:
+        validated = validate_manual_ingest_url(normalized)
+        return _ingest_lever_url(validated)
 
-    title = html.unescape(title_match.group(1)).strip() if title_match else url
-    title = _WHITESPACE_RE.sub(" ", title)
-    description = (
-        _WHITESPACE_RE.sub(" ", html.unescape(description_match.group(1)).strip())
-        if description_match
-        else MANUAL_INGEST_PLACEHOLDER_DESCRIPTION
-    )
-
-    final_url = str(response.url)
-    company = _guess_company(final_url)
-
-    return {
-        "title": title[:255] or url,
-        "company": company,
-        "url": final_url,
-        "description": description,
-    }
+    raise UnsafeURLError("Job URL host is not supported for manual ingest.")
 
 
 def _parse_iso_date(value: str | None) -> date | None:
@@ -266,6 +438,13 @@ def normalize_job(raw: dict, source: str) -> Job:
         )
 
     if source == "manual":
+        date_posted = raw.get("date_posted")
+        if isinstance(date_posted, date):
+            posted = date_posted
+        elif isinstance(date_posted, str):
+            posted = _parse_iso_date(date_posted)
+        else:
+            posted = None
         return Job(
             title=_clean_line(raw.get("title")) or "Untitled role",
             company=_clean_line(raw.get("company")) or "Unknown",
@@ -274,9 +453,10 @@ def normalize_job(raw: dict, source: str) -> Job:
             url=raw.get("url") or "",
             description=raw.get("description") or "",
             source="manual",
-            date_posted=None,
+            date_posted=posted,
             date_scraped=now,
             status="discovered",
+            ats=raw.get("ats"),
         )
 
     raise ValueError(f"Unknown job source '{source}'")
@@ -297,6 +477,9 @@ def _fingerprint(title: str, company: str, location: str | None) -> str:
 
 
 def _dedupe_key(job: Job) -> str:
+    greenhouse_key = _greenhouse_posting_dedupe_key(job.url)
+    if greenhouse_key:
+        return greenhouse_key
     normalized_url = _normalize_url(job.url)
     if normalized_url:
         return normalized_url
@@ -325,6 +508,12 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
         # this guard, every blank-URL record would collide on the same ""
         # key and silently overwrite each other.
         by_url = {_normalize_url(record.url): record for record in existing_records if record.url}
+        by_greenhouse = {
+            key: record
+            for record in existing_records
+            for key in [_greenhouse_posting_dedupe_key(record.url)]
+            if key
+        }
         by_fingerprint = {
             _fingerprint(record.title, record.company, record.location): record
             for record in existing_records
@@ -333,19 +522,30 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
         for job in jobs:
             key = _dedupe_key(job)
             normalized_url = _normalize_url(job.url)
-            existing = (by_url.get(normalized_url) if normalized_url else None) or by_fingerprint.get(key)
+            greenhouse_key = _greenhouse_posting_dedupe_key(job.url)
+            existing = (
+                (by_greenhouse.get(greenhouse_key) if greenhouse_key else None)
+                or (by_url.get(normalized_url) if normalized_url else None)
+                or by_fingerprint.get(key)
+            )
 
             if existing:
                 existing.title = job.title
                 existing.company = job.company
                 existing.location = job.location or existing.location
                 existing.salary = job.salary or existing.salary
-                existing.description = job.description or existing.description
+                existing.description = _merge_description(existing.description, job.description)
+                if job.url:
+                    existing.url = job.url
                 if job.date_posted:
                     existing.date_posted = job.date_posted.isoformat()
                 existing.date_scraped = job.date_scraped
                 existing.ats = job.ats or existing.ats
                 record = existing
+                if normalized_url:
+                    by_url[normalized_url] = record
+                if greenhouse_key:
+                    by_greenhouse[greenhouse_key] = record
             else:
                 record = JobRecord(
                     public_id=f"{job.source}-{uuid.uuid4().hex[:10]}",
@@ -364,6 +564,8 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                 db.add(record)
                 if normalized_url:
                     by_url[normalized_url] = record
+                if greenhouse_key:
+                    by_greenhouse[greenhouse_key] = record
                 by_fingerprint[key] = record
 
             db.flush()

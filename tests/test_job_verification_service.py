@@ -202,3 +202,113 @@ def test_check_still_open_succeeds_for_a_safe_url(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
     is_open, reason = check_still_open("https://example.com/jobs/1")
     assert is_open is True
+
+
+_LEAKY_URL = "https://user:hunter2@10.10.10.5/jobs?token=supersecret123"
+_LEAKY_FRAGMENTS = (
+    "hunter2",
+    "supersecret123",
+    "10.10.10.5",
+    "user:hunter2",
+    "token=supersecret123",
+    _LEAKY_URL,
+)
+
+
+def test_check_still_open_sanitizes_httpx_timeout_note_and_logs(monkeypatch, caplog) -> None:
+    """A timeout whose exception text contains a URL, credentials, query
+    token, hostname, and internal IP must become a generic verification note.
+    None of those values may appear in the note or in captured logs."""
+    import logging
+
+    from backend.services import job_verification_service as mod
+
+    leaky = httpx.TimeoutException(
+        f"timed out while requesting {_LEAKY_URL}",
+        request=httpx.Request("GET", _LEAKY_URL),
+    )
+
+    def boom(*_a, **_k):
+        raise leaky
+
+    monkeypatch.setattr(mod, "fetch_url_safely", boom)
+    with caplog.at_level(logging.DEBUG):
+        is_open, reason = check_still_open("https://example.com/jobs/1")
+    assert is_open is None
+    haystack = f"{reason}\n{caplog.text}"
+    for fragment in _LEAKY_FRAGMENTS:
+        assert fragment not in haystack
+    assert "could not reach" in reason.lower() or "could not confirm" in reason.lower()
+
+
+def test_check_still_open_sanitizes_connection_error_note(monkeypatch, caplog) -> None:
+    import logging
+
+    from backend.services import job_verification_service as mod
+
+    leaky = httpx.ConnectError(
+        f"Failed to establish connection to {_LEAKY_URL} (response: 500 internal)",
+        request=httpx.Request("GET", _LEAKY_URL),
+    )
+
+    def boom(*_a, **_k):
+        raise leaky
+
+    monkeypatch.setattr(mod, "fetch_url_safely", boom)
+    with caplog.at_level(logging.DEBUG):
+        is_open, reason = check_still_open("https://example.com/jobs/1")
+    assert is_open is None
+    haystack = f"{reason}\n{caplog.text}"
+    for fragment in _LEAKY_FRAGMENTS:
+        assert fragment not in haystack
+    assert "500 internal" not in haystack.lower()
+
+
+def test_verify_and_store_does_not_persist_raw_httpx_exception(monkeypatch) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from backend.db.database import Base
+    from backend.db.models import JobRecord
+    from backend.services import job_verification_service as mod
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    monkeypatch.setattr(mod, "SessionLocal", session_factory)
+
+    leaky = httpx.TimeoutException(
+        f"timed out while requesting {_LEAKY_URL}",
+        request=httpx.Request("GET", _LEAKY_URL),
+    )
+    monkeypatch.setattr(
+        mod,
+        "fetch_url_safely",
+        lambda *_a, **_k: (_ for _ in ()).throw(leaky),
+    )
+
+    with session_factory() as db:
+        db.add(
+            JobRecord(
+                public_id="verify-sanitize-1",
+                title="Software Engineer Intern",
+                company="Aether Analytics",
+                url="https://example.com/jobs/1",
+                description="Build Python services that power analytics dashboards for our customers.",
+                source="manual",
+                status="discovered",
+            )
+        )
+        db.commit()
+
+    job = mod.verify_and_store("verify-sanitize-1")
+    haystack = job.verification_notes or ""
+    for fragment in _LEAKY_FRAGMENTS:
+        assert fragment not in haystack
+
+    with session_factory() as db:
+        stored = db.query(JobRecord).filter(JobRecord.public_id == "verify-sanitize-1").one()
+        persisted = stored.verification_notes or ""
+    for fragment in _LEAKY_FRAGMENTS:
+        assert fragment not in persisted
+    assert "could not reach" in persisted.lower() or "could not confirm" in persisted.lower()

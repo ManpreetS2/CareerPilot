@@ -20,10 +20,25 @@ import httpx
 
 MAX_REDIRECTS = 5
 MAX_RESPONSE_BYTES = 5_000_000  # generous for an HTML job posting page
+_DEFAULT_HTTPS_PORT = 443
 
 
 class UnsafeURLError(ValueError):
     """A URL failed the outbound-fetch safety check. Message is safe to show a user."""
+
+
+def _parse_outbound_url(url: str):
+    try:
+        return urlparse(url.strip())
+    except ValueError as exc:
+        raise UnsafeURLError("URL is malformed.") from exc
+
+
+def _outbound_port(parsed) -> int | None:
+    try:
+        return parsed.port
+    except ValueError as exc:
+        raise UnsafeURLError("URL must not specify a non-default port.") from exc
 
 
 def _is_unsafe_ip(ip_str: str) -> bool:
@@ -41,12 +56,20 @@ def _is_unsafe_ip(ip_str: str) -> bool:
     )
 
 
-def assert_safe_outbound_url(url: str) -> None:
-    """Raise UnsafeURLError if `url` must not be fetched server-side."""
+def assert_safe_outbound_url(
+    url: str,
+    *,
+    allowed_hosts: frozenset[str] | None = None,
+) -> None:
+    """Raise UnsafeURLError if `url` must not be fetched server-side.
+
+    When `allowed_hosts` is set, the hostname must match one entry exactly
+    (case-insensitive). No suffix or substring matching.
+    """
     if not url or not url.strip():
         raise UnsafeURLError("URL is empty.")
 
-    parsed = urlparse(url.strip())
+    parsed = _parse_outbound_url(url)
 
     if parsed.scheme != "https":
         raise UnsafeURLError("Only https:// URLs are allowed.")
@@ -62,10 +85,25 @@ def assert_safe_outbound_url(url: str) -> None:
 
     if not host:
         raise UnsafeURLError("URL has no host.")
+    port = _outbound_port(parsed)
+    if port is not None and port != _DEFAULT_HTTPS_PORT:
+        raise UnsafeURLError("URL must not specify a non-default port.")
     if "*" in host:
         raise UnsafeURLError("URL host must not contain a wildcard.")
     if host.lower() == "localhost" or host.lower().endswith(".localhost"):
         raise UnsafeURLError("URL must not target localhost.")
+
+    host_lower = host.lower()
+    if allowed_hosts is not None:
+        if host_lower not in allowed_hosts:
+            raise UnsafeURLError("URL host is not supported for this request.")
+        try:
+            ipaddress.ip_address(host_lower)
+        except ValueError:
+            return
+        if _is_unsafe_ip(host_lower):
+            raise UnsafeURLError("URL resolves to a private, loopback, or reserved address.")
+        return
 
     # Resolve and check every returned address, not just the first — a
     # hostname can round-robin between a public and a private address.
@@ -89,6 +127,7 @@ def fetch_url_safely(
     timeout_seconds: float,
     max_redirects: int = MAX_REDIRECTS,
     max_bytes: int = MAX_RESPONSE_BYTES,
+    allowed_hosts: frozenset[str] | None = None,
 ) -> httpx.Response:
     """GET a URL server-side, safely: validates the URL and every redirect
     hop before following it, and caps how much of the body is read.
@@ -98,20 +137,21 @@ def fetch_url_safely(
     as the original URL — httpx's built-in follow_redirects=True would
     happily chase a redirect straight into a private address.
     """
-    assert_safe_outbound_url(url)
+    assert_safe_outbound_url(url, allowed_hosts=allowed_hosts)
     current = url
 
     with httpx.Client(
         headers={"User-Agent": user_agent},
         timeout=timeout_seconds,
         follow_redirects=False,
+        trust_env=False,
     ) as client:
         for _ in range(max_redirects + 1):
             with client.stream("GET", current) as response:
                 location = response.headers.get("location") if response.is_redirect else None
                 if location:
                     next_url = urljoin(current, location)
-                    assert_safe_outbound_url(next_url)
+                    assert_safe_outbound_url(next_url, allowed_hosts=allowed_hosts)
                     current = next_url
                     continue
 
