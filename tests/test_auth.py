@@ -322,6 +322,7 @@ def test_session_header_is_ignored_once_invalidated_by_logout(isolated_client) -
         ("POST", "/api/jobs/does-not-exist/fill-application"),
         ("GET", "/api/extension/autofill?url=https://example.com/jobs/1"),
         ("POST", "/api/jobs/does-not-exist/prepare-interview"),
+        ("POST", "/api/jobs/does-not-exist/interview-prep/feedback"),
     ],
 )
 def test_protected_routes_401_without_a_session(isolated_client, method, path) -> None:
