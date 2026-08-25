@@ -18,6 +18,7 @@ from backend.db.database import SessionLocal
 from backend.db.models import JobRecord
 from backend.schemas.schemas import Job
 from backend.services.job_service import record_to_job
+from backend.services.url_safety import fetch_url_safely
 
 logger = logging.getLogger(__name__)
 
@@ -173,10 +174,17 @@ def ingest_job_url(url: str) -> dict:
     The free feed has no scraper for arbitrary ATS pages, so this pulls only
     what's cheaply and reliably available (page <title>, meta description) —
     users can edit the rest once verification lands (Day 3).
+
+    Unlike scout_adzuna/scout_remoteok, `url` here comes from the user, not a
+    hardcoded trusted API endpoint — fetch_url_safely (not the plain _client()
+    the other two use) rejects non-https, credentialed, localhost, and
+    private/loopback/link-local targets before the server ever requests them,
+    and validates each redirect hop the same way. See url_safety.py.
     """
     try:
-        with _client() as client:
-            response = client.get(url)
+        response = fetch_url_safely(
+            url, user_agent=settings.http_user_agent, timeout_seconds=settings.http_timeout_seconds
+        )
         response.raise_for_status()
     except httpx.HTTPError as exc:
         raise JobScoutError(f"Could not fetch job URL: {exc}") from exc

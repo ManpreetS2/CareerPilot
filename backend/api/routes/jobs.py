@@ -19,6 +19,7 @@ from backend.services.analysis_service import list_stored_match_scores
 from backend.services.job_scout_service import JobScoutError, ingest_job_url, normalize_job, persist_jobs
 from backend.services.job_service import get_job, list_jobs, scout_jobs
 from backend.services.job_verification_service import verify_all, verify_and_store
+from backend.services.url_safety import UnsafeURLError
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -62,6 +63,8 @@ def ingest_job_url_route(payload: IngestJobUrlRequest, user: User = Depends(get_
 
     try:
         raw = ingest_job_url(url)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except JobScoutError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
