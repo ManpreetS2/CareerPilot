@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -188,11 +189,30 @@ class EmptyGroundedIntelligenceError(JobIntelligenceError):
         super().__init__("No supported job requirements were found.")
 
 
+_PROVIDER_ERROR_PRIORITY: dict[type[BaseException], int] = {
+    PostingEvidenceError: 50,
+    EmptyGroundedIntelligenceError: 50,
+    StructuredIntelligenceError: 40,
+    LLMProviderError: 40,
+    LLMEmptyResponseError: 40,
+    LLMConfigurationError: 10,
+}
+
+
+def _should_replace_provider_error(current: Exception | None, new: Exception) -> bool:
+    if current is None:
+        return True
+    current_rank = _PROVIDER_ERROR_PRIORITY.get(type(current), 0)
+    new_rank = _PROVIDER_ERROR_PRIORITY.get(type(new), 0)
+    return new_rank > current_rank
+
+
 def build_extraction_prompts(job: JobRecord) -> tuple[str, str]:
     """Build a strict prompt containing only the stored posting title and description."""
     user_prompt = f"""Extract structured requirements from this job posting.
 
 Rules:
+- Copy skill labels exactly as they appear in the posting, without trailing punctuation.
 - Copy only requirements explicitly supported by the posting.
 - Keep required, preferred, and technology-stack skills in their local posting categories.
 - Copy complete technology and responsibility phrases; do not use substrings.
@@ -226,7 +246,9 @@ def _retry_prompt(original: str) -> str:
 
 
 def _posting_source(job: JobRecord) -> str:
-    return f"{job.title.strip()}\n{job.description.strip()}"
+    title = html.unescape((job.title or "").strip())
+    description = html.unescape((job.description or "").strip())
+    return f"{title}\n{description}"
 
 
 def _require_posting_evidence(job: JobRecord) -> None:
@@ -266,6 +288,12 @@ def _parse_structured_output(raw: str) -> JobIntelligence:
     return intelligence
 
 
+def _normalize_extracted_label(value: str) -> str:
+    """Strip whitespace and trailing punctuation models often add in JSON arrays."""
+    cleaned = re.sub(r"\s+", " ", value.strip())
+    return cleaned.rstrip(".,;:!")
+
+
 def _exact_phrase_supported(value: str, source: str) -> bool:
     claim = re.sub(r"\s+", " ", value.strip())
     if not claim:
@@ -295,7 +323,7 @@ def _ground_skills(
         intelligence.tech_stack,
     ):
         for raw in labels:
-            label = raw.strip()
+            label = _normalize_extracted_label(raw)
             position += 1
             if not label:
                 removed += 1
@@ -1022,7 +1050,8 @@ def extract_job_intelligence(
                 LLMEmptyResponseError,
                 LLMConfigurationError,
             ) as exc:
-                last_error = exc
+                if _should_replace_provider_error(last_error, exc):
+                    last_error = exc
                 logger.warning(
                     "job intelligence provider sequence failed category=%s job_pk=%s",
                     type(exc).__name__,

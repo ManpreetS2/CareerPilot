@@ -1118,3 +1118,178 @@ def test_scoring_uses_stored_intelligence_without_provider_or_mutation(
         list(before.preferred_skills),
         list(before.tech_stack),
     )
+
+
+def test_grounding_retains_skills_when_model_adds_trailing_punctuation(isolated_session) -> None:
+    job = _job(
+        isolated_session,
+        description=(
+            "Requirements:\n"
+            "Python\n"
+            "Node.js\n"
+            "Docker\n"
+            "C++\n"
+            "C#\n"
+            ".NET"
+        ),
+    )
+    raw = _payload(
+        required_skills=["Python.", "Node.js,", "Docker;", "C++.", "C#,", ".NET."],
+        preferred_skills=[],
+        tech_stack=[],
+        years_experience=None,
+        education_requirements=[],
+        seniority=None,
+        responsibilities=[],
+        likely_interview_focus=[],
+    )
+
+    grounded, counts = ground_job_intelligence(raw, job)
+
+    assert grounded.required_skills == ["Python", "Node.js", "Docker", "C++", "C#", ".NET"]
+    assert counts["skills"] == 0
+
+
+@pytest.mark.parametrize(
+    ("description", "claims", "kept"),
+    [
+        (
+            "Requirements:\nC++\nC#\n.NET\nNode.js\nReact.js\nCI/CD\nREST APIs",
+            ["C++.", "C#,", ".NET;", "Node.js.", "React.js,", "CI/CD;", "REST APIs."],
+            ["C++", "C#", ".NET", "Node.js", "React.js", "CI/CD", "REST APIs"],
+        ),
+    ],
+)
+def test_grounding_retains_punctuation_technical_skills_from_source(
+    isolated_session,
+    description: str,
+    claims: list[str],
+    kept: list[str],
+) -> None:
+    job = _job(isolated_session, description=description)
+    raw = _payload(
+        required_skills=claims,
+        preferred_skills=[],
+        tech_stack=[],
+        years_experience=None,
+        education_requirements=[],
+        seniority=None,
+        responsibilities=[],
+        likely_interview_focus=[],
+    )
+
+    grounded, _counts = ground_job_intelligence(raw, job)
+
+    assert grounded.required_skills == kept
+
+
+def test_grounding_retains_responsibilities_from_bullet_and_html_source(isolated_session) -> None:
+    job = _job(
+        isolated_session,
+        description=(
+            "<h3>About the role</h3>"
+            "<p>Build APIs &amp; services.</p>"
+            "Requirements:\nPython\n"
+            "Responsibilities:\n"
+            "- Improve API latency by 20%.\n"
+            "- Write unit tests."
+        ),
+    )
+    raw = _payload(
+        required_skills=["Python"],
+        preferred_skills=[],
+        tech_stack=[],
+        years_experience=None,
+        education_requirements=[],
+        seniority=None,
+        responsibilities=[
+            "Improve API latency by 20%.",
+            "Write unit tests.",
+            "Invent warp drive.",
+        ],
+        likely_interview_focus=[],
+    )
+
+    grounded, _counts = ground_job_intelligence(raw, job)
+
+    assert grounded.required_skills == ["Python"]
+    assert grounded.responsibilities == [
+        "Improve API latency by 20%.",
+        "Write unit tests.",
+    ]
+
+
+def test_grounding_rejects_paraphrased_responsibilities(isolated_session) -> None:
+    job = _job(
+        isolated_session,
+        description="Responsibilities:\nImprove API latency by 20%.",
+    )
+    raw = _payload(
+        required_skills=[],
+        preferred_skills=[],
+        tech_stack=[],
+        years_experience=None,
+        education_requirements=[],
+        seniority=None,
+        responsibilities=["Reduce API latency by twenty percent."],
+        likely_interview_focus=[],
+    )
+
+    grounded, _counts = ground_job_intelligence(raw, job)
+
+    assert grounded.responsibilities == []
+
+
+def test_grounding_preserves_required_vs_preferred_local_context(isolated_session) -> None:
+    job = _job(
+        isolated_session,
+        description=(
+            "Requirements:\nPython\n"
+            "Preferred:\nKubernetes\n"
+            "Technology stack:\nDocker"
+        ),
+    )
+    raw = _payload(
+        required_skills=["Python.", "Kubernetes.", "Docker."],
+        preferred_skills=[],
+        tech_stack=[],
+        years_experience=None,
+        education_requirements=[],
+        seniority=None,
+        responsibilities=[],
+        likely_interview_focus=[],
+    )
+
+    grounded, _counts = ground_job_intelligence(raw, job)
+
+    assert grounded.required_skills == ["Python"]
+    assert grounded.preferred_skills == ["Kubernetes"]
+    assert grounded.tech_stack == ["Docker"]
+
+
+def test_grounding_retains_source_backed_education_and_experience(isolated_session) -> None:
+    job = _job(
+        isolated_session,
+        description=(
+            "Requirements:\n"
+            "Python\n"
+            "4 years of professional experience\n"
+            "Bachelor's degree in Computer Science"
+        ),
+    )
+    raw = _payload(
+        required_skills=["Python."],
+        preferred_skills=[],
+        tech_stack=[],
+        years_experience=4,
+        education_requirements=["Bachelor's degree in Computer Science"],
+        seniority=None,
+        responsibilities=[],
+        likely_interview_focus=[],
+    )
+
+    grounded, _counts = ground_job_intelligence(raw, job)
+
+    assert grounded.required_skills == ["Python"]
+    assert grounded.years_experience == 4
+    assert grounded.education_requirements == ["Bachelor's degree in Computer Science"]

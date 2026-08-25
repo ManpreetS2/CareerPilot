@@ -18,12 +18,13 @@ from backend.services.candidate_profile_agent import (
     extract_candidate_profile_with_llm,
 )
 from backend.services.job_intelligence_service import (
+    EmptyGroundedIntelligenceError,
     JobNotFoundError,
     PostingEvidenceError,
     StructuredIntelligenceError,
     extract_job_intelligence,
 )
-from backend.services.llm_client import LLMProviderError
+from backend.services.llm_client import LLMConfigurationError, LLMProviderError
 from tests.mvp_helpers import TEST_USER_ID, VALID_MATERIALS_JSON, seed_materials_prerequisites
 from tests.pdf_fixtures import SAMPLE_RESUME_TEXT, build_simple_text_pdf
 from tests.test_candidate_profile import _grounded_llm_payload
@@ -289,6 +290,40 @@ def test_job_intelligence_empty_grounded_falls_back(isolated_session, monkeypatc
     assert "ollama" in scripted.calls
     assert scripted.calls[-1] == "gemini"
     assert isolated_session.query(JobIntelligenceRecord).count() == 1
+
+
+def test_job_intelligence_empty_grounded_ollama_with_unconfigured_gemini_returns_409(
+    isolated_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    client, SessionLocal = isolated_client
+    with SessionLocal() as session:
+        job = _job(session)
+    empty = _payload(
+        required_skills=["NotARealSkillXYZ"],
+        preferred_skills=["AlsoFakeSkill"],
+        years_experience=99,
+        education_requirements=["Made Up Degree"],
+        tech_stack=["Unobtanium"],
+        seniority="Galactic Overlord",
+        responsibilities=["Invent warp drive"],
+        likely_interview_focus=["Telepathy"],
+    )
+    scripted = ScriptedProviders()
+    scripted.script("ollama", json.dumps(empty))
+
+    def _get_client(provider: str | None = None):
+        if provider == "gemini":
+            raise LLMConfigurationError("GEMINI_API_KEY is not set.")
+        return scripted.get_client(provider)
+
+    monkeypatch.setattr("backend.services.job_intelligence_service.get_llm_client", _get_client)
+    response = client.post(f"/api/jobs/{job.public_id}/intelligence")
+    assert response.status_code == 409
+    assert response.json() == {"detail": "No supported job requirements were found."}
+    with SessionLocal() as session:
+        assert session.query(JobIntelligenceRecord).count() == 0
+    assert scripted.calls == ["ollama"]
 
 
 def test_job_intelligence_all_providers_fail_persists_nothing(
