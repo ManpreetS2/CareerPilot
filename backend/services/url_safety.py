@@ -27,6 +27,20 @@ class UnsafeURLError(ValueError):
     """A URL failed the outbound-fetch safety check. Message is safe to show a user."""
 
 
+def _parse_outbound_url(url: str):
+    try:
+        return urlparse(url.strip())
+    except ValueError as exc:
+        raise UnsafeURLError("URL is malformed.") from exc
+
+
+def _outbound_port(parsed) -> int | None:
+    try:
+        return parsed.port
+    except ValueError as exc:
+        raise UnsafeURLError("URL must not specify a non-default port.") from exc
+
+
 def _is_unsafe_ip(ip_str: str) -> bool:
     try:
         addr = ipaddress.ip_address(ip_str)
@@ -55,7 +69,7 @@ def assert_safe_outbound_url(
     if not url or not url.strip():
         raise UnsafeURLError("URL is empty.")
 
-    parsed = urlparse(url.strip())
+    parsed = _parse_outbound_url(url)
 
     if parsed.scheme != "https":
         raise UnsafeURLError("Only https:// URLs are allowed.")
@@ -71,7 +85,8 @@ def assert_safe_outbound_url(
 
     if not host:
         raise UnsafeURLError("URL has no host.")
-    if parsed.port is not None and parsed.port != _DEFAULT_HTTPS_PORT:
+    port = _outbound_port(parsed)
+    if port is not None and port != _DEFAULT_HTTPS_PORT:
         raise UnsafeURLError("URL must not specify a non-default port.")
     if "*" in host:
         raise UnsafeURLError("URL host must not contain a wildcard.")

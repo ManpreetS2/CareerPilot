@@ -307,6 +307,8 @@ def test_reingest_placeholder_upgrades_same_job(isolated_db, mock_fetch) -> None
     [
         "http://job-boards.greenhouse.io/instead/jobs/7761472003",
         "https://job-boards.greenhouse.io:8080/instead/jobs/7761472003",
+        "https://job-boards.greenhouse.io:8443/instead/jobs/7761472003",
+        "https://job-boards.greenhouse.io:65536/instead/jobs/7761472003",
         "https://user:pass@job-boards.greenhouse.io/instead/jobs/7761472003",
         "https://localhost/instead/jobs/7761472003",
         "https://127.0.0.1/instead/jobs/7761472003",
@@ -357,6 +359,33 @@ def test_ingest_url_route_maps_unsafe_url_to_422(isolated_client) -> None:
         json={"url": "https://127.0.0.1/jobs/1"},
     )
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://job-boards.greenhouse.io:65536/instead/jobs/7761472003",
+        "https://jobs.lever.co:65536/acme/abc-123",
+        "https://[::1:jobs",
+        "https://[::1/jobs",
+        "https://[::ffff:127.0.0.1:443/jobs",
+        "https://[https://example.com/jobs",
+    ],
+)
+def test_ingest_url_route_maps_malformed_or_out_of_range_port_to_422(
+    isolated_client, mock_fetch, url: str
+) -> None:
+    client, _ = isolated_client
+    mock_fetch["handler"] = lambda *_a, **_k: (_ for _ in ()).throw(
+        AssertionError("malformed ingest URL must not fetch")
+    )
+    response = client.post("/api/jobs/ingest-url", json={"url": url})
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert mock_fetch["calls"] == []
+    body = response.text.lower()
+    assert "traceback" not in body
+    assert "65536" not in body
+    assert "internal server error" not in body
 
 
 def test_ingest_url_route_maps_greenhouse_upstream_failure_to_502(

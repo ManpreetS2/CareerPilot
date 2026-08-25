@@ -122,6 +122,57 @@ def test_accepts_explicit_port_443_with_allowed_hosts(monkeypatch) -> None:
     )
 
 
+def test_out_of_range_port_raises_unsafe_url_error_not_valueerror(monkeypatch) -> None:
+    """https://...:65536 makes urllib.parse.ParseResult.port raise ValueError.
+    The SSRF guard must convert that into UnsafeURLError so callers never see
+    a raw traceback or HTTP 500."""
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+    with pytest.raises(UnsafeURLError) as exc_info:
+        assert_safe_outbound_url("https://example.com:65536/jobs/1")
+    assert exc_info.type is UnsafeURLError
+    assert "65536" not in str(exc_info.value)
+
+
+def test_rejects_nonstandard_valid_port_8443(monkeypatch) -> None:
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+    with pytest.raises(UnsafeURLError, match="non-default port"):
+        assert_safe_outbound_url("https://example.com:8443/jobs/1")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://[::1:jobs",
+        "https://[::1/jobs",
+        "https://[::ffff:127.0.0.1:443/jobs",
+        "https://[https://example.com/jobs",
+        "https://[::1]:65536/jobs",
+        "https://[::1]:abc/jobs",
+    ],
+)
+def test_malformed_bracketed_ipv6_or_netloc_raises_unsafe_url_error(url: str) -> None:
+    with pytest.raises(UnsafeURLError):
+        assert_safe_outbound_url(url)
+
+
+def test_fetch_rejects_out_of_range_port_before_any_request(monkeypatch) -> None:
+    called = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        called["n"] += 1
+        return httpx.Response(200, text="should never run")
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: _client_with_transport(handler))
+    with pytest.raises(UnsafeURLError):
+        fetch_url_safely(
+            "https://job-boards.greenhouse.io:65536/instead/jobs/1",
+            user_agent="test",
+            timeout_seconds=5,
+            allowed_hosts=frozenset({"job-boards.greenhouse.io"}),
+        )
+    assert called["n"] == 0
+
+
 def test_allowed_hosts_rejects_suffix_trick_without_dns(monkeypatch) -> None:
     with pytest.raises(UnsafeURLError, match="not supported"):
         assert_safe_outbound_url(

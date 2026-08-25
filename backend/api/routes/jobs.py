@@ -65,6 +65,11 @@ def ingest_job_url_route(payload: IngestJobUrlRequest, user: User = Depends(get_
         raw = ingest_job_url(url)
     except UnsafeURLError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="URL is malformed.",
+        ) from exc
     except JobScoutError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
