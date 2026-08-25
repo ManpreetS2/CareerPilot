@@ -5,7 +5,6 @@ deduplication, and SQLite persistence. Owned by Developer B (Day 2).
 from __future__ import annotations
 
 import html
-import ipaddress
 import json
 import logging
 import re
@@ -21,6 +20,7 @@ from backend.db.database import SessionLocal
 from backend.db.models import JobRecord
 from backend.schemas.schemas import Job
 from backend.services.job_service import record_to_job
+from backend.services.url_safety import UnsafeURLError, assert_safe_outbound_url, fetch_url_safely
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +44,11 @@ MANUAL_INGEST_PLACEHOLDER_DESCRIPTION = (
 
 GREENHOUSE_API_BASE = "https://boards-api.greenhouse.io/v1"
 GREENHOUSE_POSTING_HOSTS = frozenset({"boards.greenhouse.io", "job-boards.greenhouse.io"})
-LEVER_POSTING_HOST = "jobs.lever.co"
+GREENHOUSE_API_HOSTS = frozenset({"boards-api.greenhouse.io"})
+LEVER_POSTING_HOSTS = frozenset({"jobs.lever.co"})
 _MIN_INGEST_DESCRIPTION_LENGTH = 40
 _GREENHOUSE_JOB_PATH_RE = re.compile(r"^/([^/]+)/jobs/(\d+)/?$")
-_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
-_MAX_INGEST_REDIRECTS = 3
+_BOARD_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,8 @@ def parse_greenhouse_posting_url(url: str) -> GreenhousePostingRef | None:
         parsed = urlparse(url.strip())
     except ValueError:
         return None
+    if parsed.query or parsed.fragment:
+        return None
     host = (parsed.hostname or "").lower()
     if host not in GREENHOUSE_POSTING_HOSTS:
         return None
@@ -70,48 +72,26 @@ def parse_greenhouse_posting_url(url: str) -> GreenhousePostingRef | None:
     if not match:
         return None
     board_token, job_id = match.group(1), match.group(2)
-    if not board_token or not job_id.isdigit():
+    if not job_id.isdigit() or not _BOARD_TOKEN_RE.fullmatch(board_token):
         return None
     return GreenhousePostingRef(board_token=board_token, job_id=job_id)
 
 
-def _is_blocked_host(host: str) -> bool:
-    lowered = host.lower()
-    if lowered in {"localhost", "::1"}:
-        return True
-    try:
-        ip = ipaddress.ip_address(lowered)
-    except ValueError:
-        return False
-    return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
-
-
-def _validate_https_url(url: str) -> tuple[str, str, str]:
-    parsed = urlparse(url.strip())
-    if parsed.scheme != "https":
-        raise JobScoutError("Only HTTPS job URLs are supported.")
-    if parsed.username or parsed.password:
-        raise JobScoutError("Job URLs with credentials are not supported.")
-    host = parsed.hostname
-    if not host:
-        raise JobScoutError("Job URL is missing a hostname.")
-    if parsed.port is not None:
-        raise JobScoutError("Job URLs with a non-default port are not supported.")
-    if _is_blocked_host(host):
-        raise JobScoutError("Job URL hostname is not allowed.")
-    return url.strip(), host.lower(), parsed.path or ""
+def _board_token_company_name(board_token: str) -> str:
+    return board_token.replace("-", " ").title()
 
 
 def validate_manual_ingest_url(url: str) -> str:
     """Validate a manual-ingest URL against the supported-host and SSRF policy."""
-    normalized, host, _ = _validate_https_url(url)
-    if host in GREENHOUSE_POSTING_HOSTS:
-        if parse_greenhouse_posting_url(normalized) is None:
-            raise JobScoutError("Greenhouse job URL format is not supported.")
+    normalized = url.strip()
+    if parse_greenhouse_posting_url(normalized) is not None:
+        assert_safe_outbound_url(normalized, allowed_hosts=GREENHOUSE_POSTING_HOSTS)
         return normalized
-    if host == LEVER_POSTING_HOST:
+    host = (urlparse(normalized).hostname or "").lower()
+    if host in LEVER_POSTING_HOSTS:
+        assert_safe_outbound_url(normalized, allowed_hosts=LEVER_POSTING_HOSTS)
         return normalized
-    raise JobScoutError("Job URL host is not supported for manual ingest.")
+    raise UnsafeURLError("Job URL host is not supported for manual ingest.")
 
 
 def _greenhouse_posting_dedupe_key(url: str | None) -> str | None:
@@ -142,44 +122,40 @@ def _merge_description(existing: str | None, new: str | None) -> str:
     return new_text
 
 
-def _safe_ingest_client() -> httpx.Client:
-    return httpx.Client(
-        headers={"User-Agent": settings.http_user_agent},
-        timeout=settings.http_timeout_seconds,
-        follow_redirects=False,
-        verify=True,
-        trust_env=False,
-    )
-
-
-def _safe_get_with_validated_redirects(
-    client: httpx.Client,
-    url: str,
-    allowed_host: str,
-) -> httpx.Response:
-    current = url
-    for _ in range(_MAX_INGEST_REDIRECTS + 1):
-        normalized, host, _ = _validate_https_url(current)
-        if host != allowed_host:
-            raise JobScoutError("Redirect destination is not supported.")
-        response = client.get(current)
-        if response.status_code in _REDIRECT_STATUSES:
-            location = response.headers.get("Location")
-            if not location:
-                raise JobScoutError("Redirect response missing a destination.")
-            current = str(httpx.URL(current).join(location))
-            continue
-        return response
-    raise JobScoutError("Too many redirects while fetching job URL.")
+def _resolve_greenhouse_public_url(
+    absolute_url: str | None,
+    validated_input_url: str,
+    ref: GreenhousePostingRef,
+) -> str:
+    """Accept API absolute_url only when it is safe and matches the same posting."""
+    if not absolute_url or not str(absolute_url).strip():
+        return validated_input_url
+    candidate = str(absolute_url).strip()
+    parsed_ref = parse_greenhouse_posting_url(candidate)
+    if parsed_ref is None:
+        return validated_input_url
+    if parsed_ref.board_token != ref.board_token or parsed_ref.job_id != ref.job_id:
+        return validated_input_url
+    try:
+        assert_safe_outbound_url(candidate, allowed_hosts=GREENHOUSE_POSTING_HOSTS)
+    except UnsafeURLError:
+        return validated_input_url
+    return candidate
 
 
 def _fetch_greenhouse_api(board_token: str, job_id: str) -> dict:
     api_url = f"{GREENHOUSE_API_BASE}/boards/{board_token}/jobs/{job_id}"
     try:
-        with _safe_ingest_client() as client:
-            response = client.get(api_url)
+        response = fetch_url_safely(
+            api_url,
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=GREENHOUSE_API_HOSTS,
+        )
         response.raise_for_status()
         payload = response.json()
+    except UnsafeURLError:
+        raise
     except httpx.HTTPStatusError:
         raise JobScoutError("Could not load job posting from Greenhouse.") from None
     except httpx.TimeoutException:
@@ -193,11 +169,7 @@ def _fetch_greenhouse_api(board_token: str, job_id: str) -> dict:
     return payload
 
 
-def _ingest_greenhouse_url(url: str) -> dict:
-    ref = parse_greenhouse_posting_url(url)
-    if ref is None:
-        raise JobScoutError("Greenhouse job URL format is not supported.")
-
+def _ingest_greenhouse_url(validated_url: str, ref: GreenhousePostingRef) -> dict:
     payload = _fetch_greenhouse_api(ref.board_token, ref.job_id)
     if str(payload.get("id")) != ref.job_id:
         raise JobScoutError("Greenhouse job posting did not match the requested job.")
@@ -208,27 +180,33 @@ def _ingest_greenhouse_url(url: str) -> dict:
         raise JobScoutError("Greenhouse posting did not include enough description text.")
 
     location = _clean_line((payload.get("location") or {}).get("name")) or None
-    absolute_url = (payload.get("absolute_url") or url).strip()
-    _, absolute_host, _ = _validate_https_url(absolute_url)
-    if absolute_host not in GREENHOUSE_POSTING_HOSTS:
-        absolute_url = url
+    public_url = _resolve_greenhouse_public_url(payload.get("absolute_url"), validated_url, ref)
+
+    company_name = _clean_line(payload.get("company_name"))
+    company = company_name or _board_token_company_name(ref.board_token)
 
     return {
         "title": title[:255] or "Untitled role",
-        "company": _guess_company(absolute_url),
-        "url": absolute_url,
+        "company": company,
+        "url": public_url,
         "description": description,
         "location": location,
-        "date_posted": _parse_iso_date(payload.get("updated_at")),
+        "date_posted": _parse_iso_date(payload.get("first_published")),
         "ats": "greenhouse",
     }
 
 
 def _ingest_lever_url(url: str) -> dict:
     try:
-        with _safe_ingest_client() as client:
-            response = _safe_get_with_validated_redirects(client, url, LEVER_POSTING_HOST)
+        response = fetch_url_safely(
+            url,
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=LEVER_POSTING_HOSTS,
+        )
         response.raise_for_status()
+    except UnsafeURLError:
+        raise
     except httpx.HTTPStatusError:
         raise JobScoutError("Could not fetch job URL.") from None
     except httpx.TimeoutException:
@@ -248,7 +226,7 @@ def _ingest_lever_url(url: str) -> dict:
         else MANUAL_INGEST_PLACEHOLDER_DESCRIPTION
     )
 
-    final_url = str(response.url)
+    final_url = str(response.request.url)
     return {
         "title": title[:255] or url,
         "company": _guess_company(final_url),
@@ -389,14 +367,21 @@ def ingest_job_url(url: str) -> dict:
     """Fetch a single supported job posting URL and return a source-backed record.
 
     Greenhouse postings are loaded from the public boards API. Lever postings
-    use a bounded HTML fetch with SSRF-safe host and redirect validation.
+    use a bounded HTML fetch. User-supplied URLs are validated through the
+    shared url_safety guard before any server-side request is made.
     """
-    normalized, host, _ = _validate_https_url(url.strip())
-    if host in GREENHOUSE_POSTING_HOSTS:
-        return _ingest_greenhouse_url(normalized)
-    if host == LEVER_POSTING_HOST:
-        return _ingest_lever_url(normalized)
-    raise JobScoutError("Job URL host is not supported for manual ingest.")
+    normalized = url.strip()
+    greenhouse_ref = parse_greenhouse_posting_url(normalized)
+    if greenhouse_ref is not None:
+        validated = validate_manual_ingest_url(normalized)
+        return _ingest_greenhouse_url(validated, greenhouse_ref)
+
+    host = (urlparse(normalized).hostname or "").lower()
+    if host in LEVER_POSTING_HOSTS:
+        validated = validate_manual_ingest_url(normalized)
+        return _ingest_lever_url(validated)
+
+    raise UnsafeURLError("Job URL host is not supported for manual ingest.")
 
 
 def _parse_iso_date(value: str | None) -> date | None:

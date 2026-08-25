@@ -20,6 +20,7 @@ from backend.db.models import JobRecord
 from backend.schemas.schemas import Job
 from backend.services.job_scout_service import MANUAL_INGEST_PLACEHOLDER_DESCRIPTION
 from backend.services.job_service import record_to_job
+from backend.services.url_safety import UnsafeURLError, fetch_url_safely
 
 logger = logging.getLogger(__name__)
 
@@ -119,9 +120,17 @@ def check_still_open(url: str) -> tuple[bool | None, str]:
     if not url:
         return None, "No URL to verify."
 
+    # fetch_url_safely, not the plain _client() below: this URL was already
+    # stored (via manual ingestion or a scout provider), but re-fetching it
+    # here is server-side just the same — an unsafe target (private/loopback/
+    # link-local, or a redirect into one) must stay "uncertain", never a
+    # crash, so is_open is never inferred from a request that never happened.
     try:
-        with _client() as client:
-            response = client.get(url)
+        response = fetch_url_safely(
+            url, user_agent=settings.http_user_agent, timeout_seconds=settings.http_timeout_seconds
+        )
+    except UnsafeURLError as exc:
+        return None, f"Posting URL is not safe to verify: {exc}"
     except httpx.HTTPError as exc:
         return None, f"Could not reach posting URL: {exc}"
 

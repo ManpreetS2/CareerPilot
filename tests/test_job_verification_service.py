@@ -1,18 +1,27 @@
-"""Job Verification heuristics tests. check_still_open hits a live URL and is
-covered by manual verification instead — everything here is pure logic."""
+"""Job Verification heuristics tests. Most of this file is pure logic with no
+network; check_still_open's outbound-fetch safety (it re-fetches an
+already-stored posting URL server-side, the same SSRF surface as
+ingest_job_url) is tested below with a mocked transport — see also
+test_url_safety.py for the shared validator's own unit tests."""
 
 from __future__ import annotations
 
+import socket
 from datetime import datetime, timedelta, timezone
+
+import httpx
 
 from backend.schemas.schemas import Job
 from backend.services.job_verification_service import (
     DEFAULT_STALE_AFTER_DAYS,
     _decide_verification,
     check_staleness,
+    check_still_open,
     detect_suspicious_signals,
     verify_job,
 )
+
+_RealClient = httpx.Client  # captured before any test monkeypatches httpx.Client itself
 
 
 def _job(**overrides) -> Job:
@@ -141,3 +150,55 @@ def test_verify_job_short_circuits_on_suspicious_without_network(monkeypatch) ->
     monkeypatch.setattr(mod, "check_still_open", boom)
     status, _ = verify_job(_job(company="Unknown"))
     assert status == "flagged"
+
+
+# ---------------------------------------------------------------------------
+# check_still_open — outbound-fetch safety (SSRF regression, same gap and
+# fix as ingest_job_url). Must never raise — an unsafe target stays
+# "uncertain" (None), which _decide_verification then correctly treats as
+# never-confidently-verified, not a crash.
+# ---------------------------------------------------------------------------
+
+
+def _fake_resolve(ip: str):
+    def _getaddrinfo(host, port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+    return _getaddrinfo
+
+
+def test_check_still_open_treats_private_address_as_uncertain_not_a_crash(monkeypatch) -> None:
+    called = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        called["n"] += 1
+        return httpx.Response(200, text="fine")
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
+    is_open, reason = check_still_open("https://127.0.0.1:9000/internal")
+    assert is_open is None
+    assert "not safe" in reason.lower()
+    assert called["n"] == 0
+
+
+def test_check_still_open_treats_redirect_to_private_address_as_uncertain(monkeypatch) -> None:
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"location": "https://169.254.169.254/latest/meta-data/"})
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
+    is_open, reason = check_still_open("https://example.com/jobs/1")
+    assert is_open is None
+    assert "not safe" in reason.lower()
+
+
+def test_check_still_open_succeeds_for_a_safe_url(monkeypatch) -> None:
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="Apply now for this great role.")
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
+    is_open, reason = check_still_open("https://example.com/jobs/1")
+    assert is_open is True
