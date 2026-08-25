@@ -46,7 +46,6 @@ _SYSTEM_PROMPT = (
 )
 
 _JSON_SHAPE = """{
-  "job_id": null,
   "required_skills": ["exact skill phrase"],
   "preferred_skills": ["exact skill phrase"],
   "years_experience": null,
@@ -188,6 +187,13 @@ class EmptyGroundedIntelligenceError(JobIntelligenceError):
         super().__init__("No supported job requirements were found.")
 
 
+def _is_meaningful_failure(exc: Exception) -> bool:
+    """True for a failure that reflects a genuine extraction attempt, as
+    opposed to LLMConfigurationError, which means the provider was never
+    really tried (no key/host configured)."""
+    return not isinstance(exc, LLMConfigurationError)
+
+
 def build_extraction_prompts(job: JobRecord) -> tuple[str, str]:
     """Build a strict prompt containing only the stored posting title and description."""
     user_prompt = f"""Extract structured requirements from this job posting.
@@ -221,7 +227,10 @@ JOB DESCRIPTION:
 def _retry_prompt(original: str) -> str:
     return (
         original
-        + "\n\nIMPORTANT: Previous output was invalid. Return one complete raw JSON object only."
+        + "\n\nIMPORTANT: Previous output was invalid or empty. Return one complete raw "
+        "JSON object with every key present. Use literal phrases copied from the posting "
+        "text above — do not paraphrase. Use [] or null for any category with no "
+        "supported evidence; do not leave a key out."
     )
 
 
@@ -681,6 +690,24 @@ def _normalized_line(value: str) -> str:
     return value.rstrip(" .;:").lower()
 
 
+def _split_into_clauses(text: str) -> list[str]:
+    """Deterministic sentence/clause segmentation — punctuation-based only,
+    no fuzzy or semantic matching. Lets a single sentence embedded inside a
+    dense, unbulleted paragraph line be matched on its own, rather than
+    only against the entire multi-sentence line."""
+    return [
+        clause.strip()
+        for clause in re.split(r"\s*(?:;|\|)\s*|(?<=[.!?])\s+(?=[A-Z])", text)
+        if clause.strip()
+    ]
+
+
+def _add_line_and_clauses(lines: set[str], text: str) -> None:
+    lines.add(_normalized_line(text))
+    for clause in _split_into_clauses(text):
+        lines.add(_normalized_line(clause))
+
+
 def _responsibility_source_lines(source: str) -> set[str]:
     lines: set[str] = set()
     in_responsibilities = False
@@ -696,7 +723,7 @@ def _responsibility_source_lines(source: str) -> set[str]:
             flags=re.I,
         )
         if inline_responsibility:
-            lines.add(_normalized_line(inline_responsibility.group(1)))
+            _add_line_and_clauses(lines, inline_responsibility.group(1))
             in_responsibilities = True
             cue_lines_allowed = True
             continue
@@ -723,7 +750,7 @@ def _responsibility_source_lines(source: str) -> set[str]:
             stripped,
             flags=re.I,
         ):
-            lines.add(_normalized_line(stripped))
+            _add_line_and_clauses(lines, stripped)
     return {line for line in lines if line}
 
 
@@ -935,7 +962,13 @@ def _extract_structured(
             if not any(
                 getattr(structured, field)
                 for field in _STRUCTURED_FIELDS
-            ) and attempt == 0:
+            ):
+                # An entirely empty object is schema-valid (every field is
+                # optional at the JSON-schema level) but useless — reject it
+                # on every attempt, not just the first, so a second empty
+                # response is retried/exhausted here rather than silently
+                # passed through to grounding, where it always fails as
+                # EmptyGroundedIntelligenceError with no useful diagnostic.
                 raise StructuredIntelligenceError()
             return structured
         except LLMProviderError:
@@ -1022,7 +1055,17 @@ def extract_job_intelligence(
                 LLMEmptyResponseError,
                 LLMConfigurationError,
             ) as exc:
-                last_error = exc
+                # LLMConfigurationError means this provider was never really
+                # tried (no key/host set) — it must not overwrite an earlier
+                # provider's genuine attempt-and-fail. Otherwise an
+                # unconfigured provider later in LLM_PROVIDER_ORDER silently
+                # replaces a meaningful failure (e.g. Ollama producing
+                # ungroundable output) with a misleading "not configured"
+                # response that hides what actually happened.
+                if last_error is None or _is_meaningful_failure(exc) or not _is_meaningful_failure(
+                    last_error
+                ):
+                    last_error = exc
                 logger.warning(
                     "job intelligence provider sequence failed category=%s job_pk=%s",
                     type(exc).__name__,

@@ -186,7 +186,14 @@ def test_missing_candidate_returns_409(isolated_client) -> None:
         assert db.query(MatchScoreRecord).count() == 0
 
 
-def test_missing_requirements_return_409_without_persistence(isolated_client) -> None:
+def test_empty_extraction_on_every_attempt_returns_502_without_persistence(
+    isolated_client,
+) -> None:
+    """Two schema-valid-but-entirely-empty attempts must exhaust the
+    provider as a structured-extraction failure (502), not be silently
+    accepted and only fail later at grounding (409) — that used to make an
+    empty {} indistinguishable from a real extraction that legitimately
+    grounded to nothing."""
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
         _candidate(db)
@@ -199,8 +206,8 @@ def test_missing_requirements_return_409_without_persistence(isolated_client) ->
         return_value=fake_client,
     ):
         response = client.post("/api/jobs/job-fit-001/score")
-    assert response.status_code == 409
-    assert "requirements" in response.json()["detail"].lower()
+    assert response.status_code == 502
+    assert fake_client.generate.call_count == 2
     with SessionLocal() as db:
         assert db.query(MatchScoreRecord).count() == 0
 

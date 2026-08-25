@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Privacy-safe manual Gemini QA using real stored posting descriptions."""
+"""Privacy-safe manual Job Intelligence QA using real stored posting
+descriptions, following LLM_PROVIDER_ORDER (Ollama-first if configured that
+way, not hardcoded to Gemini)."""
 
 from __future__ import annotations
 
@@ -24,7 +26,8 @@ from backend.core.config import settings
 from backend.db.database import Base
 from backend.db.models import JobRecord
 from backend.services.job_intelligence_service import extract_job_intelligence
-from backend.services.llm_client import LLMConfigurationError, LLMProviderError
+from backend.services.llm_client import LLMConfigurationError, LLMProviderError, get_llm_client
+from backend.services.llm_provider_sequence import configured_provider_names
 
 MIN_SCENARIOS = 5
 MAX_SCENARIOS = 8
@@ -130,6 +133,22 @@ def _counts_line(scenario: int, bucket: str, intelligence) -> str:
     )
 
 
+def _first_configured_provider() -> str | None:
+    """Return the first entry of LLM_PROVIDER_ORDER that is actually usable
+    (has whatever config it needs — an Ollama host, or an API key), or None
+    if every configured provider is missing its configuration. This makes
+    the gate below follow LLM_PROVIDER_ORDER instead of hardcoding a
+    Gemini API key and model-name requirement, so an Ollama-first setup
+    with no Gemini key configured still runs."""
+    for name in configured_provider_names():
+        try:
+            get_llm_client(name)
+        except LLMConfigurationError:
+            continue
+        return name
+    return None
+
+
 def _final_result(
     *,
     failed: int,
@@ -144,7 +163,7 @@ def _final_result(
 
 
 def main() -> int:
-    if not settings.gemini_api_key or "flash" not in settings.gemini_model.lower():
+    if _first_configured_provider() is None:
         print("scenarios=0 status=blocked reason=configuration result=blocked")
         return 2
 
