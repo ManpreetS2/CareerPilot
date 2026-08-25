@@ -29,7 +29,7 @@ Resume
 | Frontend | React + TypeScript + Vite + Tailwind CSS |
 | Database | SQLite via SQLAlchemy (`data/careerpilot.db`, gitignored) |
 | Schemas | Shared Pydantic models |
-| LLM | Thin `LLMClient` for Ollama, Gemini, Anthropic, and OpenAI. Candidate profile, Job Intelligence, and application materials try providers in `LLM_PROVIDER_ORDER` (parse → validate → ground → persist). Fit scoring stays deterministic. |
+| LLM | Thin `LLMClient` for Ollama, Gemini, Anthropic, and OpenAI. Candidate profile, Job Intelligence, application materials, and mock-interview answer feedback try providers in `LLM_PROVIDER_ORDER` (one provider at a time). Fit scoring stays deterministic. `DEFAULT_LLM_PROVIDER` is only the prompt harness default when `--provider` is omitted. |
 | Browser extension | Unpacked Chrome extension for Greenhouse/Lever autofill |
 
 ```
@@ -60,6 +60,8 @@ CareerPilot is an authenticated local product. Signup, login, logout, and `GET /
 - `GET /api/profile` — read-only current candidate and latest preferences
 - Grounded candidate profile, job scout/verification/intelligence, fit scoring, materials, approval, assisted apply, tracker, and interview prep
 - Application materials are generated from stored evidence, not a placeholder
+- Mock-interview answer feedback is ephemeral (not stored) and follows `LLM_PROVIDER_ORDER`
+- Tracker rows can store a user-set follow-up date; CareerPilot does not send automated notifications or reminders
 
 Opening Jobs, Job Detail, Applications, or Application Detail never scores a job, extracts requirements, or generates materials by itself. Calculate Fit and Generate Materials stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation. Assisted Apply and the extension never submit forms.
 
@@ -81,8 +83,6 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - Email verification
 - Login rate limiting
 - Live-provider verification in CI
-- Mock-interview feedback
-- Reminders
 - Automatic job application submission
 
 
@@ -282,7 +282,8 @@ Developer B ownership remains: Job Scout, Job Verification, Form Fill, browser-e
 | `POST` | `/api/jobs/{job_id}/fill-application` | Assisted apply preview (never submits) |
 | `GET` | `/api/extension/autofill` | Browser extension field values |
 | `GET` | `/api/applications` | Tracker list (read-only) |
-| `GET`/`PATCH` | `/api/applications/{job_id}/tracking` | Explicit tracker updates |
+| `GET`/`PATCH` | `/api/applications/{job_id}/tracking` | Explicit tracker updates, including optional follow-up date |
 | `GET` | `/api/dashboard/summary` | Real stored metrics |
 | `GET` | `/api/jobs/{job_id}/interview-prep` | Read-only stored prep |
 | `POST` | `/api/jobs/{job_id}/prepare-interview` | Deterministic baseline (explicit) |
+| `POST` | `/api/jobs/{job_id}/interview-prep/feedback` | Ephemeral mock-interview answer feedback (`LLM_PROVIDER_ORDER`) |

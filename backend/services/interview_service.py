@@ -28,7 +28,17 @@ from backend.schemas.schemas import InterviewAnswerFeedback, InterviewPrep, JobI
 from backend.services.application_materials_agent import candidate_record_to_profile
 from backend.services.job_intelligence_service import get_stored_job_intelligence
 from backend.services.job_service import record_to_job
-from backend.services.llm_client import get_llm_client
+from backend.services.llm_client import (
+    LLMConfigurationError,
+    LLMEmptyResponseError,
+    LLMProviderError,
+    get_llm_client,
+)
+from backend.services.llm_provider_sequence import (
+    configured_provider_names,
+    invoke_provider_generate,
+    uses_injected_generator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -346,8 +356,40 @@ _ANSWER_FEEDBACK_SYSTEM_PROMPT = (
 )
 
 
-def _default_answer_feedback_generator(prompt: str, system_prompt: str | None = None) -> str:
-    return get_llm_client().generate(prompt, system_prompt=system_prompt)
+def _usable_feedback_text(text: str | None) -> str:
+    if not isinstance(text, str) or not text.strip():
+        raise LLMEmptyResponseError("The language model returned an empty response.")
+    return text.strip()
+
+
+def _generate_answer_feedback(
+    prompt: str,
+    generate_fn: InterviewAnswerGenerateFn | None,
+    *,
+    job_pk: int,
+) -> str:
+    if uses_injected_generator(generate_fn):
+        assert generate_fn is not None
+        return generate_fn(prompt, _ANSWER_FEEDBACK_SYSTEM_PROMPT)
+
+    last_error: Exception | None = None
+    for provider in configured_provider_names():
+        try:
+            raw = invoke_provider_generate(
+                get_llm_client(provider), prompt, _ANSWER_FEEDBACK_SYSTEM_PROMPT
+            )
+            return _usable_feedback_text(raw)
+        except (LLMProviderError, LLMEmptyResponseError, LLMConfigurationError) as exc:
+            last_error = exc
+            logger.info(
+                "interview_answer_feedback provider sequence failed category=%s job_pk=%s",
+                type(exc).__name__,
+                job_pk,
+            )
+            continue
+    if last_error is not None:
+        raise last_error
+    raise LLMProviderError("The language model request failed.")
 
 
 def get_interview_answer_feedback(
@@ -383,7 +425,6 @@ def get_interview_answer_feedback(
         raise InterviewQuestionNotFoundError()
 
     context = load_interview_prep_context(db, job_id, user_id)
-    invoke = generate_fn if generate_fn is not None else _default_answer_feedback_generator
 
     background = ", ".join(context.candidate_skills) or "no stored skills on file"
     prompt = (
@@ -394,7 +435,7 @@ def get_interview_answer_feedback(
         f"Candidate's answer:\n{answer}\n\n"
         "Give brief feedback on this answer per your instructions."
     )
-    feedback_text = invoke(prompt, _ANSWER_FEEDBACK_SYSTEM_PROMPT)
+    feedback_text = _generate_answer_feedback(prompt, generate_fn, job_pk=context.job_pk)
 
     logger.info("interview_answer_feedback generated job_pk=%s", context.job_pk)
     return InterviewAnswerFeedback(question=question, answer=answer, feedback=feedback_text.strip())
