@@ -13,6 +13,7 @@ from backend.schemas.schemas import (
     ApprovalRequest,
     ApprovalResponse,
     AutofillResponse,
+    ExtensionPanelData,
     FormFillResult,
 )
 from backend.services.application_service import (
@@ -23,7 +24,7 @@ from backend.services.application_service import (
     get_stored_application_package,
 )
 from backend.services.application_materials_agent import StaleApplicationMaterialsError
-from backend.services.form_fill_service import get_autofill_data, run_assisted_apply
+from backend.services.form_fill_service import get_autofill_data, get_extension_panel_data, run_assisted_apply
 
 router = APIRouter(prefix="/api", tags=["applications"])
 
@@ -93,3 +94,14 @@ def extension_autofill(
     """Field values for the browser extension. Authenticated only via the
     extension session header, not as a general alternative to the cookie."""
     return get_autofill_data(db, url, user.id)
+
+
+@router.get("/extension/panel-data", response_model=ExtensionPanelData)
+def extension_panel_data(
+    url: str, db: Session = Depends(get_db), user: User = Depends(get_extension_user)
+) -> ExtensionPanelData:
+    """Read-only job/score/materials status for the extension side panel.
+    Same auth as the autofill route above — a second GET-only route inside
+    the same /api/extension/ prefix does not expand what the session header
+    can authorize. Unlike autofill, never requires an approved package."""
+    return get_extension_panel_data(db, url, user.id)

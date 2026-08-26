@@ -1,12 +1,18 @@
 {
   "manifest_version": 3,
   "name": "CareerPilot Assisted Apply",
-  "version": "0.1.0",
-  "description": "Fills your approved CareerPilot application into the real Greenhouse or Lever form on the page you're viewing. Never submits.",
+  "version": "0.2.0",
+  "description": "Shows job recognition, fit score, and materials status in a side panel, and fills your approved CareerPilot application into the real Greenhouse or Lever form on the page you're viewing. Never submits.",
   "action": {
-    "default_popup": "popup.html",
-    "default_title": "CareerPilot Assisted Apply"
+    "default_title": "CareerPilot"
   },
-  "permissions": ["activeTab", "scripting", "cookies"],
+  "side_panel": {
+    "default_path": "dist/sidepanel.html"
+  },
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "permissions": ["activeTab", "scripting", "cookies", "sidePanel", "tabs"],
   "host_permissions": ["http://localhost:8000/*"]
 }

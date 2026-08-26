@@ -1,0 +1,52 @@
+/* Forked from frontend/src/index.css's @layer components block (the exact
+   card, button, and status-pill @apply rules the panel reuses) plus the
+   same theme CSS variables, trimmed to what this panel actually renders. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --fg: #0b0f14;
+  --card: #ffffff;
+  --line: #e2e8f0;
+  --accent: #0284c7;
+  --muted: #64748b;
+}
+
+.dark {
+  color-scheme: dark;
+  --bg: #0b0f14;
+  --fg: #e5e7eb;
+  --card: #121821;
+  --line: #253041;
+  --accent: #7dd3fc;
+  --muted: #94a3b8;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  color: var(--fg);
+  background-color: var(--bg);
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent-600 text-white hover:bg-accent-500 dark:bg-accent-400 dark:text-ink-950 dark:hover:bg-accent-500;
+  }
+  .btn-secondary {
+    @apply btn border border-ink-200 bg-white/80 text-ink-900 hover:bg-white dark:border-[var(--line)] dark:bg-ink-900/80 dark:text-ink-50 dark:hover:bg-ink-800;
+  }
+  .card {
+    @apply rounded-2xl border border-[var(--line)] bg-[var(--card)] shadow-soft;
+  }
+  .status-pill {
+    @apply inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold;
+  }
+}

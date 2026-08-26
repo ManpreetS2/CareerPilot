@@ -30,6 +30,8 @@ build/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+browser-extension/node_modules/
+browser-extension/.vite/
 *.local
 local_resumes/*
 !local_resumes/README.md
