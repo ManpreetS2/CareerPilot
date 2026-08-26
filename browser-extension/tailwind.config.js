@@ -7,7 +7,14 @@ import frontendConfig from "../frontend/tailwind.config.js";
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./sidepanel.html", "./src/**/*.{js,ts}"],
-  darkMode: "class",
+  // "media", not the web app's "class". The web app toggles a .dark class
+  // from a stored preference; the panel has no theme switcher and cannot
+  // read that preference anyway (it lives in the web app origin's
+  // localStorage, which an extension page can't touch). Setting the class
+  // from JS would also need an inline <script> in <head> to avoid a
+  // light-mode flash, and MV3's extension CSP forbids inline scripts. Going
+  // by prefers-color-scheme resolves in pure CSS before first paint.
+  darkMode: "media",
   theme: frontendConfig.theme,
   plugins: [],
 };
