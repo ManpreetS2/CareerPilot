@@ -164,6 +164,8 @@ def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolat
     committed by the time this session's insert runs — it must recover the
     winner's data instead of raising or creating a duplicate row."""
     job, candidate = seed_materials_prerequisites(isolated_session)
+    from backend.services.candidate_provenance import fingerprint_for_candidate
+
     winner = ApplicationPackageRecord(
         job_id=job.id,
         user_id=TEST_USER_ID,
@@ -174,6 +176,9 @@ def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolat
         source_traceability_notes=["winner note"],
         approval_status="pending_review",
         grounded=True,
+        candidate_profile_fingerprint=fingerprint_for_candidate(
+            isolated_session, candidate, TEST_USER_ID
+        ),
     )
     isolated_session.add(winner)
     isolated_session.commit()
@@ -491,7 +496,8 @@ def test_edit_request_never_sets_eligibility_confirmed_true(isolated_session) ->
     only an approval (which requires it) can, so a caller can't sneak a
     confirmation through a decision type that doesn't require one."""
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(
         isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", eligibility_confirmed=True)
     )
@@ -528,7 +534,8 @@ def test_eligibility_notes_can_be_set_then_cleared(isolated_session) -> None:
 
 def test_eligibility_notes_can_be_updated_on_a_non_approve_decision(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(
         isolated_session,
         "manual-abc123", TEST_USER_ID,
@@ -540,7 +547,8 @@ def test_eligibility_notes_can_be_updated_on_a_non_approve_decision(isolated_ses
 
 def test_decision_notes_persisted_for_each_decision_type(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
 
     apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes="rewrite bullet 2"))
     package = get_stored_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
@@ -553,7 +561,8 @@ def test_decision_notes_persisted_for_each_decision_type(isolated_session) -> No
 
 def test_decision_notes_can_be_cleared(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes="fix typo"))
     apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes=""))
     package = get_stored_application_package(isolated_session, "manual-abc123", TEST_USER_ID)

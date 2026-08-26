@@ -16,6 +16,7 @@ import type {
   MatchScore,
   ParseResumeResponse,
   CurrentProfile,
+  ResumeVersion,
   ScoutJobsResponse,
   TargetPreferences,
   TrackerStatus,
@@ -155,6 +156,17 @@ export const api = {
 
   discardStaleMaterials: (jobId: string) =>
     request<{ status: string }>(`/api/jobs/${jobId}/discard-stale-materials`, {
+      method: "POST",
+    }),
+
+  listResumeVersions: (jobId: string) =>
+    request<ResumeVersion[]>(`/api/jobs/${jobId}/resume-versions`),
+
+  getResumeVersion: (jobId: string, versionId: string) =>
+    request<ResumeVersion>(`/api/jobs/${jobId}/resume-versions/${versionId}`),
+
+  createResumeVersion: (jobId: string) =>
+    request<ResumeVersion>(`/api/jobs/${jobId}/resume-versions`, {
       method: "POST",
     }),
 

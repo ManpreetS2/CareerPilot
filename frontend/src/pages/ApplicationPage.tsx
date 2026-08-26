@@ -5,6 +5,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
 import { MatchBadge } from "../components/MatchBadge";
+import { ResumeVersionPanel } from "../components/ResumeVersionPanel";
 import { StatusBadge } from "../components/StatusBadge";
 import { api, ApiClientError } from "../lib/api";
 import { getSelectedJobId, saveSelectedJobId } from "../lib/session";
@@ -427,6 +428,8 @@ export function ApplicationPage() {
           </>
         )}
       </section>
+
+      {materials ? <ResumeVersionPanel jobId={jobId} materials={materials} /> : null}
 
       {materials ? (
       <>

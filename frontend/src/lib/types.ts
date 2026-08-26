@@ -140,6 +140,15 @@ export type ApplicationPackage = {
   unsupported_claims?: string[];
 };
 
+export type ResumeVersion = {
+  id: string;
+  job_id: string;
+  version_number: number;
+  tailored_bullets: string[];
+  source_traceability_notes: string[];
+  created_at: string;
+};
+
 export type ApprovalDecision = "approved" | "edit_requested" | "rejected";
 
 export type FlaggedField = {
