@@ -146,7 +146,7 @@ def save_resume_version(db: Session, job_public_id: str, user_id: int) -> tuple[
     if not approved_hash or approved_hash != hash_approved_materials(bullets, notes):
         raise ResumeVersionConflictError()
 
-    snapshot = build_resume_input_snapshot(db, candidate, user_id)
+    snapshot = build_resume_input_snapshot(db, candidate, user_id, refresh=True)
     stored_fingerprint = getattr(package, "candidate_profile_fingerprint", None)
     if not stored_fingerprint or hash_resume_input_snapshot(snapshot) != stored_fingerprint:
         raise ResumeVersionConflictError()

@@ -32,7 +32,9 @@ from backend.services.application_service import apply_approval, discard_stale_r
 from backend.services.candidate_profile_agent import persist_candidate_profile
 from backend.services.candidate_provenance import (
     build_resume_input_snapshot,
+    current_resume_input_fingerprint,
     hash_resume_input_snapshot,
+    snapshot_resume_input,
 )
 from backend.services.resume_version_service import (
     ResumeVersionConflictError,
@@ -743,11 +745,50 @@ def test_sensitive_preference_change_does_not_create_new_version(isolated_sessio
     first = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
     pref = isolated_session.query(TargetPreference).filter_by(user_id=TEST_USER_ID).one()
     pref.salary_min = 180000
+    pref.work_authorization = "Permanent resident"
     pref.gender = "male"
+    pref.race_ethnicity = "Other"
+    pref.disability_status = "Yes"
+    pref.veteran_status = "Veteran"
     isolated_session.commit()
     second = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
     assert first.id == second.id
     assert isolated_session.query(ResumeVersionRecord).count() == 1
+    row = isolated_session.query(ResumeVersionRecord).one()
+    assert "salary_min" not in (row.resume_input_snapshot or {})
+    assert "work_authorization" not in (row.resume_input_snapshot or {})
+    assert "gender" not in (row.resume_input_snapshot or {})
+    assert "race_ethnicity" not in (row.resume_input_snapshot or {})
+    assert "disability_status" not in (row.resume_input_snapshot or {})
+    assert "veteran_status" not in (row.resume_input_snapshot or {})
+
+
+def test_refresh_true_observes_in_place_preference_update(isolated_session) -> None:
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    pref = isolated_session.query(TargetPreference).filter_by(user_id=TEST_USER_ID).one()
+    pref.legal_name = "Before Refresh"
+    pref.linkedin_url = "https://linkedin.com/in/before"
+    isolated_session.commit()
+    loaded = isolated_session.query(TargetPreference).filter_by(id=pref.id).one()
+    assert loaded.legal_name == "Before Refresh"
+    before = current_resume_input_fingerprint(isolated_session, TEST_USER_ID, refresh=False)
+
+    Other = sessionmaker(bind=isolated_session.get_bind(), autocommit=False, autoflush=False)
+    with Other() as other:
+        row = other.get(TargetPreference, pref.id)
+        assert row is not None
+        row.legal_name = "After Refresh"
+        row.linkedin_url = "https://linkedin.com/in/after"
+        other.commit()
+
+    stale = current_resume_input_fingerprint(isolated_session, TEST_USER_ID, refresh=False)
+    assert stale == before
+    refreshed = current_resume_input_fingerprint(isolated_session, TEST_USER_ID, refresh=True)
+    isolated_session.refresh(candidate)
+    expected = hash_resume_input_snapshot(snapshot_resume_input(candidate, loaded))
+    assert loaded.legal_name == "After Refresh"
+    assert refreshed == expected
+    assert refreshed != before
 
 
 def test_resume_input_hash_is_order_independent() -> None:

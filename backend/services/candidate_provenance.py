@@ -91,28 +91,29 @@ def version_content_hash(snapshot: dict[str, Any], bullets: list | None, notes: 
     )
 
 
-def _latest_preference(db: Session, candidate: Candidate, user_id: int) -> TargetPreference | None:
-    pref = (
-        db.query(TargetPreference)
-        .filter(TargetPreference.candidate_id == candidate.id)
-        .order_by(TargetPreference.id.desc())
-        .first()
-    )
+def _latest_preference(
+    db: Session, candidate: Candidate, user_id: int, *, refresh: bool = False
+) -> TargetPreference | None:
+    def _fetch(*, candidate_id: int | None = None, owner_id: int | None = None) -> TargetPreference | None:
+        query = db.query(TargetPreference)
+        if candidate_id is not None:
+            query = query.filter(TargetPreference.candidate_id == candidate_id)
+        else:
+            query = query.filter(TargetPreference.user_id == owner_id)
+        if refresh:
+            query = query.populate_existing()
+        return query.order_by(TargetPreference.id.desc()).first()
+
+    pref = _fetch(candidate_id=candidate.id)
     if pref is not None:
         return pref
-    return (
-        db.query(TargetPreference)
-        .filter(TargetPreference.user_id == user_id)
-        .order_by(TargetPreference.id.desc())
-        .first()
-    )
+    return _fetch(owner_id=user_id)
 
 
-def build_resume_input_snapshot(
-    db: Session, candidate: Candidate, user_id: int
+def snapshot_resume_input(
+    candidate: Candidate, preference: TargetPreference | None
 ) -> dict[str, Any]:
-    """Return the canonical resume-input dict for hashing and private storage."""
-    pref = _latest_preference(db, candidate, user_id)
+    """Canonical resume-input dict from already-loaded records. Does not query."""
     snapshot: dict[str, Any] = {
         "name": candidate.name,
         "email": candidate.email,
@@ -129,14 +130,26 @@ def build_resume_input_snapshot(
         "github_url": None,
         "portfolio_url": None,
     }
-    if pref is not None:
+    if preference is not None:
         for field in _DISPLAY_PREFERENCE_FIELDS:
-            snapshot[field] = getattr(pref, field, None)
+            snapshot[field] = getattr(preference, field, None)
     return snapshot
 
 
-def fingerprint_for_candidate(db: Session, candidate: Candidate, user_id: int) -> str:
-    return hash_resume_input_snapshot(build_resume_input_snapshot(db, candidate, user_id))
+def build_resume_input_snapshot(
+    db: Session, candidate: Candidate, user_id: int, *, refresh: bool = False
+) -> dict[str, Any]:
+    """Return the canonical resume-input dict for hashing and private storage."""
+    pref = _latest_preference(db, candidate, user_id, refresh=refresh)
+    return snapshot_resume_input(candidate, pref)
+
+
+def fingerprint_for_candidate(
+    db: Session, candidate: Candidate, user_id: int, *, refresh: bool = False
+) -> str:
+    return hash_resume_input_snapshot(
+        build_resume_input_snapshot(db, candidate, user_id, refresh=refresh)
+    )
 
 
 def current_candidate(db: Session, user_id: int, *, refresh: bool = False) -> Candidate | None:
@@ -152,7 +165,8 @@ def current_resume_input_fingerprint(
     candidate = current_candidate(db, user_id, refresh=refresh)
     if candidate is None:
         return None
-    return fingerprint_for_candidate(db, candidate, user_id)
+    preference = _latest_preference(db, candidate, user_id, refresh=refresh)
+    return hash_resume_input_snapshot(snapshot_resume_input(candidate, preference))
 
 
 def package_matches_current_resume_profile(

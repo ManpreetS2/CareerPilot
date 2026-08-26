@@ -9,13 +9,14 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from backend.db.models import ApplicationPackageRecord, Candidate, MatchScoreRecord
+from backend.db.models import ApplicationPackageRecord, Candidate, MatchScoreRecord, TargetPreference
 from backend.services.application_materials_agent import (
     ApplicationMaterialsConflictError,
     ApplicationMaterialsParseError,
     ApplicationMaterialsGroundingError,
     ApplicationMaterialsStructuredOutput,
     StaleApplicationMaterialsError,
+    build_application_materials_prompt,
     generate_grounded_application_materials,
     ground_application_materials,
     is_grounded_package_record,
@@ -556,5 +557,165 @@ def test_profile_change_during_generate_http_is_409(isolated_client) -> None:
     detail = response.json()["detail"].lower()
     assert "previous candidate" in detail
     assert "riley" not in detail
+    with SessionLocal() as db:
+        assert db.query(ApplicationPackageRecord).count() == 0
+
+
+def _stamp_display_preference(session, candidate: Candidate, *, legal_name: str, linkedin_url: str) -> TargetPreference:
+    pref = session.query(TargetPreference).filter_by(user_id=candidate.user_id).one()
+    pref.candidate_id = candidate.id
+    pref.legal_name = legal_name
+    pref.linkedin_url = linkedin_url
+    pref.github_url = "https://github.com/example-user"
+    pref.portfolio_url = "https://example.com/portfolio"
+    session.commit()
+    session.refresh(pref)
+    return pref
+
+
+def test_context_fingerprint_matches_prompt_preference_records(isolated_session) -> None:
+    from backend.services.candidate_provenance import hash_resume_input_snapshot, snapshot_resume_input
+
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    pref = _stamp_display_preference(
+        isolated_session,
+        candidate,
+        legal_name="Jordan Avery",
+        linkedin_url="https://linkedin.com/in/jordanavery",
+    )
+    context = load_application_materials_context(isolated_session, job.public_id, TEST_USER_ID)
+    _, user_prompt = build_application_materials_prompt(context)
+    expected = hash_resume_input_snapshot(snapshot_resume_input(candidate, pref))
+    assert context.resume_input_fingerprint == expected
+    assert context.preferences is not None
+    assert context.preferences.legal_name == "Jordan Avery"
+    assert context.preferences.linkedin_url == "https://linkedin.com/in/jordanavery"
+    assert "https://linkedin.com/in/jordanavery" in user_prompt
+    assert context.preferences.salary_min is None or "135000" not in user_prompt
+
+
+def test_newer_preference_insert_during_context_load_cannot_split_prompt_and_fingerprint(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.services import application_materials_agent as ama
+    from backend.services.candidate_provenance import hash_resume_input_snapshot, snapshot_resume_input
+
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    pref_a = _stamp_display_preference(
+        isolated_session,
+        candidate,
+        legal_name="Jordan Avery",
+        linkedin_url="https://linkedin.com/in/jordanavery",
+    )
+    original = ama._preference_record_to_schema
+
+    def insert_newer_then_convert(record: TargetPreference):
+        isolated_session.add(
+            TargetPreference(
+                user_id=TEST_USER_ID,
+                candidate_id=candidate.id,
+                legal_name="Riley Chen Legal",
+                linkedin_url="https://linkedin.com/in/riley-b",
+                github_url="https://github.com/riley-b",
+                portfolio_url="https://riley.example.com",
+            )
+        )
+        isolated_session.commit()
+        return original(record)
+
+    monkeypatch.setattr(ama, "_preference_record_to_schema", insert_newer_then_convert)
+    context = load_application_materials_context(isolated_session, job.public_id, TEST_USER_ID)
+    _, user_prompt = build_application_materials_prompt(context)
+    expected_a = hash_resume_input_snapshot(snapshot_resume_input(candidate, pref_a))
+    assert context.resume_input_fingerprint == expected_a
+    assert context.preferences is not None
+    assert context.preferences.legal_name == "Jordan Avery"
+    assert "Riley Chen Legal" not in user_prompt
+    assert "riley-b" not in user_prompt
+    assert "riley.example.com" not in user_prompt
+
+
+def test_display_preference_change_during_generate_fails_closed(
+    isolated_session, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    from sqlalchemy.orm import sessionmaker
+
+    caplog.set_level(logging.DEBUG)
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    pref = _stamp_display_preference(
+        isolated_session,
+        candidate,
+        legal_name="Jordan Avery",
+        linkedin_url="https://linkedin.com/in/jordanavery",
+    )
+    pref_id = pref.id
+    providers_used: list[str] = []
+    Other = sessionmaker(bind=isolated_session.get_bind(), autocommit=False, autoflush=False)
+
+    monkeypatch.setattr(
+        "backend.services.application_materials_agent.configured_provider_names",
+        lambda: ["ollama", "gemini"],
+    )
+
+    def fake_client(name: str):
+        providers_used.append(name)
+        return object()
+
+    def fake_invoke(_client, _prompt, _system, _schema):
+        with Other() as other:
+            row = other.get(TargetPreference, pref_id)
+            assert row is not None
+            row.legal_name = "Riley Chen Legal"
+            row.linkedin_url = "https://linkedin.com/in/riley-b"
+            other.commit()
+        return VALID_MATERIALS_JSON
+
+    monkeypatch.setattr("backend.services.application_materials_agent.get_llm_client", fake_client)
+    monkeypatch.setattr(
+        "backend.services.application_materials_agent.invoke_provider_generate", fake_invoke
+    )
+
+    with pytest.raises(StaleApplicationMaterialsError):
+        generate_grounded_application_materials(isolated_session, job.public_id, TEST_USER_ID)
+    assert providers_used == ["ollama"]
+    assert isolated_session.query(ApplicationPackageRecord).count() == 0
+    logs = caplog.text
+    assert "You write application materials" not in logs
+    assert "resume_input_snapshot" not in logs
+    assert "jordan@example.com" not in logs
+    assert "Riley Chen Legal" not in logs
+    assert "https://linkedin.com/in/jordanavery" not in logs
+    assert "https://linkedin.com/in/riley-b" not in logs
+    assert "+1-555" not in logs and "555-010" not in logs
+
+
+def test_display_preference_change_during_generate_http_is_409(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job, candidate = seed_materials_prerequisites(db, user_id=client.test_user_id)
+        pref = _stamp_display_preference(
+            db,
+            candidate,
+            legal_name="Jordan Avery",
+            linkedin_url="https://linkedin.com/in/jordanavery",
+        )
+        pref_id = pref.id
+
+    def racing_generator(_prompt: str, _system_prompt: str | None = None) -> str:
+        with SessionLocal() as db:
+            row = db.get(TargetPreference, pref_id)
+            assert row is not None
+            row.legal_name = "Riley Chen Legal"
+            row.linkedin_url = "https://linkedin.com/in/riley-b"
+            db.commit()
+        return VALID_MATERIALS_JSON
+
+    client.app.state.application_materials_generator = racing_generator
+    response = client.post("/api/jobs/manual-abc123/generate-materials")
+    assert response.status_code == 409
+    detail = response.json()["detail"].lower()
+    assert "previous candidate" in detail
+    assert "riley" not in detail
+    assert "linkedin.com" not in detail
     with SessionLocal() as db:
         assert db.query(ApplicationPackageRecord).count() == 0
