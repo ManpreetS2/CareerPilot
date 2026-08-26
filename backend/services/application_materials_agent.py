@@ -336,6 +336,30 @@ class ApplicationMaterialsGroundingError(ApplicationMaterialsError):
         )
 
 
+_MATERIALS_PROVIDER_ERROR_PRIORITY: dict[type[BaseException], int] = {
+    # A provider that actually ran and produced something we rejected tells
+    # the user far more than one that was never configured to begin with.
+    ApplicationMaterialsGroundingError: 50,
+    ApplicationMaterialsParseError: 40,
+    LLMProviderError: 40,
+    LLMEmptyResponseError: 40,
+    # Lowest: with a provider order like "ollama,gemini" and no Gemini key,
+    # this fires on every run and would otherwise bury the real failure,
+    # reporting "generation is not configured" for a system that is
+    # configured and did run. Mirrors _PROVIDER_ERROR_PRIORITY in
+    # job_intelligence_service, which had this same defect.
+    LLMConfigurationError: 10,
+}
+
+
+def _should_replace_materials_error(current: Exception | None, new: Exception) -> bool:
+    if current is None:
+        return True
+    current_rank = _MATERIALS_PROVIDER_ERROR_PRIORITY.get(type(current), 0)
+    new_rank = _MATERIALS_PROVIDER_ERROR_PRIORITY.get(type(new), 0)
+    return new_rank > current_rank
+
+
 class ApplicationMaterialsConflictError(ApplicationMaterialsError):
     def __init__(self, detail: str | None = None) -> None:
         super().__init__(
@@ -1408,11 +1432,31 @@ def is_grounded_package_record(record: ApplicationPackageRecord | None) -> bool:
     return _package_has_useful_content(record)
 
 
+def is_override_package_record(record: ApplicationPackageRecord | None) -> bool:
+    """An unverified package the owner explicitly chose to keep. Held to
+    every content check a grounded package is, minus the grounding result
+    itself — the override waives verification, not substance."""
+    if record is None:
+        return False
+    if _looks_like_placeholder(record):
+        return False
+    if not getattr(record, "grounding_override", False):
+        return False
+    return _package_has_useful_content(record)
+
+
 def is_package_ready_for_apply(
     db: Session, package: ApplicationPackageRecord | None, user_id: int
 ) -> bool:
-    """Shared gate for approval and both Assisted Apply paths."""
-    if not is_grounded_package_record(package):
+    """Shared gate for approval and both Assisted Apply paths.
+
+    An explicitly overridden package is allowed through: the owner has said
+    they want to apply to this job knowing the draft is not fully evidence-
+    backed. Every other check below still applies, and the package stays
+    marked unverified so the approval screen and the extension panel both
+    say so before anything is filled into a real form.
+    """
+    if not (is_grounded_package_record(package) or is_override_package_record(package)):
         return False
     assert package is not None
     if package.user_id != user_id:
@@ -1512,8 +1556,20 @@ def _persist_grounded_draft(
     context: ApplicationMaterialsContext,
     draft: ApplicationMaterialsDraft,
     existing: ApplicationPackageRecord | None = None,
+    *,
+    grounded: bool = True,
+    unsupported_claims: list[str] | None = None,
 ) -> ApplicationPackageRecord:
+    """grounded=False is reachable only through an explicit per-job override
+    (see generate_grounded_application_materials). Such a record is stored
+    with grounding_override set and the unsupported categories attached, so
+    nothing downstream can mistake it for a verified package."""
     payload = draft_to_persistence_payload(draft)
+    # Deduplicate while keeping first-seen order: the report lists one entry
+    # per rejected claim, so a draft that invented the same employer a dozen
+    # times yields a dozen identical categories. A reviewer needs the set of
+    # problems, not the tally.
+    unsupported = list(dict.fromkeys(unsupported_claims or []))
     same_candidate = existing is not None and existing.candidate_id == context.candidate_pk
     if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
         if same_candidate:
@@ -1529,7 +1585,9 @@ def _persist_grounded_draft(
         existing.recruiter_message = payload["recruiter_message"]
         existing.source_traceability_notes = list(payload["source_traceability_notes"])
         existing.approval_status = "pending_review"
-        existing.grounded = True
+        existing.grounded = grounded
+        existing.grounding_override = not grounded
+        existing.unsupported_claims = unsupported
         record = existing
     else:
         record = ApplicationPackageRecord(
@@ -1541,7 +1599,9 @@ def _persist_grounded_draft(
             recruiter_message=payload["recruiter_message"],
             source_traceability_notes=list(payload["source_traceability_notes"]),
             approval_status="pending_review",
-            grounded=True,
+            grounded=grounded,
+            grounding_override=not grounded,
+            unsupported_claims=unsupported,
         )
         db.add(record)
     try:
@@ -1583,8 +1643,18 @@ def generate_grounded_application_materials(
     user_id: int,
     *,
     generator: ApplicationMaterialsGenerateFn | ApplicationMaterialsGenerator | None = None,
+    override_grounding: bool = False,
 ) -> ApplicationMaterialsDraft:
-    """Generate grounded application materials from stored candidate, job, and score evidence."""
+    """Generate grounded application materials from stored candidate, job, and score evidence.
+
+    override_grounding is the owner's explicit, per-job decision to keep a
+    draft whose claims could not all be verified against stored evidence —
+    for applying to a role they are stretching for. It never defaults on,
+    is never inferred, and never persists to another job. The resulting
+    record is stored with grounded=False and grounding_override=True, and
+    carries the unsupported categories, so every later reader can tell it
+    apart from a verified package.
+    """
 
     context = load_application_materials_context(db, job_id, user_id)
     if not _has_usable_intelligence(context.intelligence):
@@ -1625,10 +1695,25 @@ def generate_grounded_application_materials(
             report.numeric_literals_rejected,
             context.job_pk,
         )
-        if not report.grounded:
+        if not report.grounded and not override_grounding:
             raise ApplicationMaterialsGroundingError()
         draft = draft_from_structured_output(parsed, context, report)
-        record = _persist_grounded_draft(db, context, draft, existing=existing)
+        record = _persist_grounded_draft(
+            db,
+            context,
+            draft,
+            existing=existing,
+            grounded=report.grounded,
+            unsupported_claims=report.rejected_categories,
+        )
+        if not report.grounded:
+            logger.warning(
+                "application_materials stored UNVERIFIED via explicit override "
+                "rejected=%s categories=%s job_pk=%s",
+                report.rejected_claim_count,
+                report.rejected_categories,
+                context.job_pk,
+            )
         return _draft_from_record(record, job_id)
 
     if uses_injected_generator(generator):
@@ -1636,6 +1721,9 @@ def generate_grounded_application_materials(
 
     last_error: Exception | None = None
     schema = application_materials_llm_schema()
+    # See _should_replace_materials_error: without ranking, a later
+    # unconfigured provider's error replaces the real one from the provider
+    # that actually ran.
     for provider in configured_provider_names():
         def _provider_generate(
             prompt: str,
@@ -1656,7 +1744,8 @@ def generate_grounded_application_materials(
             LLMEmptyResponseError,
             LLMConfigurationError,
         ) as exc:
-            last_error = exc
+            if _should_replace_materials_error(last_error, exc):
+                last_error = exc
             logger.info(
                 "application_materials provider sequence failed category=%s job_pk=%s",
                 type(exc).__name__,

@@ -1271,6 +1271,169 @@ def test_panel_data_route_returns_tracked_status(isolated_client) -> None:
     assert body["tracked"] is True
     assert body["score"]["overall_score"] == 82.0
     assert body["materials_status"] == "missing"
+    assert body["platform"] == "greenhouse"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://job-boards.greenhouse.io/acme/jobs/1", "greenhouse"),
+        ("https://boards.greenhouse.io/acme/jobs/1", "greenhouse"),
+        ("https://jobs.lever.co/acme/abc-123", "lever"),
+        ("https://remotive.com/remote-jobs/data/x-1", "unsupported"),
+        ("https://example.com/careers/1", "unsupported"),
+    ],
+)
+def test_panel_data_reports_the_platform_for_a_tracked_job(
+    isolated_session, url: str, expected: str
+) -> None:
+    """The panel hides its fill button on postings assisted apply can never
+    fill. It relies on this field rather than re-deriving the ATS host list
+    in extension code, so the allowlist stays defined only here."""
+    _job(isolated_session, url=url)
+    result = get_extension_panel_data(isolated_session, url, TEST_USER_ID)
+    assert result.tracked is True
+    assert result.platform == expected
+
+
+@pytest.mark.parametrize(
+    "tab_url",
+    [
+        "https://job-boards.greenhouse.io/embed/job_app?for=acme&token=7761472003",
+        "https://job-boards.greenhouse.io/embed/job_app?for=acme&token=7761472003&jr_id=6a8d&utm_source=jobright",
+        "https://job-boards.greenhouse.io/acme/jobs/7761472003",
+        "https://job-boards.greenhouse.io/acme/jobs/7761472003?utm_source=jobright",
+        "https://boards.greenhouse.io/acme/jobs/7761472003",
+        "https://boards.greenhouse.io/acme/jobs/7761472003/",
+    ],
+)
+def test_panel_data_matches_every_greenhouse_url_shape(isolated_session, tab_url: str) -> None:
+    """The extension sends the URL the user is genuinely looking at, which is
+    often the embed form or carries an aggregator's tracking parameters. An
+    exact-string match reported all of those as untracked even though the job
+    was stored — the panel then offered no fit score and no assisted apply on
+    a posting CareerPilot already knew about.
+    """
+    job = _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/7761472003")
+    result = get_extension_panel_data(isolated_session, tab_url, TEST_USER_ID)
+    assert result.tracked is True, tab_url
+    assert result.job.id == job.public_id
+    assert result.platform == "greenhouse"
+
+
+def test_panel_data_matches_a_job_stored_under_the_other_greenhouse_host(isolated_session) -> None:
+    """Rows saved at different times carry either host (boards.greenhouse.io
+    301s to job-boards.greenhouse.io); both must resolve to the same job."""
+    _job(isolated_session, url="https://job-boards.greenhouse.io/acme/jobs/7761472003")
+    result = get_extension_panel_data(
+        isolated_session, "https://boards.greenhouse.io/acme/jobs/7761472003", TEST_USER_ID
+    )
+    assert result.tracked is True
+
+
+def test_panel_data_does_not_match_a_different_posting(isolated_session) -> None:
+    """The matching is looser than an exact string compare, so this pins down
+    that it did not become loose enough to collide two different jobs."""
+    _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/7761472003")
+    for other in (
+        "https://job-boards.greenhouse.io/embed/job_app?for=acme&token=9999999999",
+        "https://job-boards.greenhouse.io/embed/job_app?for=otherco&token=7761472003",
+        "https://boards.greenhouse.io/otherco/jobs/7761472003",
+    ):
+        assert get_extension_panel_data(isolated_session, other, TEST_USER_ID).tracked is False, other
+
+
+def test_panel_data_apply_ready_is_false_without_an_approved_package(isolated_session) -> None:
+    job = _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/7761472003")
+    candidate = _seed_candidate(isolated_session)
+    isolated_session.add(
+        ApplicationPackageRecord(
+            job_id=job.id,
+            user_id=TEST_USER_ID,
+            candidate_id=candidate.id,
+            tailored_bullets=["Built Python APIs."],
+            cover_letter_draft="Dear team,",
+            recruiter_message="Hello,",
+            source_traceability_notes=["Python <- skills"],
+            approval_status="pending_review",
+            grounded=True,
+        )
+    )
+    isolated_session.commit()
+
+    result = get_extension_panel_data(
+        isolated_session, "https://boards.greenhouse.io/acme/jobs/7761472003", TEST_USER_ID
+    )
+    assert result.apply_ready is False
+    assert "approved" in (result.apply_blocked_reason or "")
+
+
+def test_panel_data_apply_ready_is_true_for_an_approved_package(isolated_session) -> None:
+    job = _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/7761472003")
+    candidate = _seed_candidate(isolated_session)
+    isolated_session.add(
+        ApplicationPackageRecord(
+            job_id=job.id,
+            user_id=TEST_USER_ID,
+            candidate_id=candidate.id,
+            tailored_bullets=["Built Python APIs."],
+            cover_letter_draft="Dear team,",
+            recruiter_message="Hello,",
+            source_traceability_notes=["Python <- skills"],
+            approval_status="approved",
+            grounded=True,
+        )
+    )
+    isolated_session.commit()
+
+    result = get_extension_panel_data(
+        isolated_session, "https://boards.greenhouse.io/acme/jobs/7761472003", TEST_USER_ID
+    )
+    assert result.apply_ready is True
+    assert result.apply_blocked_reason is None
+
+
+def test_panel_data_apply_readiness_agrees_with_the_autofill_route(isolated_session) -> None:
+    """The panel shows the fill button exactly when autofill would succeed.
+    If these two ever disagree the user gets a button that fails on click, or
+    no button for a fill that would have worked — so assert them together."""
+    job = _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/7761472003")
+    url = "https://boards.greenhouse.io/acme/jobs/7761472003"
+    _seed_candidate(isolated_session)
+
+    panel = get_extension_panel_data(isolated_session, url, TEST_USER_ID)
+    autofill_succeeded = True
+    try:
+        get_autofill_data(isolated_session, url, TEST_USER_ID)
+    except HTTPException:
+        autofill_succeeded = False
+    assert panel.apply_ready is autofill_succeeded
+    assert job.public_id  # the job really was stored under this URL
+
+
+def test_panel_data_reports_the_platform_even_when_untracked(isolated_session) -> None:
+    """Platform comes from the URL, not the stored job, so it is still
+    correct for a Greenhouse page CareerPilot has never seen."""
+    result = get_extension_panel_data(
+        isolated_session, "https://job-boards.greenhouse.io/acme/jobs/999", TEST_USER_ID
+    )
+    assert result.tracked is False
+    assert result.platform == "greenhouse"
+
+
+def test_panel_data_platform_matches_autofill_platform_detection(isolated_session) -> None:
+    """Guards against the two paths drifting: whatever autofill would decide
+    it is about to fill, the panel must have advertised the same."""
+    for index, url in enumerate(
+        (
+            "https://job-boards.greenhouse.io/acme/jobs/1",
+            "https://jobs.lever.co/acme/abc-123",
+            "https://remotive.com/remote-jobs/data/x-1",
+        )
+    ):
+        _job(isolated_session, public_id=f"manual-drift-{index}", url=url)
+        result = get_extension_panel_data(isolated_session, url, TEST_USER_ID)
+        assert result.platform == detect_ats_platform(url)
 
 
 # ---------------------------------------------------------------------------
@@ -1286,3 +1449,87 @@ def test_service_source_never_invokes_a_click_or_submit_action() -> None:
     assert ".click(" not in source
     assert ".submit(" not in source
     assert "press(\"Enter\")" not in source and "press('Enter')" not in source
+
+
+def test_panel_data_flags_an_overridden_package_as_unverified(isolated_session) -> None:
+    """Assisted apply is allowed for an explicitly overridden package, but
+    the panel must say so: this is the last screen before unverified claims
+    are typed into a real employer's application form."""
+    job = _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/7761472003")
+    candidate = _seed_candidate(isolated_session)
+    isolated_session.add(
+        ApplicationPackageRecord(
+            job_id=job.id,
+            user_id=TEST_USER_ID,
+            candidate_id=candidate.id,
+            tailored_bullets=["Led a global engineering team."],
+            cover_letter_draft="Dear team,",
+            recruiter_message="Hello,",
+            source_traceability_notes=["unverified"],
+            approval_status="approved",
+            grounded=False,
+            grounding_override=True,
+            unsupported_claims=["invented_employer"],
+        )
+    )
+    isolated_session.commit()
+
+    result = get_extension_panel_data(
+        isolated_session, "https://boards.greenhouse.io/acme/jobs/7761472003", TEST_USER_ID
+    )
+    assert result.apply_ready is True
+    assert result.materials_unverified is True
+    # Coherence: it must not simultaneously claim there are no materials.
+    assert result.materials_status == "current"
+
+
+def test_panel_data_leaves_unverified_false_for_evidence_backed_materials(isolated_session) -> None:
+    job = _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/7761472003")
+    candidate = _seed_candidate(isolated_session)
+    isolated_session.add(
+        ApplicationPackageRecord(
+            job_id=job.id,
+            user_id=TEST_USER_ID,
+            candidate_id=candidate.id,
+            tailored_bullets=["Built Python APIs."],
+            cover_letter_draft="Dear team,",
+            recruiter_message="Hello,",
+            source_traceability_notes=["Python <- skills"],
+            approval_status="approved",
+            grounded=True,
+        )
+    )
+    isolated_session.commit()
+
+    result = get_extension_panel_data(
+        isolated_session, "https://boards.greenhouse.io/acme/jobs/7761472003", TEST_USER_ID
+    )
+    assert result.apply_ready is True
+    assert result.materials_unverified is False
+
+
+def test_an_ungrounded_package_without_the_override_stays_unfillable(isolated_session) -> None:
+    """The override must be the only way an unverified package becomes
+    fillable — not merely having grounded=False."""
+    job = _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/7761472003")
+    candidate = _seed_candidate(isolated_session)
+    isolated_session.add(
+        ApplicationPackageRecord(
+            job_id=job.id,
+            user_id=TEST_USER_ID,
+            candidate_id=candidate.id,
+            tailored_bullets=["Led a global engineering team."],
+            cover_letter_draft="Dear team,",
+            recruiter_message="Hello,",
+            source_traceability_notes=["unverified"],
+            approval_status="approved",
+            grounded=False,
+            grounding_override=False,
+        )
+    )
+    isolated_session.commit()
+
+    result = get_extension_panel_data(
+        isolated_session, "https://boards.greenhouse.io/acme/jobs/7761472003", TEST_USER_ID
+    )
+    assert result.apply_ready is False

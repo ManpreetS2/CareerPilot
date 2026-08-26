@@ -195,6 +195,16 @@ class ApplicationPackageRecord(Base):
     eligibility_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     decision_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     grounded: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Set only when the owner explicitly asked to generate for a job whose
+    # draft failed grounding. Deliberately a separate column rather than
+    # flipping `grounded`: `grounded` keeps meaning "every claim was checked
+    # against stored evidence and passed", so this package stays visibly
+    # distinct from a verified one everywhere it is read, for its whole life.
+    grounding_override: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # The claims grounding could not support, kept so review is informed —
+    # the reviewer sees exactly what is unverified rather than being told
+    # only that something was.
+    unsupported_claims: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

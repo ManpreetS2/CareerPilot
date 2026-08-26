@@ -9,6 +9,7 @@ from backend.api.dependencies import get_current_user, get_extension_user
 from backend.db.database import get_db
 from backend.db.models import User
 from backend.schemas.schemas import (
+    GenerateMaterialsRequest,
     ApplicationPackage,
     ApprovalRequest,
     ApprovalResponse,
@@ -48,12 +49,25 @@ def get_materials(
 def generate_materials(
     job_id: str,
     request: Request,
+    payload: GenerateMaterialsRequest | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ApplicationPackage:
-    """Generate grounded application materials after an explicit user action."""
+    """Generate grounded application materials after an explicit user action.
+
+    override_grounding must be sent deliberately in the request body for the
+    one job being generated. It is never implied by any other field and is
+    not remembered between requests, so applying to a stretch role cannot
+    quietly become the default for every later application.
+    """
     generator = getattr(request.app.state, "application_materials_generator", None)
-    return get_or_generate_application_package(db, job_id, user.id, generator=generator)
+    return get_or_generate_application_package(
+        db,
+        job_id,
+        user.id,
+        generator=generator,
+        override_grounding=bool(payload and payload.override_grounding),
+    )
 
 
 @router.post("/jobs/{job_id}/discard-stale-materials")

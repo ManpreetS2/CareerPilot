@@ -134,6 +134,10 @@ export type ApplicationPackage = {
   eligibility_notes?: string | null;
   decision_notes?: string | null;
   grounded?: boolean;
+  /** Kept through an explicit per-job grounding override: real stored
+   * materials whose claims were never verified against the resume. */
+  grounding_override?: boolean;
+  unsupported_claims?: string[];
 };
 
 export type ApprovalDecision = "approved" | "edit_requested" | "rejected";
