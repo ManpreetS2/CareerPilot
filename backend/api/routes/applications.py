@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user, get_extension_user
@@ -13,8 +14,12 @@ from backend.schemas.schemas import (
     ApprovalRequest,
     ApprovalResponse,
     AutofillResponse,
+    CreateResumeVersionRequest,
     ExtensionPanelData,
     FormFillResult,
+    ResumeVersion,
+    ResumeVersionDetail,
+    ResumeVersionSummary,
 )
 from backend.services.application_service import (
     StoredMaterialsNotFoundError,
@@ -25,6 +30,16 @@ from backend.services.application_service import (
 )
 from backend.services.application_materials_agent import StaleApplicationMaterialsError
 from backend.services.form_fill_service import get_autofill_data, get_extension_panel_data, run_assisted_apply
+from backend.services.resume_version_service import (
+    ResumeVersionConflictError,
+    ResumeVersionNotFoundError,
+    ResumeVersionPersistenceError,
+    get_resume_version,
+    get_user_resume_version,
+    list_resume_versions,
+    list_user_resume_versions,
+    save_resume_version,
+)
 
 router = APIRouter(prefix="/api", tags=["applications"])
 
@@ -74,6 +89,96 @@ def approve_materials(
     user: User = Depends(get_current_user),
 ) -> ApprovalResponse:
     return apply_approval(db, job_id, user.id, payload)
+
+
+def _http_for_resume_version_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ResumeVersionNotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, ResumeVersionConflictError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, ResumeVersionPersistenceError):
+        return HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save resume version.",
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Unable to save resume version.",
+    )
+
+
+@router.post("/jobs/{job_id}/resume-versions", response_model=ResumeVersion)
+def create_resume_version_route(
+    job_id: str,
+    payload: CreateResumeVersionRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ResumeVersion:
+    """Snapshot the current approved package. Never generates materials or calls an LLM."""
+    _ = payload
+    try:
+        version, created = save_resume_version(db, job_id, user.id)
+    except (
+        ResumeVersionNotFoundError,
+        ResumeVersionConflictError,
+        ResumeVersionPersistenceError,
+    ) as exc:
+        raise _http_for_resume_version_error(exc) from exc
+    if created:
+        return JSONResponse(
+            status_code=status.HTTP_201_CREATED,
+            content=version.model_dump(mode="json"),
+        )
+    return version
+
+
+@router.get("/jobs/{job_id}/resume-versions", response_model=list[ResumeVersion])
+def list_resume_versions_route(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[ResumeVersion]:
+    """List the current user's resume versions for one job. Never writes or generates."""
+    try:
+        return list_resume_versions(db, job_id, user.id)
+    except ResumeVersionNotFoundError as exc:
+        raise _http_for_resume_version_error(exc) from exc
+
+
+@router.get("/jobs/{job_id}/resume-versions/{version_id}", response_model=ResumeVersion)
+def get_resume_version_route(
+    job_id: str,
+    version_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ResumeVersion:
+    """Return one owned resume version. Cross-user access is a sanitized 404."""
+    try:
+        return get_resume_version(db, job_id, version_id, user.id)
+    except ResumeVersionNotFoundError as exc:
+        raise _http_for_resume_version_error(exc) from exc
+
+
+@router.get("/resume-versions", response_model=list[ResumeVersionSummary])
+def list_all_resume_versions_route(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[ResumeVersionSummary]:
+    """List the current user's resume versions across jobs. Never writes or generates."""
+    return list_user_resume_versions(db, user.id)
+
+
+@router.get("/resume-versions/{version_id}", response_model=ResumeVersionDetail)
+def get_user_resume_version_route(
+    version_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ResumeVersionDetail:
+    """Return one owned historical resume version. Cross-user access is a sanitized 404."""
+    try:
+        return get_user_resume_version(db, version_id, user.id)
+    except ResumeVersionNotFoundError as exc:
+        raise _http_for_resume_version_error(exc) from exc
 
 
 @router.post("/jobs/{job_id}/fill-application", response_model=FormFillResult)

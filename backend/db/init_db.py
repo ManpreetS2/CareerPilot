@@ -23,6 +23,7 @@ REQUIRED_TABLES = (
     "job_intelligence",
     "match_scores",
     "application_packages",
+    "resume_versions",
     "form_fill_attempts",
     "application_tracker",
     "interview_prep",

@@ -71,6 +71,12 @@ from backend.services.llm_provider_sequence import (
     uses_injected_generator,
 )
 from backend.services.llm_structured_schemas import application_materials_llm_schema
+from backend.services.candidate_provenance import (
+    current_resume_input_fingerprint,
+    hash_resume_input_snapshot,
+    package_matches_current_resume_profile,
+    snapshot_resume_input,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -420,6 +426,7 @@ class ApplicationMaterialsContext:
     fit_score: MatchScore
     preferences: TargetPreferences | None
     posting_text: str
+    resume_input_fingerprint: str
 
 
 @dataclass
@@ -567,7 +574,35 @@ def load_application_materials_context(db: Session, job_id: str, user_id: int) -
         fit_score=_match_record_to_schema(score_record, job_id),
         preferences=_preference_record_to_schema(preference_record) if preference_record else None,
         posting_text=f"{job_record.title}\n{job_record.company}\n{job_record.description}",
+        resume_input_fingerprint=hash_resume_input_snapshot(
+            snapshot_resume_input(candidate_record, preference_record)
+        ),
     )
+
+
+_MATERIALS_PROMPT_PREFERENCE_FIELDS = (
+    "target_roles",
+    "preferred_locations",
+    "remote_preference",
+    "constraints",
+    "legal_name",
+    "linkedin_url",
+    "github_url",
+    "portfolio_url",
+    "earliest_start_date",
+    "currently_enrolled_in_program",
+    "expected_graduation",
+    "degree_pursuing",
+)
+
+
+def _materials_prompt_preferences(preferences: TargetPreferences | None) -> dict | None:
+    """Allowlisted display/job-search fields only. Never send EEO or salary."""
+
+    if preferences is None:
+        return None
+    payload = preferences.model_dump(mode="json")
+    return {field: payload.get(field) for field in _MATERIALS_PROMPT_PREFERENCE_FIELDS}
 
 
 def build_application_materials_prompt(context: ApplicationMaterialsContext) -> tuple[str, str]:
@@ -586,7 +621,7 @@ def build_application_materials_prompt(context: ApplicationMaterialsContext) -> 
         "candidate": context.candidate.model_dump(mode="json"),
         "job_intelligence": context.intelligence.model_dump(mode="json"),
         "fit_score": context.fit_score.model_dump(mode="json"),
-        "preferences": context.preferences.model_dump(mode="json") if context.preferences else None,
+        "preferences": _materials_prompt_preferences(context.preferences),
         "output_schema": _JSON_SHAPE,
     }
     user_prompt = (
@@ -1422,6 +1457,8 @@ def is_package_ready_for_apply(
     current_candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     if current_candidate is None or package.candidate_id != current_candidate.id:
         return False
+    if not package_matches_current_resume_profile(db, package, user_id):
+        return False
     return True
 
 
@@ -1514,7 +1551,19 @@ def _persist_grounded_draft(
     existing: ApplicationPackageRecord | None = None,
 ) -> ApplicationPackageRecord:
     payload = draft_to_persistence_payload(draft)
-    same_candidate = existing is not None and existing.candidate_id == context.candidate_pk
+    current_fingerprint = current_resume_input_fingerprint(db, context.user_id, refresh=True)
+    if (
+        not context.resume_input_fingerprint
+        or current_fingerprint != context.resume_input_fingerprint
+    ):
+        db.rollback()
+        raise StaleApplicationMaterialsError(reviewed=False)
+    fingerprint = context.resume_input_fingerprint
+    same_candidate = (
+        existing is not None
+        and existing.candidate_id == context.candidate_pk
+        and existing.candidate_profile_fingerprint == fingerprint
+    )
     if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
         if same_candidate:
             raise ApplicationMaterialsConflictError()
@@ -1530,6 +1579,8 @@ def _persist_grounded_draft(
         existing.source_traceability_notes = list(payload["source_traceability_notes"])
         existing.approval_status = "pending_review"
         existing.grounded = True
+        existing.candidate_profile_fingerprint = fingerprint
+        existing.approved_materials_hash = None
         record = existing
     else:
         record = ApplicationPackageRecord(
@@ -1542,6 +1593,8 @@ def _persist_grounded_draft(
             source_traceability_notes=list(payload["source_traceability_notes"]),
             approval_status="pending_review",
             grounded=True,
+            candidate_profile_fingerprint=fingerprint,
+            approved_materials_hash=None,
         )
         db.add(record)
     try:
@@ -1560,6 +1613,7 @@ def _persist_grounded_draft(
             winner is not None
             and is_grounded_package_record(winner)
             and winner.candidate_id == context.candidate_pk
+            and winner.candidate_profile_fingerprint == context.resume_input_fingerprint
             and winner.user_id == context.user_id
         ):
             logger.info(
@@ -1598,7 +1652,11 @@ def generate_grounded_application_materials(
         )
         .first()
     )
-    same_candidate = existing is not None and existing.candidate_id == context.candidate_pk
+    same_candidate = (
+        existing is not None
+        and existing.candidate_id == context.candidate_pk
+        and package_matches_current_resume_profile(db, existing, user_id)
+    )
     if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
         if same_candidate and is_grounded_package_record(existing):
             logger.info("application_materials reused protected_package job_pk=%s", context.job_pk)

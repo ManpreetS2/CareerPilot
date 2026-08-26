@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class Project(BaseModel):
@@ -146,6 +146,61 @@ class ApplicationPackage(BaseModel):
     eligibility_notes: str | None = None
     decision_notes: str | None = None
     grounded: bool = False
+
+
+class CreateResumeVersionRequest(BaseModel):
+    """Explicit create has no client-supplied snapshot fields.
+
+    Extra keys are rejected so callers cannot inject hashes, paths, or IDs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ResumeVersion(BaseModel):
+    id: str
+    job_id: str
+    version_number: int = Field(ge=1)
+    tailored_bullets: list[str] = Field(default_factory=list)
+    source_traceability_notes: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
+class ResumeVersionSummary(BaseModel):
+    id: str
+    job_id: str
+    job_title: str
+    company: str
+    version_number: int = Field(ge=1)
+    created_at: datetime
+    bullet_count: int = Field(ge=0)
+    provenance_status: Literal["approved_snapshot"] = "approved_snapshot"
+    matches_current_profile: bool
+
+
+class ResumeVersionProfile(BaseModel):
+    """Allowlisted historical display fields from one immutable version."""
+
+    name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    skills: list | None = None
+    projects: list | None = None
+    experience: list | None = None
+    education: list | None = None
+    certifications: list | None = None
+    strengths: list | None = None
+    evidence_links: list | None = None
+    legal_name: str | None = None
+    linkedin_url: str | None = None
+    github_url: str | None = None
+    portfolio_url: str | None = None
+
+
+class ResumeVersionDetail(ResumeVersionSummary):
+    tailored_bullets: list[str] = Field(default_factory=list)
+    source_traceability_notes: list[str] = Field(default_factory=list)
+    profile: ResumeVersionProfile
 
 
 class InterviewPrep(BaseModel):
