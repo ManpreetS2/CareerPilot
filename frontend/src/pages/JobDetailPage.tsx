@@ -6,6 +6,7 @@ import { FitScorePanel } from "../components/FitScorePanel";
 import { InterviewPrepPanel } from "../components/InterviewPrepPanel";
 import { JobIntelligencePanel } from "../components/JobIntelligencePanel";
 import { LoadingState } from "../components/LoadingState";
+import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { api, ApiClientError } from "../lib/api";
 import { saveSelectedJobId } from "../lib/session";
@@ -228,7 +229,10 @@ export function JobDetailPage() {
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusBadge status={job.status} />
-            <span className="text-xs uppercase tracking-wide text-ink-500">{job.source}</span>
+            <SourceBadge source={job.source} />
+            {scoutedTimeAgo(job.date_scraped) ? (
+              <span className="text-xs text-ink-500">{scoutedTimeAgo(job.date_scraped)}</span>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">

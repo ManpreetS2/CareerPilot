@@ -1,5 +1,6 @@
-"""Job Scout — Adzuna + RemoteOK discovery, manual URL ingestion, normalization,
-deduplication, and SQLite persistence. Owned by Developer B (Day 2).
+"""Job Scout — Adzuna, RemoteOK, Greenhouse, Lever, and Remotive discovery,
+manual URL ingestion, normalization, deduplication, and SQLite persistence.
+Owned by Developer B (Day 2).
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import httpx
 
@@ -43,11 +44,19 @@ MANUAL_INGEST_PLACEHOLDER_DESCRIPTION = (
 )
 
 GREENHOUSE_API_BASE = "https://boards-api.greenhouse.io/v1"
+GREENHOUSE_POSTING_URL_BASE = "https://boards.greenhouse.io"
 GREENHOUSE_POSTING_HOSTS = frozenset({"boards.greenhouse.io", "job-boards.greenhouse.io"})
 GREENHOUSE_API_HOSTS = frozenset({"boards-api.greenhouse.io"})
 LEVER_POSTING_HOSTS = frozenset({"jobs.lever.co"})
+LEVER_API_BASE = "https://api.lever.co/v0"
+LEVER_API_HOSTS = frozenset({"api.lever.co"})
+REMOTIVE_SEARCH_URL = "https://remotive.com/api/remote-jobs"
+REMOTIVE_API_HOSTS = frozenset({"remotive.com"})
 _MIN_INGEST_DESCRIPTION_LENGTH = 40
 _GREENHOUSE_JOB_PATH_RE = re.compile(r"^/([^/]+)/jobs/(\d+)/?$")
+_LEVER_JOB_PATH_RE = re.compile(
+    r"^/([^/]+)/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/?$"
+)
 _BOARD_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -101,6 +110,36 @@ def _greenhouse_posting_dedupe_key(url: str | None) -> str | None:
     if ref is None:
         return None
     return f"greenhouse|{ref.board_token}|{ref.job_id}"
+
+
+def parse_lever_posting_url(url: str) -> tuple[str, str] | None:
+    """Parse a jobs.lever.co posting URL into (company_slug, posting_id)."""
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError:
+        return None
+    if parsed.query or parsed.fragment:
+        return None
+    host = (parsed.hostname or "").lower()
+    if host not in LEVER_POSTING_HOSTS:
+        return None
+    match = _LEVER_JOB_PATH_RE.match(parsed.path or "")
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _lever_posting_dedupe_key(url: str | None) -> str | None:
+    """Independent of `source` — same shape as the Greenhouse key, so a
+    manually-pasted Lever URL and a bulk-discovered Lever posting for the
+    same job collapse into one row."""
+    if not url:
+        return None
+    ref = parse_lever_posting_url(url)
+    if ref is None:
+        return None
+    company_slug, posting_id = ref
+    return f"lever|{company_slug}|{posting_id}"
 
 
 def _merge_description(existing: str | None, new: str | None) -> str:
@@ -329,16 +368,153 @@ def scout_remoteok(query: str | None = None) -> list[dict]:
     listings = [item for item in payload if isinstance(item, dict) and item.get("id")]
 
     if query:
-        # Any-word (not exact-phrase) match: a literal "software engineer intern"
-        # substring almost never appears verbatim in a title and returned zero
-        # results in testing. Title only, not tags — RemoteOK's "tags" field is
-        # noisy in practice (e.g. an unrelated "Store Manager" listing carrying
-        # an "engineer" tag), so matching against it produces false positives.
-        words = [w for w in query.lower().split() if w]
-        listings = [
-            item for item in listings if any(w in (item.get("position") or "").lower() for w in words)
-        ]
+        listings = [item for item in listings if _title_matches_query(item.get("position"), query)]
     return listings[: settings.scout_results_per_source]
+
+
+def _default_greenhouse_boards() -> list[str]:
+    return [token.strip() for token in (settings.greenhouse_board_tokens or "").split(",") if token.strip()]
+
+
+def _default_lever_companies() -> list[str]:
+    return [slug.strip() for slug in (settings.lever_company_slugs or "").split(",") if slug.strip()]
+
+
+def _fetch_greenhouse_board_jobs(board_token: str) -> list[dict]:
+    """One list call per board (content=true inlines full descriptions) —
+    not the existing per-job single endpoint, which would be one HTTP call
+    per opening on a board that can have hundreds."""
+    url = f"{GREENHOUSE_API_BASE}/boards/{board_token}/jobs?content=true"
+    try:
+        response = fetch_url_safely(
+            url,
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=GREENHOUSE_API_HOSTS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except UnsafeURLError:
+        raise
+    except httpx.HTTPStatusError:
+        raise JobScoutError("Could not load board listing from Greenhouse.") from None
+    except httpx.TimeoutException:
+        raise JobScoutError("Greenhouse board request timed out.") from None
+    except httpx.HTTPError:
+        raise JobScoutError("Could not load board listing from Greenhouse.") from None
+    except json.JSONDecodeError:
+        raise JobScoutError("Greenhouse returned an unreadable board listing.") from None
+    if not isinstance(payload, dict):
+        raise JobScoutError("Greenhouse returned an unreadable board listing.")
+    return payload.get("jobs") or []
+
+
+def scout_greenhouse(query: str | None = None) -> list[dict]:
+    """Discover current openings across every configured Greenhouse board.
+
+    Greenhouse has no cross-company search — each board must be listed
+    individually — so a single dead/renamed board token must not take down
+    every other configured board (per-token isolation, not just
+    per-provider, since one "source" now fans out over N boards).
+    """
+    listings: list[dict] = []
+    for token in _default_greenhouse_boards():
+        try:
+            raw_jobs = _fetch_greenhouse_board_jobs(token)
+        except JobScoutError as exc:
+            logger.warning("Greenhouse board '%s' skipped: %s", token, exc)
+            continue
+        for item in raw_jobs:
+            if query and not _title_matches_query(item.get("title"), query):
+                continue
+            enriched = dict(item)
+            enriched["_board_token"] = token
+            listings.append(enriched)
+    return listings[: settings.scout_results_per_source]
+
+
+def _fetch_lever_company_postings(company_slug: str) -> list[dict]:
+    url = f"{LEVER_API_BASE}/postings/{company_slug}?mode=json"
+    try:
+        response = fetch_url_safely(
+            url,
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=LEVER_API_HOSTS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except UnsafeURLError:
+        raise
+    except httpx.HTTPStatusError:
+        raise JobScoutError("Could not load company postings from Lever.") from None
+    except httpx.TimeoutException:
+        raise JobScoutError("Lever postings request timed out.") from None
+    except httpx.HTTPError:
+        raise JobScoutError("Could not load company postings from Lever.") from None
+    except json.JSONDecodeError:
+        raise JobScoutError("Lever returned an unreadable postings list.") from None
+    if not isinstance(payload, list):
+        raise JobScoutError("Lever returned an unreadable postings list.")
+    return payload
+
+
+def scout_lever(query: str | None = None) -> list[dict]:
+    """Discover current openings across every configured Lever company.
+
+    Same board-scoped constraint as Greenhouse — Lever's public API lists
+    one company's postings at a time, no cross-company search — so each
+    company slug gets its own try/except (per-company isolation).
+    """
+    listings: list[dict] = []
+    for slug in _default_lever_companies():
+        try:
+            raw_jobs = _fetch_lever_company_postings(slug)
+        except JobScoutError as exc:
+            logger.warning("Lever company '%s' skipped: %s", slug, exc)
+            continue
+        for item in raw_jobs:
+            if query and not _title_matches_query(item.get("text"), query):
+                continue
+            enriched = dict(item)
+            enriched["_company_slug"] = slug
+            listings.append(enriched)
+    return listings[: settings.scout_results_per_source]
+
+
+def scout_remotive(query: str | None = None) -> list[dict]:
+    """Remotive's public API: keyless, but rate-limited and attribution-
+    gated by its own terms (linking back to the original remotive.com URL
+    and crediting Remotive as the source — both already satisfied here,
+    since job.url stores the Remotive URL and job.source="remotive" drives
+    the UI's source badge; and no more than a few requests a day, satisfied
+    by only ever calling this from a user-triggered "Find Jobs" click, never
+    a schedule)."""
+    params: dict[str, object] = {"limit": settings.scout_results_per_source}
+    if query:
+        params["search"] = query
+    try:
+        response = fetch_url_safely(
+            f"{REMOTIVE_SEARCH_URL}?{urlencode(params)}",
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=REMOTIVE_API_HOSTS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except UnsafeURLError:
+        raise
+    except httpx.HTTPStatusError:
+        raise JobScoutError("Could not reach Remotive.") from None
+    except httpx.TimeoutException:
+        raise JobScoutError("Remotive request timed out.") from None
+    except httpx.HTTPError:
+        raise JobScoutError("Could not reach Remotive.") from None
+    except json.JSONDecodeError:
+        raise JobScoutError("Remotive returned an unreadable response.") from None
+    if not isinstance(payload, dict):
+        raise JobScoutError("Remotive returned an unreadable response.")
+    return payload.get("jobs") or []
 
 
 # Free-tier ATS platforms where the subdomain is a fixed platform word
@@ -391,6 +567,29 @@ def _parse_iso_date(value: str | None) -> date | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
     except ValueError:
         return None
+
+
+def _parse_epoch_millis(value: object) -> date | None:
+    """Lever's createdAt is epoch milliseconds, not an ISO string."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).date()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _title_matches_query(title: str | None, query: str) -> bool:
+    """Any-word (not exact-phrase) match against a listing title — a literal
+    multi-word query almost never appears verbatim in a title. Used by every
+    full-feed source (RemoteOK, and the board-scoped Greenhouse/Lever APIs,
+    which have no server-side search of their own) to filter relevance
+    client-side. Title only, not tags/categories — noisy in practice (an
+    unrelated listing can carry a misleadingly matching tag)."""
+    words = [w for w in query.lower().split() if w]
+    if not words:
+        return True
+    return any(w in (title or "").lower() for w in words)
 
 
 def _format_salary(min_value: float | None, max_value: float | None) -> str | None:
@@ -459,6 +658,56 @@ def normalize_job(raw: dict, source: str) -> Job:
             ats=raw.get("ats"),
         )
 
+    if source == "greenhouse":
+        board_token = raw.get("_board_token") or ""
+        job_id = raw.get("id")
+        company = _clean_line(raw.get("company_name")) or _board_token_company_name(board_token)
+        url = f"{GREENHOUSE_POSTING_URL_BASE}/{board_token}/jobs/{job_id}" if board_token and job_id else ""
+        return Job(
+            title=_clean_line(raw.get("title")) or "Untitled role",
+            company=company,
+            location=_clean_line((raw.get("location") or {}).get("name")) or None,
+            salary=None,
+            url=url,
+            description=_clean_description(raw.get("content")),
+            source="greenhouse",
+            date_posted=_parse_iso_date(raw.get("first_published")),
+            date_scraped=now,
+            status="discovered",
+            ats="greenhouse",
+        )
+
+    if source == "lever":
+        categories = raw.get("categories") or {}
+        company_slug = raw.get("_company_slug") or ""
+        return Job(
+            title=_clean_line(raw.get("text")) or "Untitled role",
+            company=_board_token_company_name(company_slug) if company_slug else "Unknown",
+            location=_clean_line(categories.get("location")) or None,
+            salary=None,
+            url=raw.get("hostedUrl") or "",
+            description=_clean_description(raw.get("descriptionPlain") or raw.get("description")),
+            source="lever",
+            date_posted=_parse_epoch_millis(raw.get("createdAt")),
+            date_scraped=now,
+            status="discovered",
+            ats="lever",
+        )
+
+    if source == "remotive":
+        return Job(
+            title=_clean_line(raw.get("title")) or "Untitled role",
+            company=_clean_line(raw.get("company_name")) or "Unknown",
+            location=_clean_line(raw.get("candidate_required_location")) or "Remote",
+            salary=_clean_line(raw.get("salary")) or None,
+            url=raw.get("url") or "",
+            description=_clean_description(raw.get("description")),
+            source="remotive",
+            date_posted=_parse_iso_date(raw.get("publication_date")),
+            date_scraped=now,
+            status="discovered",
+        )
+
     raise ValueError(f"Unknown job source '{source}'")
 
 
@@ -480,6 +729,9 @@ def _dedupe_key(job: Job) -> str:
     greenhouse_key = _greenhouse_posting_dedupe_key(job.url)
     if greenhouse_key:
         return greenhouse_key
+    lever_key = _lever_posting_dedupe_key(job.url)
+    if lever_key:
+        return lever_key
     normalized_url = _normalize_url(job.url)
     if normalized_url:
         return normalized_url
@@ -514,6 +766,12 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
             for key in [_greenhouse_posting_dedupe_key(record.url)]
             if key
         }
+        by_lever = {
+            key: record
+            for record in existing_records
+            for key in [_lever_posting_dedupe_key(record.url)]
+            if key
+        }
         by_fingerprint = {
             _fingerprint(record.title, record.company, record.location): record
             for record in existing_records
@@ -523,8 +781,10 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
             key = _dedupe_key(job)
             normalized_url = _normalize_url(job.url)
             greenhouse_key = _greenhouse_posting_dedupe_key(job.url)
+            lever_key = _lever_posting_dedupe_key(job.url)
             existing = (
                 (by_greenhouse.get(greenhouse_key) if greenhouse_key else None)
+                or (by_lever.get(lever_key) if lever_key else None)
                 or (by_url.get(normalized_url) if normalized_url else None)
                 or by_fingerprint.get(key)
             )
@@ -541,11 +801,19 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                     existing.date_posted = job.date_posted.isoformat()
                 existing.date_scraped = job.date_scraped
                 existing.ats = job.ats or existing.ats
+                # A job reappearing in a scout run is live again — a stale
+                # mark must not be permanent. Leave flagged/verified alone:
+                # those carry a human/content verdict that mere reappearance
+                # shouldn't silently overwrite.
+                if existing.status == "stale":
+                    existing.status = "discovered"
                 record = existing
                 if normalized_url:
                     by_url[normalized_url] = record
                 if greenhouse_key:
                     by_greenhouse[greenhouse_key] = record
+                if lever_key:
+                    by_lever[lever_key] = record
             else:
                 record = JobRecord(
                     public_id=f"{job.source}-{uuid.uuid4().hex[:10]}",
@@ -566,6 +834,8 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                     by_url[normalized_url] = record
                 if greenhouse_key:
                     by_greenhouse[greenhouse_key] = record
+                if lever_key:
+                    by_lever[lever_key] = record
                 by_fingerprint[key] = record
 
             db.flush()
@@ -605,4 +875,29 @@ def run_scout(query: str, location: str | None = None) -> list[Job]:
     except JobScoutError as exc:
         logger.warning("Adzuna scout skipped: %s", exc)
 
-    return persist_jobs(deduplicate_jobs(raw_jobs))
+    try:
+        raw_jobs.extend(_normalize_listings(scout_greenhouse(query), "greenhouse"))
+    except JobScoutError as exc:
+        logger.warning("Greenhouse scout skipped: %s", exc)
+
+    try:
+        raw_jobs.extend(_normalize_listings(scout_lever(query), "lever"))
+    except JobScoutError as exc:
+        logger.warning("Lever scout skipped: %s", exc)
+
+    try:
+        raw_jobs.extend(_normalize_listings(scout_remotive(query), "remotive"))
+    except JobScoutError as exc:
+        logger.warning("Remotive scout skipped: %s", exc)
+
+    stored = persist_jobs(deduplicate_jobs(raw_jobs))
+
+    # Deferred import: job_verification_service imports
+    # MANUAL_INGEST_PLACEHOLDER_DESCRIPTION from this module, so the reverse
+    # import must happen at call time to avoid a circular import (same
+    # pattern already used between job_service.py and this module).
+    from backend.services.job_verification_service import mark_stale_if_unseen
+
+    mark_stale_if_unseen()
+
+    return stored

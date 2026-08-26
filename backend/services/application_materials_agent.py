@@ -352,6 +352,7 @@ class ApplicationMaterialsConflictError(ApplicationMaterialsError):
 
 class StaleApplicationMaterialsError(ApplicationMaterialsError):
     def __init__(self, *, reviewed: bool = False) -> None:
+        self.reviewed = reviewed
         if reviewed:
             super().__init__(
                 "Reviewed application materials belong to a previous candidate profile "
