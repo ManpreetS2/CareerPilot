@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -435,3 +436,125 @@ def test_production_main_has_no_browser_fake_materials_backdoor() -> None:
     source = Path("backend/main.py").read_text(encoding="utf-8")
     assert "_browser_fake_materials" not in source
     assert "CAREERPILOT_BROWSER_FAKE_MATERIALS" not in source
+
+
+def _profile_b():
+    from backend.schemas.schemas import CandidateProfile
+
+    return CandidateProfile(
+        name="Riley Chen",
+        email="riley@example.com",
+        phone="555-0199",
+        skills=["Python", "SQL", "Kubernetes"],
+        projects=[
+            {
+                "name": "Campus Planner",
+                "description": "Python API for campus events.",
+                "technologies": ["Python", "FastAPI"],
+                "url": None,
+            }
+        ],
+        experience=[
+            {
+                "title": "Software Engineering Intern",
+                "company": "Northstar Labs",
+                "start_date": "2025-05",
+                "end_date": "2025-08",
+                "highlights": ["Reduced p95 latency on search endpoints by 28%."],
+            }
+        ],
+        education=[
+            {
+                "institution": "State University",
+                "degree": "B.S.",
+                "field": "Computer Science",
+                "graduation_year": "2027",
+            }
+        ],
+        certifications=[],
+        strengths=["Backend APIs"],
+        evidence_links=[],
+    )
+
+
+def test_profile_change_during_generate_fails_closed_without_persist(isolated_session, caplog) -> None:
+    from backend.services.candidate_profile_agent import persist_candidate_profile
+
+    caplog.set_level(logging.DEBUG)
+    seed_materials_prerequisites(isolated_session)
+    original_id = isolated_session.query(Candidate).one().id
+
+    def racing_generator(_prompt: str, _system_prompt: str | None = None) -> str:
+        persist_candidate_profile(_profile_b(), isolated_session, TEST_USER_ID)
+        isolated_session.expire_all()
+        current = isolated_session.query(Candidate).filter_by(user_id=TEST_USER_ID).one()
+        assert current.id == original_id
+        assert current.name == "Riley Chen"
+        return VALID_MATERIALS_JSON
+
+    with pytest.raises(StaleApplicationMaterialsError):
+        generate_grounded_application_materials(
+            isolated_session, "manual-abc123", TEST_USER_ID, generator=racing_generator
+        )
+    assert isolated_session.query(ApplicationPackageRecord).count() == 0
+    logs = caplog.text
+    assert "Riley Chen" not in logs
+    assert "Jordan Avery" not in logs
+    assert "riley@example.com" not in logs
+    assert "You write application materials" not in logs
+    assert "Built Python APIs at Northstar Labs" not in logs
+
+
+def test_profile_change_during_generate_does_not_call_fallback_provider(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.services.candidate_profile_agent import persist_candidate_profile
+
+    seed_materials_prerequisites(isolated_session)
+    providers_used: list[str] = []
+
+    monkeypatch.setattr(
+        "backend.services.application_materials_agent.configured_provider_names",
+        lambda: ["ollama", "gemini"],
+    )
+
+    def fake_client(name: str):
+        providers_used.append(name)
+        return object()
+
+    def fake_invoke(_client, _prompt, _system, _schema):
+        persist_candidate_profile(_profile_b(), isolated_session, TEST_USER_ID)
+        isolated_session.expire_all()
+        return VALID_MATERIALS_JSON
+
+    monkeypatch.setattr("backend.services.application_materials_agent.get_llm_client", fake_client)
+    monkeypatch.setattr(
+        "backend.services.application_materials_agent.invoke_provider_generate", fake_invoke
+    )
+
+    with pytest.raises(StaleApplicationMaterialsError):
+        generate_grounded_application_materials(isolated_session, "manual-abc123", TEST_USER_ID)
+    assert providers_used == ["ollama"]
+    assert isolated_session.query(ApplicationPackageRecord).count() == 0
+
+
+def test_profile_change_during_generate_http_is_409(isolated_client) -> None:
+    from backend.services.candidate_profile_agent import persist_candidate_profile
+
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        seed_materials_prerequisites(db, user_id=client.test_user_id)
+
+    def racing_generator(_prompt: str, _system_prompt: str | None = None) -> str:
+        with SessionLocal() as db:
+            persist_candidate_profile(_profile_b(), db, client.test_user_id)
+        return VALID_MATERIALS_JSON
+
+    client.app.state.application_materials_generator = racing_generator
+    response = client.post("/api/jobs/manual-abc123/generate-materials")
+    assert response.status_code == 409
+    detail = response.json()["detail"].lower()
+    assert "previous candidate" in detail
+    assert "riley" not in detail
+    with SessionLocal() as db:
+        assert db.query(ApplicationPackageRecord).count() == 0

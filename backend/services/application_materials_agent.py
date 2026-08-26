@@ -73,6 +73,7 @@ from backend.services.llm_provider_sequence import (
 from backend.services.llm_structured_schemas import application_materials_llm_schema
 from backend.services.candidate_provenance import (
     current_resume_input_fingerprint,
+    fingerprint_for_candidate,
     package_matches_current_resume_profile,
 )
 
@@ -423,6 +424,7 @@ class ApplicationMaterialsContext:
     fit_score: MatchScore
     preferences: TargetPreferences | None
     posting_text: str
+    resume_input_fingerprint: str
 
 
 @dataclass
@@ -570,6 +572,7 @@ def load_application_materials_context(db: Session, job_id: str, user_id: int) -
         fit_score=_match_record_to_schema(score_record, job_id),
         preferences=_preference_record_to_schema(preference_record) if preference_record else None,
         posting_text=f"{job_record.title}\n{job_record.company}\n{job_record.description}",
+        resume_input_fingerprint=fingerprint_for_candidate(db, candidate_record, user_id),
     )
 
 
@@ -1519,11 +1522,18 @@ def _persist_grounded_draft(
     existing: ApplicationPackageRecord | None = None,
 ) -> ApplicationPackageRecord:
     payload = draft_to_persistence_payload(draft)
-    fingerprint = current_resume_input_fingerprint(db, context.user_id)
+    current_fingerprint = current_resume_input_fingerprint(db, context.user_id, refresh=True)
+    if (
+        not context.resume_input_fingerprint
+        or current_fingerprint != context.resume_input_fingerprint
+    ):
+        db.rollback()
+        raise StaleApplicationMaterialsError(reviewed=False)
+    fingerprint = context.resume_input_fingerprint
     same_candidate = (
         existing is not None
         and existing.candidate_id == context.candidate_pk
-        and package_matches_current_resume_profile(db, existing, context.user_id)
+        and existing.candidate_profile_fingerprint == fingerprint
     )
     if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
         if same_candidate:
@@ -1574,7 +1584,7 @@ def _persist_grounded_draft(
             winner is not None
             and is_grounded_package_record(winner)
             and winner.candidate_id == context.candidate_pk
-            and package_matches_current_resume_profile(db, winner, context.user_id)
+            and winner.candidate_profile_fingerprint == context.resume_input_fingerprint
             and winner.user_id == context.user_id
         ):
             logger.info(

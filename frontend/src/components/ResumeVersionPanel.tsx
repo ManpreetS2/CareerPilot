@@ -126,8 +126,8 @@ export function ResumeVersionPanel({
                 </span>
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-700 dark:text-ink-200">
-                {version.tailored_bullets.map((bullet) => (
-                  <li key={bullet}>{bullet}</li>
+                {version.tailored_bullets.map((bullet, index) => (
+                  <li key={`${version.id}:${index}`}>{bullet}</li>
                 ))}
               </ul>
             </li>

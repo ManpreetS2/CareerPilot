@@ -139,12 +139,17 @@ def fingerprint_for_candidate(db: Session, candidate: Candidate, user_id: int) -
     return hash_resume_input_snapshot(build_resume_input_snapshot(db, candidate, user_id))
 
 
-def current_candidate(db: Session, user_id: int) -> Candidate | None:
-    return db.query(Candidate).filter(Candidate.user_id == user_id).first()
+def current_candidate(db: Session, user_id: int, *, refresh: bool = False) -> Candidate | None:
+    query = db.query(Candidate).filter(Candidate.user_id == user_id)
+    if refresh:
+        query = query.populate_existing()
+    return query.first()
 
 
-def current_resume_input_fingerprint(db: Session, user_id: int) -> str | None:
-    candidate = current_candidate(db, user_id)
+def current_resume_input_fingerprint(
+    db: Session, user_id: int, *, refresh: bool = False
+) -> str | None:
+    candidate = current_candidate(db, user_id, refresh=refresh)
     if candidate is None:
         return None
     return fingerprint_for_candidate(db, candidate, user_id)

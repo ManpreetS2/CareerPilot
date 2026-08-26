@@ -28,7 +28,7 @@ from backend.services.candidate_provenance import (
     build_resume_input_snapshot,
     canonical_string_list,
     hash_approved_materials,
-    package_matches_current_resume_profile,
+    hash_resume_input_snapshot,
     version_content_hash,
 )
 
@@ -57,8 +57,11 @@ def _load_job(db: Session, job_public_id: str) -> JobRecord:
     return job
 
 
-def _current_candidate(db: Session, user_id: int) -> Candidate | None:
-    return db.query(Candidate).filter(Candidate.user_id == user_id).first()
+def _current_candidate(db: Session, user_id: int, *, refresh: bool = False) -> Candidate | None:
+    query = db.query(Candidate).filter(Candidate.user_id == user_id)
+    if refresh:
+        query = query.populate_existing()
+    return query.first()
 
 
 def _owned_package(db: Session, job: JobRecord, user_id: int) -> ApplicationPackageRecord | None:
@@ -132,10 +135,8 @@ def save_resume_version(db: Session, job_public_id: str, user_id: int) -> tuple[
         raise ResumeVersionNotFoundError("Approved application materials were not found.")
     if package.approval_status != "approved" or not is_package_ready_for_apply(db, package, user_id):
         raise ResumeVersionConflictError()
-    if not package_matches_current_resume_profile(db, package, user_id):
-        raise ResumeVersionConflictError()
 
-    candidate = _current_candidate(db, user_id)
+    candidate = _current_candidate(db, user_id, refresh=True)
     if candidate is None:
         raise ResumeVersionConflictError()
 
@@ -146,6 +147,10 @@ def save_resume_version(db: Session, job_public_id: str, user_id: int) -> tuple[
         raise ResumeVersionConflictError()
 
     snapshot = build_resume_input_snapshot(db, candidate, user_id)
+    stored_fingerprint = getattr(package, "candidate_profile_fingerprint", None)
+    if not stored_fingerprint or hash_resume_input_snapshot(snapshot) != stored_fingerprint:
+        raise ResumeVersionConflictError()
+
     digest = version_content_hash(snapshot, bullets, notes)
 
     existing = (
