@@ -198,4 +198,17 @@ describe("AppShell", () => {
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
     expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
   });
+
+  it("requests a top scroll when the route changes", async () => {
+    const user = userEvent.setup();
+    const scrollTo = vi.mocked(window.scrollTo);
+    renderShell("/dashboard");
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
+    scrollTo.mockClear();
+    await user.click(
+      within(screen.getByTestId("app-sidebar")).getByRole("link", { name: "Settings", hidden: true }),
+    );
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
+  });
 });
