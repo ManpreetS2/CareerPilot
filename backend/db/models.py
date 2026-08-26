@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -128,6 +128,7 @@ class JobRecord(Base):
     intelligence: Mapped["JobIntelligenceRecord | None"] = relationship(back_populates="job")
     match_scores: Mapped[list["MatchScoreRecord"]] = relationship(back_populates="job")
     applications: Mapped[list["ApplicationPackageRecord"]] = relationship(back_populates="job")
+    resume_versions: Mapped[list["ResumeVersionRecord"]] = relationship(back_populates="job")
     form_fill_attempts: Mapped[list["FormFillAttemptRecord"]] = relationship(back_populates="job")
     tracker_rows: Mapped[list["ApplicationTrackerRecord"]] = relationship(back_populates="job")
     interview_prep_rows: Mapped[list["InterviewPrepRecord"]] = relationship(back_populates="job")
@@ -200,6 +201,52 @@ class ApplicationPackageRecord(Base):
     )
 
     job: Mapped[JobRecord] = relationship(back_populates="applications")
+
+
+class ResumeVersionRecord(Base):
+    """Immutable per-job snapshot of approved tailored resume bullets.
+
+    One mutable ApplicationPackageRecord remains the working draft. Resume
+    versions are append-only audit records so a later exporter can render a
+    specific approved snapshot without racing package edits.
+    """
+
+    __tablename__ = "resume_versions"
+    __table_args__ = (
+        Index("ux_resume_versions_public_id", "public_id", unique=True),
+        Index(
+            "ux_resume_versions_job_user_version",
+            "job_id",
+            "user_id",
+            "version_number",
+            unique=True,
+        ),
+        Index(
+            "ux_resume_versions_job_user_hash",
+            "job_id",
+            "user_id",
+            "content_hash",
+            unique=True,
+        ),
+        Index("ix_resume_versions_job_user", "job_id", "user_id"),
+        Index("ix_resume_versions_user_id", "user_id"),
+        CheckConstraint("version_number >= 1", name="ck_resume_versions_version_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    public_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id"), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    tailored_bullets: Mapped[list] = mapped_column(JSON, default=list)
+    source_traceability_notes: Mapped[list] = mapped_column(JSON, default=list)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    job: Mapped[JobRecord] = relationship(back_populates="resume_versions")
 
 
 class FormFillAttemptRecord(Base):
