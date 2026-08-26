@@ -376,6 +376,51 @@ def test_job_intelligence_missing_evidence_does_not_call_provider(
     assert scripted.calls == []
 
 
+def test_job_intelligence_second_attempt_succeeds_without_calling_gemini(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    job = _job(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", "not-json", json.dumps(_payload()))
+    scripted.script("gemini", "GEMINI_SHOULD_NOT_RUN")
+    _patch_clients(monkeypatch, scripted, *_intel_modules())
+    stored = extract_job_intelligence(isolated_session, job.public_id)
+    assert stored.required_skills
+    assert scripted.calls == ["ollama", "ollama"]
+    assert isolated_session.query(JobIntelligenceRecord).count() == 1
+
+
+def test_job_intelligence_meaningful_ollama_failure_survives_unconfigured_gemini(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    job = _job(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", "not-json", "still not json")
+    scripted.script("gemini", LLMConfigurationError("Gemini is not configured."))
+    _patch_clients(monkeypatch, scripted, *_intel_modules())
+    with pytest.raises(StructuredIntelligenceError):
+        extract_job_intelligence(isolated_session, job.public_id)
+    assert scripted.calls == ["ollama", "ollama", "gemini"]
+    assert isolated_session.query(JobIntelligenceRecord).count() == 0
+
+
+def test_job_intelligence_all_providers_genuinely_unconfigured_returns_configuration_error(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    job = _job(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", LLMConfigurationError("Ollama is not configured."))
+    scripted.script("gemini", LLMConfigurationError("Gemini is not configured."))
+    _patch_clients(monkeypatch, scripted, *_intel_modules())
+    with pytest.raises(LLMConfigurationError):
+        extract_job_intelligence(isolated_session, job.public_id)
+    assert scripted.calls == ["ollama", "gemini"]
+    assert isolated_session.query(JobIntelligenceRecord).count() == 0
+
+
 def test_materials_ollama_success_never_calls_gemini(isolated_session, monkeypatch: pytest.MonkeyPatch) -> None:
     _order(monkeypatch, "ollama,gemini")
     job, _candidate = seed_materials_prerequisites(isolated_session)

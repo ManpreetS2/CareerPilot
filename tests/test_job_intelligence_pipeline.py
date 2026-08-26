@@ -32,6 +32,7 @@ from scripts.test_job_intelligence_real_descriptions import (
     SourcePosting,
     _counts_line,
     _final_result,
+    _first_configured_provider,
     _has_required_variety,
     _select_postings,
 )
@@ -821,6 +822,31 @@ def test_cli_temporary_database_runs_without_confirm(
     output = capsys.readouterr().out.strip()
     assert "extracted=1" in output
     assert "result=refused" not in output
+
+
+def test_manual_qa_gate_selects_ollama_first_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("backend.core.config.settings.llm_provider_order", "ollama,gemini")
+    monkeypatch.setattr("backend.core.config.settings.gemini_api_key", "")
+    assert _first_configured_provider() == "ollama"
+
+
+def test_manual_qa_gate_is_blocked_only_when_nothing_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("backend.core.config.settings.llm_provider_order", "ollama,gemini")
+    monkeypatch.setattr("backend.core.config.settings.ollama_base_url", "")
+    monkeypatch.setattr("backend.core.config.settings.gemini_api_key", "")
+    assert _first_configured_provider() is None
+
+
+def test_manual_qa_gate_falls_back_past_an_unconfigured_first_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("backend.core.config.settings.llm_provider_order", "gemini,ollama")
+    monkeypatch.setattr("backend.core.config.settings.gemini_api_key", "")
+    assert _first_configured_provider() == "ollama"
 
 
 def test_manual_qa_does_not_mask_validation_failure_as_provider_blocker() -> None:

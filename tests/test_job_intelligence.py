@@ -119,6 +119,7 @@ def test_valid_structured_extraction_is_grounded_and_persisted(isolated_session)
     assert job.title in prompt and job.description in prompt
     assert "candidate" not in prompt.lower()
     assert "preference" not in prompt.lower()
+    assert '"job_id"' not in prompt
 
 
 def test_invalid_json_gets_one_structured_correction_attempt(isolated_session) -> None:
@@ -162,9 +163,11 @@ def test_two_invalid_structured_responses_fail_without_persistence(
     assert isolated_session.query(JobIntelligenceRecord).count() == 0
 
 
-def test_two_empty_structured_objects_retry_then_return_grounding_409(
+def test_two_empty_structured_objects_exhaust_the_provider_without_grounding(
     isolated_client,
 ) -> None:
+    """{} is schema-invalid as a complete extraction. Both attempts must
+    exhaust structured retries as a 502, not slip into grounding as 409."""
     client, SessionLocal = isolated_client
     with SessionLocal() as session:
         job = _job(session)
@@ -177,11 +180,83 @@ def test_two_empty_structured_objects_retry_then_return_grounding_409(
     ):
         response = client.post(f"/api/jobs/{job.public_id}/intelligence")
 
-    assert response.status_code == 409
-    assert response.json() == {"detail": "No supported job requirements were found."}
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Unable to extract structured job requirements."}
     assert fake_client.generate.call_count == 2
     with SessionLocal() as session:
         assert session.query(JobIntelligenceRecord).count() == 0
+
+
+def test_all_output_keys_present_but_empty_is_unusable_on_both_attempts(
+    isolated_session,
+) -> None:
+    all_empty = json.dumps(
+        _payload(
+            required_skills=[],
+            preferred_skills=[],
+            years_experience=None,
+            education_requirements=[],
+            tech_stack=[],
+            seniority=None,
+            responsibilities=[],
+            likely_interview_focus=[],
+        )
+    )
+    job = _job(isolated_session)
+    generator = SequenceGenerator(all_empty, all_empty)
+
+    with pytest.raises(StructuredIntelligenceError):
+        extract_job_intelligence(
+            isolated_session,
+            job.public_id,
+            generate_fn=generator,
+        )
+
+    assert len(generator.prompts) == 2
+    assert isolated_session.query(JobIntelligenceRecord).count() == 0
+
+
+def test_invalid_first_then_empty_second_exhausts_the_provider(
+    isolated_session,
+) -> None:
+    job = _job(isolated_session)
+    generator = SequenceGenerator("not json", "{}")
+
+    with pytest.raises(StructuredIntelligenceError):
+        extract_job_intelligence(
+            isolated_session,
+            job.public_id,
+            generate_fn=generator,
+        )
+
+    assert len(generator.prompts) == 2
+    assert isolated_session.query(JobIntelligenceRecord).count() == 0
+
+
+def test_prompt_and_raw_schema_agree_and_exclude_job_id(isolated_session) -> None:
+    from backend.services.job_intelligence_service import build_extraction_prompts
+    from backend.services.llm_structured_schemas import job_intelligence_llm_schema
+
+    job = _job(isolated_session)
+    _system, user_prompt = build_extraction_prompts(job)
+    schema = job_intelligence_llm_schema()
+    expected = {
+        "required_skills",
+        "preferred_skills",
+        "years_experience",
+        "education_requirements",
+        "tech_stack",
+        "seniority",
+        "responsibilities",
+        "likely_interview_focus",
+    }
+    assert set(schema["properties"].keys()) == expected
+    assert set(schema["required"]) == expected
+    assert schema["additionalProperties"] is False
+    assert "job_id" not in schema["properties"]
+    assert '"job_id"' not in user_prompt
+    for key in expected:
+        assert f'"{key}"' in user_prompt
 
 
 def test_provider_failure_creates_no_row_and_does_not_retry_structured_output(
@@ -797,6 +872,125 @@ def test_responsibilities_and_interview_topics_require_traceable_exact_evidence(
 
     assert grounded.responsibilities == ["Improve API latency by 20%."]
     assert grounded.likely_interview_focus == ["Python", "Distributed systems"]
+
+
+def test_responsibility_sentence_grounds_from_an_unbulleted_paragraph(
+    isolated_session,
+) -> None:
+    job = _job(
+        isolated_session,
+        title="Software Engineer Intern",
+        description=(
+            "Role Summary/Purpose: At Fictional Meridian, a software engineer "
+            "internship allows you to gain real-world experience. You will learn "
+            "how to code, test, and document changes for new product features. "
+            "You will also learn the overall technology landscape and collaborate "
+            "with a cross-functional team."
+        ),
+    )
+    raw = _payload(
+        required_skills=[],
+        preferred_skills=[],
+        tech_stack=[],
+        years_experience=None,
+        education_requirements=[],
+        seniority=None,
+        responsibilities=[
+            "You will learn how to code, test, and document changes for new product features.",
+            "Learn to code and ship features.",
+            "Own the product roadmap end to end.",
+        ],
+        likely_interview_focus=[],
+    )
+
+    grounded, counts = ground_job_intelligence(raw, job)
+
+    assert grounded.responsibilities == [
+        "You will learn how to code, test, and document changes for new product features."
+    ]
+    assert counts["responsibilities"] == 2
+
+
+def test_responsibility_sentence_grounds_across_multiple_real_line_breaks(
+    isolated_session,
+) -> None:
+    job = _job(
+        isolated_session,
+        title="Platform Engineer",
+        description=(
+            "Responsibilities:\n"
+            "Design and operate internal deployment tooling.\n"
+            "On-call rotation for production incidents.\n"
+            "Requirements:\nPython"
+        ),
+    )
+    raw = _payload(
+        required_skills=["Python"],
+        preferred_skills=[],
+        tech_stack=[],
+        years_experience=None,
+        education_requirements=[],
+        seniority=None,
+        responsibilities=[
+            "Design and operate internal deployment tooling.",
+            "On-call rotation for production incidents.",
+        ],
+        likely_interview_focus=[],
+    )
+
+    grounded, counts = ground_job_intelligence(raw, job)
+
+    assert grounded.responsibilities == [
+        "Design and operate internal deployment tooling.",
+        "On-call rotation for production incidents.",
+    ]
+    assert counts["responsibilities"] == 0
+
+
+def test_realistic_model_shaped_paragraph_output_grounds_end_to_end(
+    isolated_session,
+) -> None:
+    job = _job(
+        isolated_session,
+        title="Software Engineer Intern - Fall 2026",
+        description=(
+            "Role Summary/Purpose: At Fictional Meridian, a software engineer "
+            "internship allows you to gain experience while you are still "
+            "pursuing your degree. You will learn how to code, test, and "
+            "document changes for enhancements to existing software.\n"
+            "Requirements:\nExperience with Python\n3 years of professional "
+            "experience\nPreferred: Familiarity with Docker"
+        ),
+    )
+    raw = json.dumps(
+        {
+            "required_skills": ["  Python ", "Python", "Quantum Blockchain AI"],
+            "preferred_skills": ["Docker"],
+            "years_experience": 3,
+            "education_requirements": [],
+            "tech_stack": [],
+            "seniority": None,
+            "responsibilities": [
+                "You will learn how to code, test, and document changes for enhancements to existing software.",
+                "Single-handedly rebuild the platform from scratch.",
+            ],
+            "likely_interview_focus": [],
+        }
+    )
+
+    result = extract_job_intelligence(
+        isolated_session,
+        job.public_id,
+        generate_fn=lambda _prompt, _system: raw,
+    )
+
+    assert result.required_skills == ["Python"]
+    assert result.preferred_skills == ["Docker"]
+    assert result.years_experience == 3
+    assert result.responsibilities == [
+        "You will learn how to code, test, and document changes for enhancements to existing software."
+    ]
+    assert isolated_session.query(JobIntelligenceRecord).count() == 1
 
 
 def test_empty_grounded_result_returns_409_and_persists_nothing(isolated_client) -> None:

@@ -47,7 +47,6 @@ _SYSTEM_PROMPT = (
 )
 
 _JSON_SHAPE = """{
-  "job_id": null,
   "required_skills": ["exact skill phrase"],
   "preferred_skills": ["exact skill phrase"],
   "years_experience": null,
@@ -241,7 +240,10 @@ JOB DESCRIPTION:
 def _retry_prompt(original: str) -> str:
     return (
         original
-        + "\n\nIMPORTANT: Previous output was invalid. Return one complete raw JSON object only."
+        + "\n\nIMPORTANT: Previous output was invalid or empty. Return one complete raw "
+        "JSON object with every key present. Use literal phrases copied from the posting "
+        "text above — do not paraphrase. Use [] or null for any category with no "
+        "supported evidence; do not leave a key out."
     )
 
 
@@ -276,8 +278,12 @@ def _parse_structured_output(raw: str) -> JobIntelligence:
         raise StructuredIntelligenceError() from exc
     if not isinstance(payload, dict):
         raise StructuredIntelligenceError()
-    unknown = set(payload) - {"job_id", *_STRUCTURED_FIELDS}
+    payload = dict(payload)
+    payload.pop("job_id", None)
+    unknown = set(payload) - set(_STRUCTURED_FIELDS)
     if unknown:
+        raise StructuredIntelligenceError()
+    if any(field not in payload for field in _STRUCTURED_FIELDS):
         raise StructuredIntelligenceError()
     if isinstance(payload.get("years_experience"), bool):
         raise StructuredIntelligenceError()
@@ -709,6 +715,22 @@ def _normalized_line(value: str) -> str:
     return value.rstrip(" .;:").lower()
 
 
+def _split_into_clauses(text: str) -> list[str]:
+    """Split a dense paragraph into exact sentences/clauses. Punctuation-based
+    only — no fuzzy or semantic matching."""
+    return [
+        clause.strip()
+        for clause in re.split(r"\s*(?:;|\|)\s*|(?<=[.!?])\s+(?=[A-Z])", text)
+        if clause.strip()
+    ]
+
+
+def _add_line_and_clauses(lines: set[str], text: str) -> None:
+    lines.add(_normalized_line(text))
+    for clause in _split_into_clauses(text):
+        lines.add(_normalized_line(clause))
+
+
 def _responsibility_source_lines(source: str) -> set[str]:
     lines: set[str] = set()
     in_responsibilities = False
@@ -724,7 +746,7 @@ def _responsibility_source_lines(source: str) -> set[str]:
             flags=re.I,
         )
         if inline_responsibility:
-            lines.add(_normalized_line(inline_responsibility.group(1)))
+            _add_line_and_clauses(lines, inline_responsibility.group(1))
             in_responsibilities = True
             cue_lines_allowed = True
             continue
@@ -751,7 +773,7 @@ def _responsibility_source_lines(source: str) -> set[str]:
             stripped,
             flags=re.I,
         ):
-            lines.add(_normalized_line(stripped))
+            _add_line_and_clauses(lines, stripped)
     return {line for line in lines if line}
 
 
@@ -963,7 +985,7 @@ def _extract_structured(
             if not any(
                 getattr(structured, field)
                 for field in _STRUCTURED_FIELDS
-            ) and attempt == 0:
+            ):
                 raise StructuredIntelligenceError()
             return structured
         except LLMProviderError:

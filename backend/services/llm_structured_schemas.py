@@ -28,7 +28,19 @@ def candidate_profile_llm_schema() -> dict[str, Any]:
 
 
 def job_intelligence_llm_schema() -> dict[str, Any]:
-    return _without_fields(JobIntelligence.model_json_schema(), {"job_id"})
+    """Raw schema for Ollama structured output.
+
+    job_id is excluded — it is assigned locally from the job record after
+    grounding and must never be requested from the model. Every remaining
+    key is marked required so the model cannot satisfy the schema with {}
+    or a partial object; a key's value may still be an empty list or null.
+    additionalProperties is false so the model cannot smuggle in an
+    unvalidated key.
+    """
+    schema = _without_fields(JobIntelligence.model_json_schema(), {"job_id"})
+    schema["required"] = list(schema["properties"].keys())
+    schema["additionalProperties"] = False
+    return schema
 
 
 def application_materials_llm_schema() -> dict[str, Any]:
