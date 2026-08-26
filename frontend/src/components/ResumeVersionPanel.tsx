@@ -76,12 +76,12 @@ export function ResumeVersionPanel({
             Resume versions
           </h2>
           <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
-            Versions are immutable snapshots of approved tailored resume bullets. Saving a
-            version does not generate new materials. A later export step can turn a selected
-            version into PDF or DOCX; nothing is uploaded automatically.
+            Versions are immutable snapshots of tailored resume bullets. Saving a
+            version does not generate new materials. A later export step can turn a
+            selected version into PDF or DOCX; nothing is uploaded automatically.
           </p>
         </div>
-        {canSave || materials.approval_status === "approved" ? (
+        {materials.approval_status === "approved" ? (
           <button
             type="button"
             className="btn-primary"
@@ -91,10 +91,10 @@ export function ResumeVersionPanel({
             onClick={() => void saveVersion()}
           >
             <BookmarkPlus className={`h-4 w-4 ${saving ? "animate-pulse" : ""}`} aria-hidden />
-            {saving ? "Saving…" : "Save approved resume version"}
+            {saving ? "Saving…" : "Save resume version"}
           </button>
         ) : (
-          <p className="text-sm text-ink-500">Approve this package to save a resume version.</p>
+          <p className="text-sm text-ink-500">Pass review on this package to save a resume version.</p>
         )}
       </div>
 
