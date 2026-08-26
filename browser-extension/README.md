@@ -55,6 +55,10 @@ manifest points at (`side_panel.default_path`, `background.service_worker`).
 Re-run `npm run build` after any source change — nothing auto-reloads the
 loaded extension for you.
 
+`npm test` runs the panel's unit tests (Vitest, jsdom). CI runs them under
+`TZ=Asia/Kolkata` rather than the runner's UTC, because the backend sends
+naive UTC timestamps and a UTC-only run would hide local-time parsing bugs.
+
 ## Loading it locally
 
 This isn't published to the Chrome Web Store — load it as an unpacked
@@ -77,9 +81,18 @@ extension:
 - Assisted apply: Greenhouse and Lever only, matching the backend's
   `detect_ats_platform`, and only once there's an **approved** application
   for that exact posting.
-- `host_permissions` is scoped to `http://localhost:8000/*` only; the
-  extension doesn't request access to job board domains up front — page
-  access for the fill itself is granted per-click via `activeTab`, not a
-  standing permission. The broader `tabs` permission (tab URLs only, never
-  page content) is what lets the panel follow you as you switch tabs; it
-  does not grant any additional access to a page's own content.
+- `host_permissions` is scoped to `http://localhost:8000/*` only — the
+  extension has no standing access to any job board. Page access for the
+  fill is requested at the moment you click **Fill this page**, scoped to
+  that one posting's origin, via `optional_host_permissions` (limited to
+  `greenhouse.io` and `lever.co`). `activeTab` alone is not enough here:
+  it covers only the tab that was active when you opened the panel, and a
+  panel that follows you across tabs would otherwise fail to fill on every
+  tab you moved to afterwards.
+- The broader `tabs` permission gives the panel tab URLs only, never page
+  content. It is what lets the panel follow you as you switch tabs.
+- **The active tab's URL is sent to your CareerPilot backend** each time it
+  changes, so the panel can ask whether it's a tracked job. Only `http`/
+  `https` pages are ever sent — `chrome://` pages, the New Tab page,
+  `file://` URLs and other extensions' pages are filtered out in the panel
+  before any request is made. That backend is your own local instance.

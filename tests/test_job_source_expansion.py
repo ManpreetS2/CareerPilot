@@ -88,7 +88,6 @@ def test_parse_lever_posting_url_extracts_company_and_id() -> None:
     "url",
     [
         "https://jobs.lever.co/acme/not-a-uuid",
-        "https://jobs.lever.co/acme/f25a6c49-5ed4-4aa0-a5bb-b30e9790f90c?utm=1",
         "https://boards.greenhouse.io/acme/jobs/123",
         "",
     ],

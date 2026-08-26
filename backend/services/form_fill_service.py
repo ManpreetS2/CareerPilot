@@ -67,6 +67,12 @@ from backend.services.application_service import (
     StoredMaterialsNotFoundError,
     get_stored_application_package,
 )
+from backend.services.job_scout_service import (
+    GREENHOUSE_POSTING_HOSTS,
+    canonical_lever_posting_url,
+    parse_greenhouse_posting_url,
+    parse_lever_posting_url,
+)
 from backend.services.job_service import record_to_job
 
 logger = logging.getLogger(__name__)
@@ -667,12 +673,33 @@ def _strip_lever_apply_suffix(url: str) -> str:
 def find_job_by_url(db: Session, url: str) -> JobRecord | None:
     """Match a real browser tab's URL back to a stored job.
 
-    The extension passes whatever URL the user is actually looking at,
-    which for Lever is the .../apply form URL — the stored JobRecord.url is
-    always the plain posting URL (what job_scout_service persists), so an
-    exact match alone would miss every Lever match.
+    The extension passes whatever URL the user is actually looking at, and
+    that is rarely the tidy URL the job was stored under. For Lever it is
+    the .../apply form URL. For Greenhouse it is often the embed form
+    (/embed/job_app?for=…&token=…) that employers frame on their own careers
+    page. Either can arrive with an aggregator's tracking parameters glued
+    on. All of those identify the same posting, so each recognized shape is
+    reduced to its canonical URL and that is matched too — an exact-string
+    match alone silently reports a tracked job as untracked.
     """
     candidates = {url, url.rstrip("/"), _strip_lever_apply_suffix(url)}
+
+    # Canonicalize every variant we can recognize, including the Lever
+    # apply-suffix-stripped one, which is what carries the posting ID.
+    for variant in list(candidates):
+        greenhouse_ref = parse_greenhouse_posting_url(variant)
+        if greenhouse_ref is not None:
+            # Greenhouse serves the same posting from both boards.greenhouse.io
+            # and job-boards.greenhouse.io (the former 301s to the latter), and
+            # rows stored at different times can carry either. Matching on one
+            # host only would report a stored job as untracked purely because
+            # of which host it happened to be saved under.
+            for host in GREENHOUSE_POSTING_HOSTS:
+                candidates.add(f"https://{host}/{greenhouse_ref.board_token}/jobs/{greenhouse_ref.job_id}")
+        lever_ref = parse_lever_posting_url(variant)
+        if lever_ref is not None:
+            candidates.add(canonical_lever_posting_url(*lever_ref))
+
     for candidate_url in candidates:
         record = db.query(JobRecord).filter(JobRecord.url == candidate_url).first()
         if record is not None:
@@ -733,9 +760,10 @@ def get_extension_panel_data(db: Session, url: str, user_id: int) -> ExtensionPa
     provider — reuses the same stored-lookup functions the main web app's
     read-only views already use, catching their "not found"/"stale"
     signals to build the response instead of letting them 404/409."""
+    platform = detect_ats_platform(url)
     job = find_job_by_url(db, url)
     if job is None:
-        return ExtensionPanelData(tracked=False)
+        return ExtensionPanelData(tracked=False, platform=platform)
 
     try:
         score = get_stored_match_score(db, job.public_id, user_id)
@@ -750,11 +778,30 @@ def get_extension_panel_data(db: Session, url: str, user_id: int) -> ExtensionPa
     except StaleApplicationMaterialsError as exc:
         materials_status = "stale_reviewed" if exc.reviewed else "stale_pending"
 
+    # Ask the real gate rather than re-deriving it from materials_status:
+    # _load_approved_application is what the autofill route itself enforces,
+    # so routing the panel through it means the button can never be offered
+    # for a fill that would then be refused, and the reason shown is the
+    # reason that would actually have come back. Read-only, and the raised
+    # HTTPException is caught here rather than allowed to fail this request —
+    # "not ready to apply" is a status to report, not an error.
+    try:
+        approved_package, _ = _load_approved_application(db, job, user_id)
+        apply_ready, apply_blocked_reason = True, None
+        materials_unverified = bool(getattr(approved_package, "grounding_override", False))
+    except HTTPException as exc:
+        apply_ready, apply_blocked_reason = False, str(exc.detail)
+        materials_unverified = False
+
     return ExtensionPanelData(
         tracked=True,
         job=record_to_job(job),
         score=score,
         materials_status=materials_status,  # type: ignore[arg-type]
+        platform=platform,  # type: ignore[arg-type]
+        apply_ready=apply_ready,
+        apply_blocked_reason=apply_blocked_reason,
+        materials_unverified=materials_unverified,
     )
 
 

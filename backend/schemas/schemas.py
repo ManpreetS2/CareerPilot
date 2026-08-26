@@ -146,6 +146,20 @@ class ApplicationPackage(BaseModel):
     eligibility_notes: str | None = None
     decision_notes: str | None = None
     grounded: bool = False
+    # True only when the owner explicitly chose to keep a draft whose claims
+    # could not all be verified. Kept separate from `grounded` so a reader
+    # can distinguish "verified" from "deliberately unverified" rather than
+    # seeing one ambiguous false.
+    grounding_override: bool = False
+    unsupported_claims: list[str] = Field(default_factory=list)
+
+
+class GenerateMaterialsRequest(BaseModel):
+    """Body for POST /api/jobs/{job_id}/generate-materials. Optional: the
+    default request generates normally and fails if grounding rejects the
+    draft."""
+
+    override_grounding: bool = False
 
 
 class CreateResumeVersionRequest(BaseModel):
@@ -328,6 +342,21 @@ class ExtensionPanelData(BaseModel):
     job: Job | None = None
     score: MatchScore | None = None
     materials_status: Literal["missing", "current", "stale_pending", "stale_reviewed"] | None = None
+    # Whether assisted apply could ever run on this URL, derived from the same
+    # detect_ats_platform the autofill route uses. Sent so the panel can hide
+    # the fill action on a posting it can never fill instead of offering a
+    # button that always fails — and so the host allowlist stays defined in
+    # one place here rather than being duplicated in the extension.
+    platform: Literal["greenhouse", "lever", "unsupported"] = "unsupported"
+    # Whether assisted apply would actually run right now, and if not, the
+    # reason the autofill route itself would have given. Lets the panel state
+    # what is still needed instead of showing a button that fails on click.
+    apply_ready: bool = False
+    apply_blocked_reason: str | None = None
+    # True when the package behind apply_ready was kept through an explicit
+    # grounding override. The panel must say so before filling a real
+    # application form with claims that were never verified.
+    materials_unverified: bool = False
 
 
 TrackerStatus = Literal[

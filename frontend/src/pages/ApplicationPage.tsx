@@ -11,6 +11,19 @@ import { api, ApiClientError } from "../lib/api";
 import { getSelectedJobId, saveSelectedJobId } from "../lib/session";
 import type { ApplicationPackage, ApprovalDecision, FormFillResult, Job, MatchScore } from "../lib/types";
 
+/** Matches only the grounding refusal, not every 409 this endpoint can
+ * return (missing profile, missing requirements, a protected package) —
+ * offering an "ignore evidence checks" button for an unrelated conflict
+ * would be misleading and would not fix it. */
+function isGroundingRefusal(err: unknown): boolean {
+  return (
+    err instanceof ApiClientError &&
+    err.status === 409 &&
+    err.message.toLowerCase().includes("not supported by stored evidence")
+  );
+}
+
+
 export function ApplicationPage() {
   const params = useParams();
   const jobId = params.jobId || getSelectedJobId();
@@ -28,6 +41,10 @@ export function ApplicationPage() {
   const [filling, setFilling] = useState(false);
   const [fillResult, setFillResult] = useState<FormFillResult | null>(null);
   const [fillError, setFillError] = useState<unknown>(null);
+  // Set only after a generate attempt is refused for grounding, so the
+  // override is offered as a considered response to a specific failure
+  // rather than sitting on the page as a shortcut past evidence checks.
+  const [groundingRefused, setGroundingRefused] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [scoring, setScoring] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -115,18 +132,20 @@ export function ApplicationPage() {
     }
   }
 
-  async function generateMaterials() {
+  async function generateMaterials(overrideGrounding = false) {
     if (!jobId) return;
     setGenerating(true);
     setError(null);
     try {
-      const next = await api.generateMaterials(jobId);
+      const next = await api.generateMaterials(jobId, overrideGrounding);
       setMaterials(next);
       setMaterialsState("current");
+      setGroundingRefused(false);
       setEligibilityConfirmed(next.eligibility_confirmed);
       setEligibilityNotes(next.eligibility_notes || "");
       setDecisionNotes(next.decision_notes || "");
     } catch (err) {
+      if (!overrideGrounding && isGroundingRefusal(err)) setGroundingRefused(true);
       setError(err);
     } finally {
       setGenerating(false);
@@ -325,6 +344,43 @@ export function ApplicationPage() {
             </button>
           )}
         </div>
+        {groundingRefused && !materials ? (
+          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/30">
+            <p className="text-sm font-semibold text-warn-600 dark:text-amber-200">
+              The draft claimed things your resume does not show
+            </p>
+            <p className="mt-1 text-sm text-ink-600 dark:text-ink-200">
+              Nothing was saved. You can generate anyway for this job — the draft will be kept
+              without evidence checks and marked unverified everywhere, including in the browser
+              extension before it fills a real application. Read it closely before you submit it.
+            </p>
+            <button
+              type="button"
+              className="btn-secondary mt-3"
+              data-testid="generate-materials-override"
+              disabled={generating}
+              onClick={() => void generateMaterials(true)}
+            >
+              {generating ? "Generating…" : "Generate anyway for this job"}
+            </button>
+          </div>
+        ) : null}
+        {materials?.grounding_override ? (
+          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/30">
+            <p className="text-sm font-semibold text-warn-600 dark:text-amber-200">
+              Unverified materials
+            </p>
+            <p className="mt-1 text-sm text-ink-600 dark:text-ink-200">
+              These were kept without evidence checks at your request. Review every claim before
+              approving — they may assert experience your resume does not support.
+            </p>
+            {(materials.unsupported_claims?.length ?? 0) > 0 ? (
+              <p className="mt-2 text-xs text-ink-500">
+                Unsupported: {(materials.unsupported_claims ?? []).join(", ").replace(/_/g, " ")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         {!materials ? (
           <p className="mt-3 text-sm text-ink-500">
             No grounded materials stored yet. Generate materials after a fit score exists.

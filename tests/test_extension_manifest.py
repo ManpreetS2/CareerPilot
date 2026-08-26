@@ -14,6 +14,10 @@ MANIFEST_PATH = Path(__file__).parent.parent / "browser-extension" / "manifest.j
 
 ALLOWED_PERMISSIONS = {"activeTab", "scripting", "cookies", "sidePanel", "tabs", "storage"}
 ALLOWED_HOST_PERMISSIONS = {"http://localhost:8000/*"}
+# Requested at fill time via chrome.permissions.request, never granted at
+# install. Confined to the two ATS vendors form-filling actually supports —
+# the same hosts detect_ats_platform recognizes.
+ALLOWED_OPTIONAL_HOST_PERMISSIONS = {"https://*.greenhouse.io/*", "https://*.lever.co/*"}
 
 
 def _manifest() -> dict:
@@ -37,16 +41,28 @@ def test_manifest_host_permissions_are_an_allowed_subset() -> None:
     assert host_permissions <= ALLOWED_HOST_PERMISSIONS, host_permissions - ALLOWED_HOST_PERMISSIONS
 
 
+def test_manifest_optional_host_permissions_are_an_allowed_subset() -> None:
+    manifest = _manifest()
+    optional = set(manifest.get("optional_host_permissions", []))
+    assert optional <= ALLOWED_OPTIONAL_HOST_PERMISSIONS, optional - ALLOWED_OPTIONAL_HOST_PERMISSIONS
+
+
 def test_manifest_never_requests_broad_host_access() -> None:
     """A bare "<all_urls>" or unscoped wildcard host permission would let the
     extension read every page the user visits — never acceptable here, since
     tab-URL awareness is deliberately scoped through the "tabs" permission
     (metadata only, not page content) plus activeTab (content, but only on
-    an explicit user gesture)."""
+    an explicit user gesture).
+
+    Optional host permissions are held to the same bar: they prompt at fill
+    time rather than at install, but once granted they are exactly as broad
+    as a declared one, so a wildcard slipped in there would be just as bad.
+    """
     manifest = _manifest()
-    host_permissions = manifest.get("host_permissions", [])
-    assert "<all_urls>" not in host_permissions
-    assert not any(perm.strip() == "*://*/*" for perm in host_permissions)
+    for key in ("host_permissions", "optional_host_permissions"):
+        perms = manifest.get(key, [])
+        assert "<all_urls>" not in perms, key
+        assert not any(perm.strip() in {"*://*/*", "https://*/*", "http://*/*"} for perm in perms), key
 
 
 def test_manifest_declares_side_panel_default_path_that_exists() -> None:

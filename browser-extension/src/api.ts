@@ -29,6 +29,15 @@ export class ApiError extends Error {
   }
 }
 
+/** The backend isn't reachable at all. Distinct from ApiError (which means
+ * the server answered and said no) because the remedy is completely
+ * different — start CareerPilot, rather than fix something in the app. */
+export class BackendUnreachableError extends Error {
+  constructor() {
+    super("Can't reach CareerPilot. Make sure the app is running, then try again.");
+  }
+}
+
 async function sessionHeaders(): Promise<Record<string, string>> {
   const sessionCookie = await chrome.cookies.get({ url: BACKEND_URL, name: SESSION_COOKIE_NAME });
   if (!sessionCookie) throw new NotLoggedInError();
@@ -38,7 +47,16 @@ async function sessionHeaders(): Promise<Record<string, string>> {
 async function extensionGet<T>(path: string, params: Record<string, string>): Promise<T> {
   const headers = await sessionHeaders();
   const query = new URLSearchParams(params).toString();
-  const response = await fetch(`${BACKEND_URL}${path}?${query}`, { headers });
+  let response: Response;
+  try {
+    response = await fetch(`${BACKEND_URL}${path}?${query}`, { headers });
+  } catch {
+    // fetch only rejects on a transport failure (server down, DNS, refused
+    // connection) — an HTTP error status resolves normally and is handled
+    // below. Surfacing the raw "Failed to fetch" here would tell the user
+    // nothing actionable.
+    throw new BackendUnreachableError();
+  }
   if (response.status === 401) throw new NotLoggedInError();
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -72,11 +90,19 @@ export type MatchScore = {
 
 export type MaterialsStatus = "missing" | "current" | "stale_pending" | "stale_reviewed" | null;
 
+export type Platform = "greenhouse" | "lever" | "unsupported";
+
 export type PanelData = {
   tracked: boolean;
   job: Job | null;
   score: MatchScore | null;
   materials_status: MaterialsStatus;
+  platform: Platform;
+  apply_ready: boolean;
+  apply_blocked_reason: string | null;
+  /** The approved package was kept through an explicit grounding override,
+   * so its claims were never verified against the resume. */
+  materials_unverified: boolean;
 };
 
 export function getPanelData(url: string): Promise<PanelData> {
@@ -93,6 +119,31 @@ export type AutofillResponse = {
 
 export function getAutofillData(url: string): Promise<AutofillResponse> {
   return extensionGet<AutofillResponse>("/api/extension/autofill", { url });
+}
+
+/** Only an http(s) page can ever be a job posting. Everything else the
+ * browser can sit on — chrome:// internals, the New Tab page, about:blank,
+ * file://, another extension's pages — is skipped outright, so those URLs
+ * are never sent to the backend and the panel shows an idle state instead
+ * of "not tracked", which would wrongly imply CareerPilot could track it. */
+export function isJobPageUrl(url: string | null | undefined): url is string {
+  if (!url) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** The match pattern covering just this page's own origin, for a scoped
+ * optional-permission request. Returns null for anything unparseable. */
+export function originPattern(url: string): string | null {
+  try {
+    return `${new URL(url).origin}/*`;
+  } catch {
+    return null;
+  }
 }
 
 export async function getActiveTabUrl(): Promise<string | null> {

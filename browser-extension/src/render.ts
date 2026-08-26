@@ -47,11 +47,22 @@ export function sourceBadge(source: string): string {
   return `<span class="status-pill ${tone}">${escapeHtml(label)}</span>`;
 }
 
-export function scoutedTimeAgo(dateScraped?: string | null): string | null {
+/** The backend stores UTC but SQLite drops the tzinfo, so date_scraped
+ * arrives as a naive "2026-08-26T06:34:33.735519". JavaScript parses a
+ * date-time string with no offset as LOCAL time, which silently shifts the
+ * value by the viewer's UTC offset (+5:30 in IST, -7:00 in US Pacific) and
+ * pushes "Seen N days ago" across a day boundary either way. Appending the
+ * offset the value actually carries is what makes the arithmetic correct. */
+export function parseUtcTimestamp(value: string): number {
+  const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  return new Date(hasOffset ? value : `${value}Z`).getTime();
+}
+
+export function scoutedTimeAgo(dateScraped?: string | null, now: number = Date.now()): string | null {
   if (!dateScraped) return null;
-  const scraped = new Date(dateScraped).getTime();
+  const scraped = parseUtcTimestamp(dateScraped);
   if (Number.isNaN(scraped)) return null;
-  const days = Math.floor((Date.now() - scraped) / (1000 * 60 * 60 * 24));
+  const days = Math.floor((now - scraped) / (1000 * 60 * 60 * 24));
   if (days <= 0) return "Seen today";
   if (days === 1) return "Seen 1 day ago";
   return `Seen ${days} days ago`;
