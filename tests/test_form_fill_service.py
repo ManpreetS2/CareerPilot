@@ -1158,6 +1158,9 @@ def test_panel_data_does_not_require_approval(isolated_session) -> None:
         source_traceability_notes=["Python <- skills"],
         approval_status="pending_review",
         grounded=True,
+        candidate_profile_fingerprint=fingerprint_for_candidate(
+            isolated_session, candidate, TEST_USER_ID
+        ),
     )
     isolated_session.add(package)
     isolated_session.commit()

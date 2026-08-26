@@ -97,8 +97,9 @@ def get_stored_application_package(db: Session, job_id: str, user_id: int) -> Ap
     if record is None or not is_grounded_package_record(record):
         raise StoredMaterialsNotFoundError()
     current = _get_current_candidate(db, user_id)
-    if current is not None and (
-        record.candidate_id != current.id
+    if (
+        current is None
+        or record.candidate_id != current.id
         or not package_matches_current_resume_profile(db, record, user_id)
     ):
         reviewed = record.approval_status in {"approved", "edit_requested"}

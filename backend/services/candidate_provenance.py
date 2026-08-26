@@ -170,18 +170,23 @@ def current_resume_input_fingerprint(
 
 
 def package_matches_current_resume_profile(
-    db: Session, package: ApplicationPackageRecord | None, user_id: int
+    db: Session,
+    package: ApplicationPackageRecord | None,
+    user_id: int,
+    *,
+    refresh: bool = True,
 ) -> bool:
     """True only when a stored fingerprint matches the current resume profile.
 
-    Missing legacy fingerprints are never treated as current.
+    Safety-critical callers observe committed DB state by default. Missing
+    legacy fingerprints are never treated as current.
     """
     if package is None:
         return False
     stored = getattr(package, "candidate_profile_fingerprint", None)
     if not stored:
         return False
-    current = current_resume_input_fingerprint(db, user_id)
+    current = current_resume_input_fingerprint(db, user_id, refresh=refresh)
     if current is None:
         return False
     return stored == current

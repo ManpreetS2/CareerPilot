@@ -580,6 +580,31 @@ def load_application_materials_context(db: Session, job_id: str, user_id: int) -
     )
 
 
+_MATERIALS_PROMPT_PREFERENCE_FIELDS = (
+    "target_roles",
+    "preferred_locations",
+    "remote_preference",
+    "constraints",
+    "legal_name",
+    "linkedin_url",
+    "github_url",
+    "portfolio_url",
+    "earliest_start_date",
+    "currently_enrolled_in_program",
+    "expected_graduation",
+    "degree_pursuing",
+)
+
+
+def _materials_prompt_preferences(preferences: TargetPreferences | None) -> dict | None:
+    """Allowlisted display/job-search fields only. Never send EEO or salary."""
+
+    if preferences is None:
+        return None
+    payload = preferences.model_dump(mode="json")
+    return {field: payload.get(field) for field in _MATERIALS_PROMPT_PREFERENCE_FIELDS}
+
+
 def build_application_materials_prompt(context: ApplicationMaterialsContext) -> tuple[str, str]:
     """Construct the grounded generation prompt. Does not call a provider."""
 
@@ -596,7 +621,7 @@ def build_application_materials_prompt(context: ApplicationMaterialsContext) -> 
         "candidate": context.candidate.model_dump(mode="json"),
         "job_intelligence": context.intelligence.model_dump(mode="json"),
         "fit_score": context.fit_score.model_dump(mode="json"),
-        "preferences": context.preferences.model_dump(mode="json") if context.preferences else None,
+        "preferences": _materials_prompt_preferences(context.preferences),
         "output_schema": _JSON_SHAPE,
     }
     user_prompt = (

@@ -23,7 +23,9 @@ from backend.services.application_materials_agent import (
     load_application_materials_context,
     parse_application_materials_json,
 )
+from backend.schemas.schemas import ApprovalRequest
 from backend.services.application_service import (
+    apply_approval,
     get_or_generate_application_package,
     get_stored_application_package,
 )
@@ -719,3 +721,251 @@ def test_display_preference_change_during_generate_http_is_409(isolated_client) 
     assert "linkedin.com" not in detail
     with SessionLocal() as db:
         assert db.query(ApplicationPackageRecord).count() == 0
+
+
+def _approve_package(session, job_public_id: str, user_id: int = TEST_USER_ID) -> None:
+    apply_approval(
+        session,
+        job_public_id,
+        user_id,
+        ApprovalRequest(decision="approved", eligibility_confirmed=True),
+    )
+
+
+_EXCLUDED_PROMPT_SENTINELS = {
+    "salary_min": 777331,
+    "work_authorization": "EEO-SENTINEL-WORK-AUTH-ZZ9",
+    "sponsorship_required": True,
+    "gender": "EEO-SENTINEL-GENDER-ZZ9",
+    "race_ethnicity": "EEO-SENTINEL-RACE-ZZ9",
+    "disability_status": "EEO-SENTINEL-DISABILITY-ZZ9",
+    "veteran_status": "EEO-SENTINEL-VETERAN-ZZ9",
+}
+
+
+def _stamp_excluded_preference_sentinels(session, candidate: Candidate) -> TargetPreference:
+    pref = _stamp_display_preference(
+        session,
+        candidate,
+        legal_name="Jordan Avery",
+        linkedin_url="https://linkedin.com/in/jordanavery",
+    )
+    pref.salary_min = _EXCLUDED_PROMPT_SENTINELS["salary_min"]
+    pref.work_authorization = _EXCLUDED_PROMPT_SENTINELS["work_authorization"]
+    pref.sponsorship_required = _EXCLUDED_PROMPT_SENTINELS["sponsorship_required"]
+    pref.gender = _EXCLUDED_PROMPT_SENTINELS["gender"]
+    pref.race_ethnicity = _EXCLUDED_PROMPT_SENTINELS["race_ethnicity"]
+    pref.disability_status = _EXCLUDED_PROMPT_SENTINELS["disability_status"]
+    pref.veteran_status = _EXCLUDED_PROMPT_SENTINELS["veteran_status"]
+    session.commit()
+    session.refresh(pref)
+    return pref
+
+
+def _assert_logs_omit_sensitive(logs: str) -> None:
+    assert "You write application materials" not in logs
+    assert "resume_input_snapshot" not in logs
+    assert "jordan@example.com" not in logs
+    assert "Riley Chen Legal" not in logs
+    assert "https://linkedin.com/in/jordanavery" not in logs
+    assert "https://linkedin.com/in/riley-b" not in logs
+    assert "+1-555" not in logs and "555-010" not in logs
+    for value in _EXCLUDED_PROMPT_SENTINELS.values():
+        if value is True:
+            continue
+        assert str(value) not in logs
+
+
+def test_protected_package_reuse_observes_committed_preference_not_identity_map(
+    isolated_session, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    from sqlalchemy.orm import sessionmaker
+
+    caplog.set_level(logging.DEBUG)
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    pref = _stamp_display_preference(
+        isolated_session,
+        candidate,
+        legal_name="Jordan Avery",
+        linkedin_url="https://linkedin.com/in/jordanavery",
+    )
+    insert_grounded_package(isolated_session, job, candidate=candidate)
+    _approve_package(isolated_session, job.public_id)
+    loaded = isolated_session.query(TargetPreference).filter_by(id=pref.id).one()
+    assert loaded.legal_name == "Jordan Avery"
+
+    Other = sessionmaker(bind=isolated_session.get_bind(), autocommit=False, autoflush=False)
+    with Other() as other:
+        row = other.get(TargetPreference, pref.id)
+        assert row is not None
+        row.legal_name = "Riley Chen Legal"
+        row.linkedin_url = "https://linkedin.com/in/riley-b"
+        other.commit()
+
+    providers_used: list[str] = []
+    monkeypatch.setattr(
+        "backend.services.application_materials_agent.configured_provider_names",
+        lambda: ["ollama", "gemini"],
+    )
+
+    def fake_client(name: str):
+        providers_used.append(name)
+        return object()
+
+    def fake_invoke(_client, _prompt, _system, _schema):
+        raise AssertionError("provider must not be called when reuse is stale")
+
+    monkeypatch.setattr("backend.services.application_materials_agent.get_llm_client", fake_client)
+    monkeypatch.setattr(
+        "backend.services.application_materials_agent.invoke_provider_generate", fake_invoke
+    )
+
+    with pytest.raises(StaleApplicationMaterialsError):
+        generate_grounded_application_materials(isolated_session, job.public_id, TEST_USER_ID)
+    assert providers_used == []
+    packages = isolated_session.query(ApplicationPackageRecord).all()
+    assert len(packages) == 1
+    assert packages[0].approval_status == "approved"
+    _assert_logs_omit_sensitive(caplog.text)
+
+
+def test_protected_package_reuse_http_is_409(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job, candidate = seed_materials_prerequisites(db, user_id=client.test_user_id)
+        pref = _stamp_display_preference(
+            db,
+            candidate,
+            legal_name="Jordan Avery",
+            linkedin_url="https://linkedin.com/in/jordanavery",
+        )
+        insert_grounded_package(db, job, candidate=candidate, user_id=client.test_user_id)
+        _approve_package(db, job.public_id, client.test_user_id)
+        loaded = db.query(TargetPreference).filter_by(id=pref.id).one()
+        assert loaded.legal_name == "Jordan Avery"
+
+    with SessionLocal() as other:
+        row = other.get(TargetPreference, pref.id)
+        assert row is not None
+        row.legal_name = "Riley Chen Legal"
+        row.linkedin_url = "https://linkedin.com/in/riley-b"
+        other.commit()
+
+    response = client.post("/api/jobs/manual-abc123/generate-materials")
+    assert response.status_code == 409
+    detail = response.json()["detail"].lower()
+    assert "previous candidate" in detail
+    assert "riley" not in detail
+    assert "linkedin.com" not in detail
+    with SessionLocal() as db:
+        packages = db.query(ApplicationPackageRecord).all()
+        assert len(packages) == 1
+        assert packages[0].approval_status == "approved"
+
+
+def test_stored_materials_without_current_candidate_fail_closed(isolated_session) -> None:
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
+    isolated_session.query(Candidate).filter(Candidate.id == candidate.id).update({"user_id": None})
+    isolated_session.commit()
+    with pytest.raises(StaleApplicationMaterialsError) as exc_info:
+        get_stored_application_package(isolated_session, job.public_id, TEST_USER_ID)
+    assert exc_info.value.reviewed is False
+    assert isolated_session.query(ApplicationPackageRecord).count() == 1
+
+
+def test_stored_reviewed_materials_without_current_candidate_keep_reviewed_semantics(
+    isolated_session,
+) -> None:
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
+    _approve_package(isolated_session, job.public_id)
+    isolated_session.query(Candidate).filter(Candidate.id == candidate.id).update({"user_id": None})
+    isolated_session.commit()
+    with pytest.raises(StaleApplicationMaterialsError) as exc_info:
+        get_stored_application_package(isolated_session, job.public_id, TEST_USER_ID)
+    assert exc_info.value.reviewed is True
+    assert isolated_session.query(ApplicationPackageRecord).count() == 1
+
+
+def test_stored_materials_without_current_candidate_http_is_409(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job, candidate = seed_materials_prerequisites(db, user_id=client.test_user_id)
+        insert_grounded_package(db, job, candidate=candidate, user_id=client.test_user_id)
+        db.query(Candidate).filter(Candidate.id == candidate.id).update({"user_id": None})
+        db.commit()
+
+    pending = client.get("/api/jobs/manual-abc123/materials")
+    assert pending.status_code == 409
+    pending_detail = pending.json()["detail"].lower()
+    assert "previous candidate" in pending_detail
+    assert "generate materials" in pending_detail
+    assert "riley" not in pending_detail
+
+    with SessionLocal() as db:
+        job = db.query(ApplicationPackageRecord).one()
+        job.approval_status = "approved"
+        job.eligibility_confirmed = True
+        db.commit()
+
+    reviewed = client.get("/api/jobs/manual-abc123/materials")
+    assert reviewed.status_code == 409
+    reviewed_detail = reviewed.json()["detail"].lower()
+    assert "reviewed application materials" in reviewed_detail
+    assert "not replaced" in reviewed_detail
+    assert "riley" not in reviewed_detail
+    with SessionLocal() as db:
+        assert db.query(ApplicationPackageRecord).count() == 1
+
+
+def test_materials_prompt_omits_sensitive_preference_sentinels(isolated_session, caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    _stamp_excluded_preference_sentinels(isolated_session, candidate)
+    context = load_application_materials_context(isolated_session, job.public_id, TEST_USER_ID)
+    system_prompt, user_prompt = build_application_materials_prompt(context)
+    combined = f"{system_prompt}\n{user_prompt}"
+    assert "Jordan Avery" in user_prompt
+    assert "https://linkedin.com/in/jordanavery" in user_prompt
+    assert "salary_min" not in combined
+    assert "work_authorization" not in combined
+    assert "sponsorship_required" not in combined
+    assert "race_ethnicity" not in combined
+    assert "disability_status" not in combined
+    assert "veteran_status" not in combined
+    for value in _EXCLUDED_PROMPT_SENTINELS.values():
+        assert str(value) not in combined
+        if value is not True:
+            assert str(value) not in system_prompt
+            assert str(value) not in user_prompt
+    _assert_logs_omit_sensitive(caplog.text)
+
+
+def test_materials_provider_payload_omits_sensitive_preference_sentinels(
+    isolated_session, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    _stamp_excluded_preference_sentinels(isolated_session, candidate)
+    captured: dict[str, str] = {}
+
+    def capturing_generator(prompt: str, system_prompt: str | None = None) -> str:
+        captured["user"] = prompt
+        captured["system"] = system_prompt or ""
+        return VALID_MATERIALS_JSON
+
+    generate_grounded_application_materials(
+        isolated_session, job.public_id, TEST_USER_ID, generator=capturing_generator
+    )
+    combined = f"{captured['system']}\n{captured['user']}"
+    assert captured["system"]
+    assert captured["user"]
+    assert "salary_min" not in combined
+    assert "EEO-SENTINEL-GENDER-ZZ9" not in combined
+    assert "EEO-SENTINEL-WORK-AUTH-ZZ9" not in combined
+    assert "EEO-SENTINEL-RACE-ZZ9" not in combined
+    assert "EEO-SENTINEL-DISABILITY-ZZ9" not in combined
+    assert "EEO-SENTINEL-VETERAN-ZZ9" not in combined
+    assert "777331" not in combined
+    _assert_logs_omit_sensitive(caplog.text)

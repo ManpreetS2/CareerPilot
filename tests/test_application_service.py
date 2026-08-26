@@ -496,7 +496,8 @@ def test_edit_request_never_sets_eligibility_confirmed_true(isolated_session) ->
     only an approval (which requires it) can, so a caller can't sneak a
     confirmation through a decision type that doesn't require one."""
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(
         isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", eligibility_confirmed=True)
     )
@@ -533,7 +534,8 @@ def test_eligibility_notes_can_be_set_then_cleared(isolated_session) -> None:
 
 def test_eligibility_notes_can_be_updated_on_a_non_approve_decision(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(
         isolated_session,
         "manual-abc123", TEST_USER_ID,
@@ -545,7 +547,8 @@ def test_eligibility_notes_can_be_updated_on_a_non_approve_decision(isolated_ses
 
 def test_decision_notes_persisted_for_each_decision_type(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
 
     apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes="rewrite bullet 2"))
     package = get_stored_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
@@ -558,7 +561,8 @@ def test_decision_notes_persisted_for_each_decision_type(isolated_session) -> No
 
 def test_decision_notes_can_be_cleared(isolated_session) -> None:
     job = _job(isolated_session)
-    insert_grounded_package(isolated_session, job)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
     apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes="fix typo"))
     apply_approval(isolated_session, "manual-abc123", TEST_USER_ID, ApprovalRequest(decision="edit_requested", notes=""))
     package = get_stored_application_package(isolated_session, "manual-abc123", TEST_USER_ID)
