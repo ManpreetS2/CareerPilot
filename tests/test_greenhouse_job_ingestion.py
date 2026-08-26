@@ -58,6 +58,9 @@ CLOUDFLARE_API = {
 }
 
 INSTEAD_URL = "https://job-boards.greenhouse.io/instead/jobs/7761472003"
+# What INSTEAD_URL canonicalizes to: ingest stores one URL per posting
+# regardless of which Greenhouse host or query string it arrived with.
+INSTEAD_CANONICAL_URL = "https://boards.greenhouse.io/instead/jobs/7761472003"
 CLOUDFLARE_URL = "https://boards.greenhouse.io/cloudflare/jobs/8118855"
 API_INSTEAD = "https://boards-api.greenhouse.io/v1/boards/instead/jobs/7761472003"
 
@@ -126,7 +129,6 @@ def test_parse_greenhouse_job_job_boards_host() -> None:
         "/instead%2Fevil/jobs/7761472003",
         "/instead/jobs/7761472003/extra",
         "/instead/jobs/not-a-number",
-        "/instead/jobs/7761472003?token=abc",
     ],
 )
 def test_parse_rejects_malformed_board_or_job_paths(path: str) -> None:
@@ -136,6 +138,78 @@ def test_parse_rejects_malformed_board_or_job_paths(path: str) -> None:
 
 def test_parse_rejects_non_ascii_board_token() -> None:
     assert parse_greenhouse_posting_url("https://job-boards.greenhouse.io/inste\u00e4d/jobs/1") is None
+
+
+def test_parse_reads_the_embed_url_form() -> None:
+    """The URL an employer's careers page frames, and what aggregators link
+    to \u2014 frequently the URL actually in the address bar. Rejecting it meant
+    a real Greenhouse posting could neither be added nor recognized."""
+    ref = parse_greenhouse_posting_url(
+        "https://job-boards.greenhouse.io/embed/job_app?for=stepstone&token=8154373"
+    )
+    assert ref is not None
+    assert ref.board_token == "stepstone"
+    assert ref.job_id == "8154373"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # An aggregator's own id alongside the real Greenhouse params.
+        "https://job-boards.greenhouse.io/embed/job_app?for=instead&token=7761472003&jr_id=6a8d&utm_source=jobright",
+        "https://job-boards.greenhouse.io/embed/job_app?token=7761472003&for=instead",
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003?utm_source=jobright",
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003?gh_src=abc#app",
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003/",
+        "https://boards.greenhouse.io/instead/jobs/7761472003",
+    ],
+)
+def test_every_shape_of_the_same_posting_parses_identically(url: str) -> None:
+    """Tracking parameters and host/path variants do not change which job
+    this is, so they must all reduce to one identity \u2014 otherwise the same
+    posting stores twice and the extension fails to match a stored copy."""
+    ref = parse_greenhouse_posting_url(url)
+    assert ref is not None
+    assert (ref.board_token, ref.job_id) == ("instead", "7761472003")
+
+
+def test_canonical_path_wins_over_query_parameters() -> None:
+    """A path that already names the posting is authoritative; a "for" or
+    "token" parameter riding along must not be able to redirect it."""
+    ref = parse_greenhouse_posting_url(
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003?for=evil&token=999"
+    )
+    assert ref is not None
+    assert (ref.board_token, ref.job_id) == ("instead", "7761472003")
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "for=instead",  # no token
+        "token=7761472003",  # no board
+        "for=instead&token=not-a-number",
+        "for=inste%2Fevil&token=7761472003",
+        "for=&token=7761472003",
+    ],
+)
+def test_parse_rejects_incomplete_or_malformed_embed_urls(query: str) -> None:
+    assert parse_greenhouse_posting_url(f"https://job-boards.greenhouse.io/embed/job_app?{query}") is None
+
+
+def test_manual_ingest_of_an_embed_url_is_stored_canonically(mock_fetch) -> None:
+    """End of the chain: pasting the embed URL yields the same stored URL as
+    pasting the canonical one, so the two cannot become duplicate rows.
+    Asserts the two agree rather than naming a specific URL — Greenhouse's
+    API reports its own absolute_url for a posting and that is preferred
+    when it resolves to the same job."""
+    mock_fetch["handler"] = lambda url, **_: _json_response(url, INSTEAD_API)
+    from_embed = ingest_job_url(
+        "https://job-boards.greenhouse.io/embed/job_app?for=instead&token=7761472003&utm_source=jobright"
+    )
+    from_canonical = ingest_job_url(INSTEAD_URL)
+    assert from_embed["url"] == from_canonical["url"]
+    assert parse_greenhouse_posting_url(from_embed["url"]) == parse_greenhouse_posting_url(INSTEAD_URL)
 
 
 def test_ingest_greenhouse_instead_shaped(mock_fetch) -> None:
@@ -220,7 +294,7 @@ def test_bad_absolute_url_ignored(mock_fetch) -> None:
     payload["absolute_url"] = "http://evil.example.com/instead/jobs/7761472003"
     mock_fetch["handler"] = lambda url, **_: _json_response(url, payload)
     raw = ingest_job_url(INSTEAD_URL)
-    assert raw["url"] == INSTEAD_URL
+    assert raw["url"] == INSTEAD_CANONICAL_URL
 
 
 def test_absolute_url_wrong_board_ignored(mock_fetch) -> None:
@@ -228,7 +302,7 @@ def test_absolute_url_wrong_board_ignored(mock_fetch) -> None:
     payload["absolute_url"] = "https://job-boards.greenhouse.io/otherco/jobs/7761472003"
     mock_fetch["handler"] = lambda url, **_: _json_response(url, payload)
     raw = ingest_job_url(INSTEAD_URL)
-    assert raw["url"] == INSTEAD_URL
+    assert raw["url"] == INSTEAD_CANONICAL_URL
 
 
 def test_equivalent_absolute_url_on_canonical_host_accepted(mock_fetch) -> None:
@@ -328,7 +402,9 @@ def test_validate_manual_ingest_url_rejects_unsafe(url: str) -> None:
 def test_explicit_port_443_is_accepted(monkeypatch) -> None:
     monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
     url = "https://job-boards.greenhouse.io:443/instead/jobs/7761472003"
-    assert validate_manual_ingest_url(url) == url
+    # Accepted, and returned canonicalized — the explicit default port is
+    # dropped along with the host variant, so one posting has one stored URL.
+    assert validate_manual_ingest_url(url) == INSTEAD_CANONICAL_URL
 
 
 def test_ingest_unsupported_host_raises_unsafe_error() -> None:

@@ -12,7 +12,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import httpx
 
@@ -47,6 +47,7 @@ GREENHOUSE_API_BASE = "https://boards-api.greenhouse.io/v1"
 GREENHOUSE_POSTING_URL_BASE = "https://boards.greenhouse.io"
 GREENHOUSE_POSTING_HOSTS = frozenset({"boards.greenhouse.io", "job-boards.greenhouse.io"})
 GREENHOUSE_API_HOSTS = frozenset({"boards-api.greenhouse.io"})
+LEVER_POSTING_URL_BASE = "https://jobs.lever.co"
 LEVER_POSTING_HOSTS = frozenset({"jobs.lever.co"})
 LEVER_API_BASE = "https://api.lever.co/v0"
 LEVER_API_HOSTS = frozenset({"api.lever.co"})
@@ -54,8 +55,12 @@ REMOTIVE_SEARCH_URL = "https://remotive.com/api/remote-jobs"
 REMOTIVE_API_HOSTS = frozenset({"remotive.com"})
 _MIN_INGEST_DESCRIPTION_LENGTH = 40
 _GREENHOUSE_JOB_PATH_RE = re.compile(r"^/([^/]+)/jobs/(\d+)/?$")
+_GREENHOUSE_EMBED_PATH_RE = re.compile(r"^/embed/job_app/?$")
 _LEVER_JOB_PATH_RE = re.compile(
-    r"^/([^/]+)/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/?$"
+    # The trailing /apply is the form page for the same posting — the URL a
+    # candidate is most often actually on. Accepted here so pasting it
+    # ingests the posting rather than being rejected as an unsupported host.
+    r"^/([^/]+)/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:/apply)?/?$"
 )
 _BOARD_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -67,23 +72,51 @@ class GreenhousePostingRef:
 
 
 def parse_greenhouse_posting_url(url: str) -> GreenhousePostingRef | None:
-    """Parse a supported Greenhouse posting URL into board token and job ID."""
+    """Parse a supported Greenhouse posting URL into board token and job ID.
+
+    Two URL shapes reach us in practice and both identify a posting the same
+    way, so both are accepted:
+
+      canonical  https://job-boards.greenhouse.io/<board>/jobs/<job_id>
+      embed      https://job-boards.greenhouse.io/embed/job_app?for=<board>&token=<job_id>
+
+    The embed form is what an employer's own careers page frames, and it is
+    what aggregators link to, so it is frequently the URL actually sitting in
+    the address bar. Tracking parameters (utm_source, gh_src, an aggregator's
+    own id) are ignored rather than rejected: they do not change which
+    posting this is, and treating them as significant meant a job arriving
+    with them attached would neither ingest nor match an already-stored copy
+    of itself.
+    """
     try:
         parsed = urlparse(url.strip())
     except ValueError:
         return None
-    if parsed.query or parsed.fragment:
-        return None
     host = (parsed.hostname or "").lower()
     if host not in GREENHOUSE_POSTING_HOSTS:
         return None
-    match = _GREENHOUSE_JOB_PATH_RE.match(parsed.path or "")
-    if not match:
+
+    path = parsed.path or ""
+    match = _GREENHOUSE_JOB_PATH_RE.match(path)
+    if match:
+        board_token, job_id = match.group(1), match.group(2)
+    elif _GREENHOUSE_EMBED_PATH_RE.match(path):
+        params = parse_qs(parsed.query)
+        board_token = (params.get("for") or [""])[0]
+        job_id = (params.get("token") or [""])[0]
+    else:
         return None
-    board_token, job_id = match.group(1), match.group(2)
-    if not job_id.isdigit() or not _BOARD_TOKEN_RE.fullmatch(board_token):
+
+    if not job_id.isdigit() or not _BOARD_TOKEN_RE.fullmatch(board_token or ""):
         return None
     return GreenhousePostingRef(board_token=board_token, job_id=job_id)
+
+
+def canonical_greenhouse_posting_url(ref: GreenhousePostingRef) -> str:
+    """The one URL form a posting is stored and fetched under, whichever
+    shape it arrived in. Built only from a validated board token and a
+    numeric job ID, so it carries none of the original query string."""
+    return f"{GREENHOUSE_POSTING_URL_BASE}/{ref.board_token}/jobs/{ref.job_id}"
 
 
 def _board_token_company_name(board_token: str) -> str:
@@ -91,13 +124,36 @@ def _board_token_company_name(board_token: str) -> str:
 
 
 def validate_manual_ingest_url(url: str) -> str:
-    """Validate a manual-ingest URL against the supported-host and SSRF policy."""
+    """Validate a manual-ingest URL against the supported-host and SSRF policy.
+
+    Returns the canonical posting URL, not the caller's. Whatever shape the
+    URL arrived in — embed form, tracking parameters attached — the posting
+    is stored and fetched under one URL, so the same job pasted twice from
+    two different places lands on one record.
+
+    The safety check runs against the URL as supplied, before any
+    canonicalization. Rebuilding first and validating the result would let
+    an unsafe input be laundered into a safe one: embedded credentials, a
+    plain-http scheme, or an unexpected port would all be discarded by the
+    rebuild and the check would then pass on a URL the caller never sent.
+    Canonicalization decides which posting this is; it must never decide
+    whether the request is allowed.
+    """
     normalized = url.strip()
-    if parse_greenhouse_posting_url(normalized) is not None:
+    greenhouse_ref = parse_greenhouse_posting_url(normalized)
+    if greenhouse_ref is not None:
         assert_safe_outbound_url(normalized, allowed_hosts=GREENHOUSE_POSTING_HOSTS)
-        return normalized
+        return canonical_greenhouse_posting_url(greenhouse_ref)
+    lever_ref = parse_lever_posting_url(normalized)
+    if lever_ref is not None:
+        assert_safe_outbound_url(normalized, allowed_hosts=LEVER_POSTING_HOSTS)
+        return canonical_lever_posting_url(*lever_ref)
     host = (urlparse(normalized).hostname or "").lower()
     if host in LEVER_POSTING_HOSTS:
+        # Lever postings are ingested by fetching the page itself, which does
+        # not need the ID parsed out, so a posting URL that doesn't match the
+        # UUID shape is still ingestable — just not canonicalizable. Being
+        # unable to canonicalize is not a reason to refuse.
         assert_safe_outbound_url(normalized, allowed_hosts=LEVER_POSTING_HOSTS)
         return normalized
     raise UnsafeURLError("Job URL host is not supported for manual ingest.")
@@ -113,12 +169,15 @@ def _greenhouse_posting_dedupe_key(url: str | None) -> str | None:
 
 
 def parse_lever_posting_url(url: str) -> tuple[str, str] | None:
-    """Parse a jobs.lever.co posting URL into (company_slug, posting_id)."""
+    """Parse a jobs.lever.co posting URL into (company_slug, posting_id).
+
+    Tracking parameters are ignored for the same reason as Greenhouse above:
+    a posting arriving with ?lever-origin=applied or a utm_ tag attached is
+    the same posting, and rejecting it meant failing to match a stored copy.
+    """
     try:
         parsed = urlparse(url.strip())
     except ValueError:
-        return None
-    if parsed.query or parsed.fragment:
         return None
     host = (parsed.hostname or "").lower()
     if host not in LEVER_POSTING_HOSTS:
@@ -127,6 +186,10 @@ def parse_lever_posting_url(url: str) -> tuple[str, str] | None:
     if not match:
         return None
     return match.group(1), match.group(2)
+
+
+def canonical_lever_posting_url(company_slug: str, posting_id: str) -> str:
+    return f"{LEVER_POSTING_URL_BASE}/{company_slug}/{posting_id}"
 
 
 def _lever_posting_dedupe_key(url: str | None) -> str | None:
