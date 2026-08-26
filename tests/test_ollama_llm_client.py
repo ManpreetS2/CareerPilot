@@ -229,6 +229,28 @@ def test_structured_schemas_omit_persistence_fields() -> None:
     assert "tailored_bullets" in props
 
 
+def test_job_intelligence_schema_requires_every_remaining_key_and_forbids_extras() -> None:
+    schema = job_intelligence_llm_schema()
+    expected_keys = {
+        "required_skills",
+        "preferred_skills",
+        "years_experience",
+        "education_requirements",
+        "tech_stack",
+        "seniority",
+        "responsibilities",
+        "likely_interview_focus",
+    }
+    assert set(schema["properties"].keys()) == expected_keys
+    assert set(schema["required"]) == expected_keys
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["years_experience"]["anyOf"] == [
+        {"type": "integer"},
+        {"type": "null"},
+    ]
+    assert schema["properties"]["required_skills"]["type"] == "array"
+
+
 def test_unsupported_provider_still_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(LLMConfigurationError):
         LLMClient(provider="not-a-provider")

@@ -18,12 +18,13 @@ from backend.services.candidate_profile_agent import (
     extract_candidate_profile_with_llm,
 )
 from backend.services.job_intelligence_service import (
+    EmptyGroundedIntelligenceError,
     JobNotFoundError,
     PostingEvidenceError,
     StructuredIntelligenceError,
     extract_job_intelligence,
 )
-from backend.services.llm_client import LLMProviderError
+from backend.services.llm_client import LLMConfigurationError, LLMProviderError
 from tests.mvp_helpers import TEST_USER_ID, VALID_MATERIALS_JSON, seed_materials_prerequisites
 from tests.pdf_fixtures import SAMPLE_RESUME_TEXT, build_simple_text_pdf
 from tests.test_candidate_profile import _grounded_llm_payload
@@ -291,6 +292,40 @@ def test_job_intelligence_empty_grounded_falls_back(isolated_session, monkeypatc
     assert isolated_session.query(JobIntelligenceRecord).count() == 1
 
 
+def test_job_intelligence_empty_grounded_ollama_with_unconfigured_gemini_returns_409(
+    isolated_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    client, SessionLocal = isolated_client
+    with SessionLocal() as session:
+        job = _job(session)
+    empty = _payload(
+        required_skills=["NotARealSkillXYZ"],
+        preferred_skills=["AlsoFakeSkill"],
+        years_experience=99,
+        education_requirements=["Made Up Degree"],
+        tech_stack=["Unobtanium"],
+        seniority="Galactic Overlord",
+        responsibilities=["Invent warp drive"],
+        likely_interview_focus=["Telepathy"],
+    )
+    scripted = ScriptedProviders()
+    scripted.script("ollama", json.dumps(empty))
+
+    def _get_client(provider: str | None = None):
+        if provider == "gemini":
+            raise LLMConfigurationError("GEMINI_API_KEY is not set.")
+        return scripted.get_client(provider)
+
+    monkeypatch.setattr("backend.services.job_intelligence_service.get_llm_client", _get_client)
+    response = client.post(f"/api/jobs/{job.public_id}/intelligence")
+    assert response.status_code == 409
+    assert response.json() == {"detail": "No supported job requirements were found."}
+    with SessionLocal() as session:
+        assert session.query(JobIntelligenceRecord).count() == 0
+    assert scripted.calls == ["ollama"]
+
+
 def test_job_intelligence_all_providers_fail_persists_nothing(
     isolated_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -339,6 +374,51 @@ def test_job_intelligence_missing_evidence_does_not_call_provider(
     with pytest.raises(PostingEvidenceError):
         extract_job_intelligence(isolated_session, record.public_id)
     assert scripted.calls == []
+
+
+def test_job_intelligence_second_attempt_succeeds_without_calling_gemini(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    job = _job(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", "not-json", json.dumps(_payload()))
+    scripted.script("gemini", "GEMINI_SHOULD_NOT_RUN")
+    _patch_clients(monkeypatch, scripted, *_intel_modules())
+    stored = extract_job_intelligence(isolated_session, job.public_id)
+    assert stored.required_skills
+    assert scripted.calls == ["ollama", "ollama"]
+    assert isolated_session.query(JobIntelligenceRecord).count() == 1
+
+
+def test_job_intelligence_meaningful_ollama_failure_survives_unconfigured_gemini(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    job = _job(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", "not-json", "still not json")
+    scripted.script("gemini", LLMConfigurationError("Gemini is not configured."))
+    _patch_clients(monkeypatch, scripted, *_intel_modules())
+    with pytest.raises(StructuredIntelligenceError):
+        extract_job_intelligence(isolated_session, job.public_id)
+    assert scripted.calls == ["ollama", "ollama", "gemini"]
+    assert isolated_session.query(JobIntelligenceRecord).count() == 0
+
+
+def test_job_intelligence_all_providers_genuinely_unconfigured_returns_configuration_error(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    job = _job(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", LLMConfigurationError("Ollama is not configured."))
+    scripted.script("gemini", LLMConfigurationError("Gemini is not configured."))
+    _patch_clients(monkeypatch, scripted, *_intel_modules())
+    with pytest.raises(LLMConfigurationError):
+        extract_job_intelligence(isolated_session, job.public_id)
+    assert scripted.calls == ["ollama", "gemini"]
+    assert isolated_session.query(JobIntelligenceRecord).count() == 0
 
 
 def test_materials_ollama_success_never_calls_gemini(isolated_session, monkeypatch: pytest.MonkeyPatch) -> None:

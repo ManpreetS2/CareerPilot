@@ -29,7 +29,7 @@ REQUIRED_SCENARIOS = {
     "annual-salary-maximum-mismatch",
     "hourly-salary-ignored",
     "score-triggered-intelligence-extraction",
-    "no-explicit-requirements-409",
+    "no-explicit-requirements-502",
     "repeat-recalculation-upserts-one-row",
     "database-commit-failure-rolls-back",
 }

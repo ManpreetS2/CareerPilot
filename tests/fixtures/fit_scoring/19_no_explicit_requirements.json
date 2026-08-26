@@ -1,5 +1,5 @@
 {
-  "scenario_id": "no-explicit-requirements-409",
+  "scenario_id": "no-explicit-requirements-502",
   "job": {
     "public_id": "fit-matrix-019",
     "title": "Team Contributor",
@@ -34,7 +34,7 @@
     "matched": [],
     "partial": [],
     "missing": [],
-    "http_status": 409,
+    "http_status": 502,
     "row_count": 0,
     "persistence": "none"
   }

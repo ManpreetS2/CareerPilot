@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -46,7 +47,6 @@ _SYSTEM_PROMPT = (
 )
 
 _JSON_SHAPE = """{
-  "job_id": null,
   "required_skills": ["exact skill phrase"],
   "preferred_skills": ["exact skill phrase"],
   "years_experience": null,
@@ -188,11 +188,30 @@ class EmptyGroundedIntelligenceError(JobIntelligenceError):
         super().__init__("No supported job requirements were found.")
 
 
+_PROVIDER_ERROR_PRIORITY: dict[type[BaseException], int] = {
+    PostingEvidenceError: 50,
+    EmptyGroundedIntelligenceError: 50,
+    StructuredIntelligenceError: 40,
+    LLMProviderError: 40,
+    LLMEmptyResponseError: 40,
+    LLMConfigurationError: 10,
+}
+
+
+def _should_replace_provider_error(current: Exception | None, new: Exception) -> bool:
+    if current is None:
+        return True
+    current_rank = _PROVIDER_ERROR_PRIORITY.get(type(current), 0)
+    new_rank = _PROVIDER_ERROR_PRIORITY.get(type(new), 0)
+    return new_rank > current_rank
+
+
 def build_extraction_prompts(job: JobRecord) -> tuple[str, str]:
     """Build a strict prompt containing only the stored posting title and description."""
     user_prompt = f"""Extract structured requirements from this job posting.
 
 Rules:
+- Copy skill labels exactly as they appear in the posting, without trailing punctuation.
 - Copy only requirements explicitly supported by the posting.
 - Keep required, preferred, and technology-stack skills in their local posting categories.
 - Copy complete technology and responsibility phrases; do not use substrings.
@@ -221,12 +240,17 @@ JOB DESCRIPTION:
 def _retry_prompt(original: str) -> str:
     return (
         original
-        + "\n\nIMPORTANT: Previous output was invalid. Return one complete raw JSON object only."
+        + "\n\nIMPORTANT: Previous output was invalid or empty. Return one complete raw "
+        "JSON object with every key present. Use literal phrases copied from the posting "
+        "text above — do not paraphrase. Use [] or null for any category with no "
+        "supported evidence; do not leave a key out."
     )
 
 
 def _posting_source(job: JobRecord) -> str:
-    return f"{job.title.strip()}\n{job.description.strip()}"
+    title = html.unescape((job.title or "").strip())
+    description = html.unescape((job.description or "").strip())
+    return f"{title}\n{description}"
 
 
 def _require_posting_evidence(job: JobRecord) -> None:
@@ -254,8 +278,12 @@ def _parse_structured_output(raw: str) -> JobIntelligence:
         raise StructuredIntelligenceError() from exc
     if not isinstance(payload, dict):
         raise StructuredIntelligenceError()
-    unknown = set(payload) - {"job_id", *_STRUCTURED_FIELDS}
+    payload = dict(payload)
+    payload.pop("job_id", None)
+    unknown = set(payload) - set(_STRUCTURED_FIELDS)
     if unknown:
+        raise StructuredIntelligenceError()
+    if any(field not in payload for field in _STRUCTURED_FIELDS):
         raise StructuredIntelligenceError()
     if isinstance(payload.get("years_experience"), bool):
         raise StructuredIntelligenceError()
@@ -264,6 +292,12 @@ def _parse_structured_output(raw: str) -> JobIntelligence:
     except ValidationError as exc:
         raise StructuredIntelligenceError() from exc
     return intelligence
+
+
+def _normalize_extracted_label(value: str) -> str:
+    """Strip whitespace and trailing punctuation models often add in JSON arrays."""
+    cleaned = re.sub(r"\s+", " ", value.strip())
+    return cleaned.rstrip(".,;:!")
 
 
 def _exact_phrase_supported(value: str, source: str) -> bool:
@@ -295,7 +329,7 @@ def _ground_skills(
         intelligence.tech_stack,
     ):
         for raw in labels:
-            label = raw.strip()
+            label = _normalize_extracted_label(raw)
             position += 1
             if not label:
                 removed += 1
@@ -681,6 +715,22 @@ def _normalized_line(value: str) -> str:
     return value.rstrip(" .;:").lower()
 
 
+def _split_into_clauses(text: str) -> list[str]:
+    """Split a dense paragraph into exact sentences/clauses. Punctuation-based
+    only — no fuzzy or semantic matching."""
+    return [
+        clause.strip()
+        for clause in re.split(r"\s*(?:;|\|)\s*|(?<=[.!?])\s+(?=[A-Z])", text)
+        if clause.strip()
+    ]
+
+
+def _add_line_and_clauses(lines: set[str], text: str) -> None:
+    lines.add(_normalized_line(text))
+    for clause in _split_into_clauses(text):
+        lines.add(_normalized_line(clause))
+
+
 def _responsibility_source_lines(source: str) -> set[str]:
     lines: set[str] = set()
     in_responsibilities = False
@@ -696,7 +746,7 @@ def _responsibility_source_lines(source: str) -> set[str]:
             flags=re.I,
         )
         if inline_responsibility:
-            lines.add(_normalized_line(inline_responsibility.group(1)))
+            _add_line_and_clauses(lines, inline_responsibility.group(1))
             in_responsibilities = True
             cue_lines_allowed = True
             continue
@@ -723,7 +773,7 @@ def _responsibility_source_lines(source: str) -> set[str]:
             stripped,
             flags=re.I,
         ):
-            lines.add(_normalized_line(stripped))
+            _add_line_and_clauses(lines, stripped)
     return {line for line in lines if line}
 
 
@@ -935,7 +985,7 @@ def _extract_structured(
             if not any(
                 getattr(structured, field)
                 for field in _STRUCTURED_FIELDS
-            ) and attempt == 0:
+            ):
                 raise StructuredIntelligenceError()
             return structured
         except LLMProviderError:
@@ -1022,7 +1072,8 @@ def extract_job_intelligence(
                 LLMEmptyResponseError,
                 LLMConfigurationError,
             ) as exc:
-                last_error = exc
+                if _should_replace_provider_error(last_error, exc):
+                    last_error = exc
                 logger.warning(
                     "job intelligence provider sequence failed category=%s job_pk=%s",
                     type(exc).__name__,
