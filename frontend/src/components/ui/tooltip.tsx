@@ -22,7 +22,7 @@ export function Tooltip({
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content
           sideOffset={6}
-          className="glass-surface z-50 rounded-[var(--radius-sm)] border border-border px-2 py-1 text-xs shadow-floating"
+          className="glass-floating z-[80] rounded-[var(--radius-sm)] border border-border px-2 py-1 text-xs shadow-floating"
         >
           {content}
         </TooltipPrimitive.Content>

@@ -14,8 +14,9 @@ export function DropdownMenuContent({
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
         sideOffset={8}
+        collisionPadding={12}
         className={cn(
-          "glass-surface z-50 min-w-[10rem] rounded-[var(--radius-md)] border border-border p-1 shadow-floating",
+          "glass-floating z-[80] min-w-[10rem] rounded-[var(--radius-md)] border border-border p-1 shadow-floating",
           className,
         )}
         {...props}

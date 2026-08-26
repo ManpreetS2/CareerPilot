@@ -19,6 +19,11 @@ describe("loading empty and error primitives", () => {
     );
     expect(screen.getByRole("alert")).toHaveTextContent("Backend unreachable");
   });
+
+  it("does not render a decorative Try again control when no action is provided", () => {
+    render(<ErrorState title="Backend unreachable" description="Start the API and retry." />);
+    expect(screen.queryByRole("button", { name: /try again/i })).not.toBeInTheDocument();
+  });
 });
 
 describe("PreferenceForm", () => {

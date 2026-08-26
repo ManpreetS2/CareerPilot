@@ -148,7 +148,7 @@ export function CommandPalette() {
                   >
                     <command.icon className="h-4 w-4 text-muted-foreground" aria-hidden />
                     <span className="font-medium">{command.label}</span>
-                    <span className="ml-auto text-xs text-muted-foreground">{command.hint}</span>
+                    <span className="ml-auto hidden min-w-0 truncate text-xs text-muted-foreground sm:inline">{command.hint}</span>
                   </button>
                 </li>
               ))

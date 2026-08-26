@@ -51,7 +51,7 @@ export function SettingsPage() {
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
             <div>
               <dt className="text-muted-foreground">Email</dt>
-              <dd className="font-medium">{user.email}</dd>
+              <dd className="wrap-anywhere font-medium">{user.email}</dd>
             </div>
             <div>
               <dt className="text-muted-foreground">Signed in since</dt>

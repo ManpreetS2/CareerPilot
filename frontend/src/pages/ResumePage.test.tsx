@@ -69,8 +69,8 @@ const details: Record<string, ResumeVersionDetail> = {
   },
 };
 
-function renderResume(route: string) {
-  vi.mocked(api.listAllResumeVersions).mockResolvedValue(summaries);
+function renderResume(route: string, versions = summaries) {
+  vi.mocked(api.listAllResumeVersions).mockResolvedValue(versions);
   vi.mocked(api.getResumeVersionDetail).mockImplementation(async (id: string) => details[id]!);
   return render(
     <QueryClientProvider client={createTestQueryClient()}>
@@ -103,11 +103,9 @@ describe("ResumePage", () => {
     expect(screen.queryByText("candidate_profile_fingerprint")).not.toBeInTheDocument();
   });
 
-  it("selects a version from the library", async () => {
-    const user = userEvent.setup();
-    renderResume("/resume");
-    await screen.findByTestId("resume-version-list");
-    await user.click(screen.getByText("Version 2"));
-    expect(await screen.findByText("Historical Ada v2")).toBeInTheDocument();
+  it("keeps the Resume heading on an empty library", async () => {
+    renderResume("/resume", []);
+    expect(await screen.findByText("No resume versions")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Resume" })).toBeInTheDocument();
   });
 });

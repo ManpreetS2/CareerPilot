@@ -45,7 +45,7 @@ function ResumePreview({ detail }: { detail: ResumeVersionDetail }) {
     <article className="space-y-6" data-testid="resume-preview">
       <header>
         <h2 className="font-display text-2xl font-semibold">{profile.name || "Candidate"}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="wrap-anywhere mt-1 text-sm text-muted-foreground">
           {[profile.email, profile.phone].filter(Boolean).join(" · ") || "Contact not stored on this version"}
         </p>
       </header>
@@ -169,13 +169,19 @@ export function ResumePage() {
 
   if (listQuery.isPending) {
     return (
-      <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]" aria-busy>
-        <div className="space-y-2">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
+      <div className="space-y-6">
+        <PageHeader
+          title="Resume"
+          description="Immutable approved snapshots. Each preview uses the historical profile stored with that version."
+        />
+        <div className="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]" aria-busy>
+          <div className="space-y-2">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+          </div>
+          <Skeleton className="min-h-[28rem] w-full" />
         </div>
-        <Skeleton className="min-h-[28rem] w-full" />
       </div>
     );
   }
@@ -183,15 +189,21 @@ export function ResumePage() {
 
   if (versions.length === 0) {
     return (
-      <EmptyState
-        title="No resume versions"
-        description="Approve grounded materials for a job, then save an immutable resume version."
-        action={
-          <Link to="/jobs" className="btn-primary">
-            Open jobs
-          </Link>
-        }
-      />
+      <div className="space-y-6">
+        <PageHeader
+          title="Resume"
+          description="Immutable approved snapshots. Each preview uses the historical profile stored with that version."
+        />
+        <EmptyState
+          title="No resume versions"
+          description="Approve grounded materials for a job, then save an immutable resume version."
+          action={
+            <Link to="/jobs" className="btn-primary">
+              Open jobs
+            </Link>
+          }
+        />
+      </div>
     );
   }
 
@@ -222,7 +234,7 @@ export function ResumePage() {
                   {new Date(version.created_at).toLocaleDateString()}
                 </span>
               </span>
-              <span className="mt-0.5 block truncate text-muted-foreground">
+              <span className="mt-0.5 block wrap-anywhere text-muted-foreground">
                 {version.company} · {version.job_title}
               </span>
             </motion.span>

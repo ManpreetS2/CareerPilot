@@ -7,7 +7,6 @@ import { LoadingState } from "../components/LoadingState";
 import { MatchBadge } from "../components/MatchBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { PageHeader } from "../components/ui/page-header";
-import { Glass } from "../components/ui/glass";
 import { api, ApiClientError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { cn } from "../lib/cn";
@@ -65,11 +64,11 @@ function TrackerCard({
   onReminderChange: (jobId: string, date: string | null) => void;
 }) {
   return (
-    <article className="card space-y-3 p-4">
+    <article className="rounded-[var(--radius-md)] border border-border/80 bg-background/70 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="font-display text-base font-semibold leading-snug">{item.title}</h2>
-          <p className="text-sm text-muted-foreground">{item.company}</p>
+          <h2 className="wrap-anywhere font-display text-base font-semibold leading-snug">{item.title}</h2>
+          <p className="wrap-anywhere text-sm text-muted-foreground">{item.company}</p>
           <p className="mt-1 text-xs text-muted-foreground">Updated {formatUpdated(item.updated_at)}</p>
         </div>
         <MatchBadge score={item.match_score} recommendation={item.recommendation} />
@@ -84,7 +83,7 @@ function TrackerCard({
       </div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
-          <label className="flex min-w-[10rem] flex-col gap-1 text-sm">
+          <label className="flex min-w-0 flex-col gap-1 text-sm sm:min-w-[10rem]">
             <span className="text-muted-foreground">Tracking status</span>
             <select
               className="input"
@@ -107,7 +106,7 @@ function TrackerCard({
               ))}
             </select>
           </label>
-          <label className="flex min-w-[9rem] flex-col gap-1 text-sm">
+          <label className="flex min-w-0 flex-col gap-1 text-sm sm:min-w-[9rem]">
             <span className="text-muted-foreground">Follow-up</span>
             <input
               type="date"
@@ -267,19 +266,19 @@ export function ApplicationsPage() {
           }
         />
       ) : view === "kanban" ? (
-        <div className="flex gap-3 overflow-x-auto pb-2" data-testid="tracker-kanban">
+        <div className="kanban-board" data-testid="tracker-kanban">
           {KANBAN_COLUMNS.map((column) => {
             const columnJobs = columnItems(items, column.id);
             return (
               <section
                 key={column.id}
-                className="w-[18.5rem] shrink-0"
+                className="kanban-column glass-atmosphere rounded-[var(--radius-md)]"
                 aria-label={`${column.label} column`}
               >
-                <Glass variant="subtle" className="mb-3 rounded-[var(--radius-md)] px-3 py-2">
+                <div className="mb-3">
                   <h2 className="text-sm font-semibold capitalize">{column.label}</h2>
                   <p className="text-xs text-muted-foreground">{columnJobs.length}</p>
-                </Glass>
+                </div>
                 <div className="space-y-3">
                   {columnJobs.length === 0 ? (
                     <p className="px-1 text-xs text-muted-foreground">Empty</p>

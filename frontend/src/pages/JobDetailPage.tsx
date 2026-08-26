@@ -8,6 +8,7 @@ import { JobIntelligencePanel } from "../components/JobIntelligencePanel";
 import { LoadingState } from "../components/LoadingState";
 import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { ScoreOrb } from "../components/signature/ScoreOrb";
 import { api, ApiClientError } from "../lib/api";
 import { topMatchPercentileLabel } from "../lib/match-percentile";
 import { saveSelectedJobId } from "../lib/session";
@@ -281,27 +282,30 @@ export function JobDetailPage() {
           <span className="text-muted-foreground">End of your stored list</span>
         )}
       </div>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-ink-500">{job.company}</p>
-          <h1 className="font-display text-4xl font-semibold">{job.title}</h1>
-          <p className="mt-2 text-ink-600 dark:text-ink-300">
-            {job.location || "Location n/a"}
-            {job.salary ? ` · ${job.salary}` : ""}
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <StatusBadge status={job.status} />
-            <SourceBadge source={job.source} />
-            {scoutedTimeAgo(job.date_scraped) ? (
-              <span className="text-xs text-ink-500">{scoutedTimeAgo(job.date_scraped)}</span>
-            ) : null}
-            {percentile ? <span className="text-xs font-medium text-primary">{percentile}</span> : null}
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-4">
+          <ScoreOrb score={match?.overall_score} />
+          <div className="min-w-0">
+            <p className="wrap-anywhere text-sm text-ink-500">{job.company}</p>
+            <h1 className="wrap-anywhere font-display text-4xl font-semibold">{job.title}</h1>
+            <p className="mt-2 text-ink-600 dark:text-ink-300">
+              {job.location || "Location n/a"}
+              {job.salary ? ` · ${job.salary}` : ""}
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge status={job.status} />
+              <SourceBadge source={job.source} />
+              {scoutedTimeAgo(job.date_scraped) ? (
+                <span className="text-xs text-ink-500">{scoutedTimeAgo(job.date_scraped)}</span>
+              ) : null}
+              {percentile ? <span className="text-xs font-medium text-primary">{percentile}</span> : null}
+            </div>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <a href={job.url} target="_blank" rel="noreferrer" className="btn-secondary">
-            <ExternalLink className="h-4 w-4" aria-hidden />
-            Open posting
+          <a href={job.url} target="_blank" rel="noreferrer" className="btn-secondary max-w-full">
+            <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
+            <span className="wrap-anywhere">Open posting</span>
           </a>
           <Link
             to={`/jobs/${job.id}/prepare`}
@@ -317,7 +321,7 @@ export function JobDetailPage() {
 
       <section className="card p-6">
         <h2 className="font-display text-2xl font-semibold">Job overview</h2>
-        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-ink-700 dark:text-ink-200">
+        <p className="mt-3 wrap-anywhere whitespace-pre-wrap text-sm leading-relaxed text-ink-700 dark:text-ink-200">
           {job.description}
         </p>
       </section>

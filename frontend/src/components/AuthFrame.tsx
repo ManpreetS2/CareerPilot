@@ -13,7 +13,7 @@ export function AuthFrame({
   children: ReactNode;
 }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4">
+    <div className="cp-atmosphere relative flex min-h-[100dvh] items-center justify-center bg-background px-4 py-8">
       <PointerHalo />
       <IntelligenceField />
       <div className="relative z-10 w-full max-w-sm space-y-6">

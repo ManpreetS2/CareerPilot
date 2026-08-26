@@ -55,4 +55,11 @@ describe("theme", () => {
     expect(root.className).not.toMatch(/\b(min-h-screen|items-center|justify-center|place-items-center)\b/);
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
   });
+
+  it("persists reduced motion on the document", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    await user.click(screen.getByLabelText("Reduce motion"));
+    expect(document.documentElement.classList.contains("reduce-motion")).toBe(true);
+  });
 });

@@ -130,7 +130,14 @@ describe("AppShell", () => {
     expect(screen.getByTestId("app-shell").contains(palette)).toBe(false);
     const style = getComputedStyle(palette);
     expect(style.position).toBe("fixed");
+    expect(style.bottom).toBe("auto");
     expect(style.bottom).not.toBe("0px");
+    expect(Number.parseInt(style.zIndex, 10)).toBeGreaterThanOrEqual(80);
+    const probe = document.createElement("div");
+    probe.className = "command-palette";
+    document.body.appendChild(probe);
+    expect(getComputedStyle(probe).position).toBe("fixed");
+    probe.remove();
     expect(screen.getByLabelText("Filter commands")).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
@@ -162,7 +169,33 @@ describe("AppShell", () => {
       "Settings",
     ]);
     expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
+    const sheet = screen.getByRole("dialog");
+    expect(sheet.className).toMatch(/max-h-\[100dvh\]/);
+    expect(getComputedStyle(sheet).overflowY).toBe("auto");
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("mobile-nav")).not.toBeInTheDocument();
+  });
+
+  it("keeps the desktop sidebar fixed and out of document flow", () => {
+    renderShell("/settings");
+    const sidebar = screen.getByTestId("app-sidebar");
+    const main = document.getElementById("main");
+    expect(getComputedStyle(sidebar).position).toBe("fixed");
+    expect(getComputedStyle(sidebar).left).toBe("0px");
+    expect(main).toHaveClass("lg:ml-56", "pt-8");
+    expect(getComputedStyle(main as HTMLElement).paddingTop).toBe("2rem");
+    expect(screen.getByRole("heading", { name: "Settings" }).getBoundingClientRect().top).toBeLessThan(160);
+  });
+
+  it("filters command palette items and navigates with Enter", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.keyboard("{Control>}k{/Control}");
+    await user.type(screen.getByLabelText("Filter commands"), "set");
+    expect(screen.getByRole("option", { name: /Settings/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^Overview/i })).not.toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
   });
 });

@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { ReadinessPath } from "../components/signature/ReadinessPath";
+import { ScoreOrb } from "../components/signature/ScoreOrb";
+import { WorkflowPath } from "../components/signature/WorkflowPath";
 import { Glass } from "../components/ui/glass";
 import { PageHeader } from "../components/ui/page-header";
 import { Skeleton } from "../components/ui/skeleton";
@@ -115,8 +117,8 @@ export function DashboardPage() {
         </div>
       ) : (
         <>
-          <Glass variant="floating" refract className="rounded-[var(--radius-lg)] p-6">
-            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Next action</p>
+          <Glass variant="atmosphere" refract className="rounded-[var(--radius-lg)] p-6">
+            <p className="cp-kicker">Next action</p>
             <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight">{next.title}</h2>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{next.description}</p>
             <Link to={next.to} className="btn-primary mt-4 inline-flex" data-testid="dashboard-next-action">
@@ -133,30 +135,41 @@ export function DashboardPage() {
             ) : null}
           </Glass>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="border-t border-border pt-4">
+          <WorkflowPath
+            nodes={[
+              { id: "profile", label: "Profile", state: liveCandidate?.name ? "complete" : "current" },
+              { id: "discover", label: "Discover", state: jobs.length ? "complete" : "upcoming" },
+              { id: "analyze", label: "Analyze", state: scores.length ? "complete" : jobs.length ? "current" : "upcoming" },
+              { id: "prepare", label: "Prepare", state: versions.length ? "complete" : "upcoming" },
+              { id: "track", label: "Track", state: pipelineBits.length ? "current" : "upcoming" },
+            ]}
+          />
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+            <Glass variant="working" className="rounded-[var(--radius-lg)] p-5">
               <h2 className="font-display text-lg font-semibold">Strongest matches</h2>
               {strong.length === 0 ? (
                 <p className="mt-2 text-sm text-muted-foreground">No stored high-fit scores yet.</p>
               ) : (
-                <ul className="mt-3 divide-y divide-border">
+                <ul className="mt-3 space-y-3">
                   {strong.slice(0, 4).map((score) => {
                     const job = jobs.find((item) => item.id === score.job_id);
                     return (
-                      <li key={score.job_id} className="py-2.5">
-                        <Link to={`/jobs/${score.job_id}`} className="flex justify-between gap-3 text-sm">
-                          <span className="min-w-0 truncate">
-                            {job?.title ?? "Role"} · {job?.company ?? "Company"}
+                      <li key={score.job_id}>
+                        <Link to={`/jobs/${score.job_id}`} className="flex items-start gap-3 text-sm">
+                          <ScoreOrb score={score.overall_score} compact />
+                          <span className="min-w-0 wrap-anywhere">
+                            <span className="font-semibold">{job?.title ?? "Role"}</span>
+                            <span className="mt-0.5 block text-muted-foreground">{job?.company ?? "Company"}</span>
                           </span>
-                          <span className="tabular text-muted-foreground">{score.overall_score}</span>
                         </Link>
                       </li>
                     );
                   })}
                 </ul>
               )}
-            </div>
-            <div className="border-t border-border pt-4">
+            </Glass>
+            <Glass variant="working" className="rounded-[var(--radius-lg)] p-5">
               <h2 className="font-display text-lg font-semibold">Profile readiness</h2>
               <div className="mt-3">
                 <ReadinessPath flags={readinessFlags} />
@@ -171,8 +184,8 @@ export function DashboardPage() {
                   <dd className="tabular font-semibold">{jobs.length}</dd>
                 </div>
               </dl>
-            </div>
-            <div className="border-t border-border pt-4">
+            </Glass>
+            <div className="rounded-[var(--radius-lg)] border border-border/70 p-5">
               <h2 className="font-display text-lg font-semibold">Recent resume versions</h2>
               {versions.length === 0 ? (
                 <p className="mt-2 text-sm text-muted-foreground">No approved resume versions yet.</p>
@@ -181,10 +194,10 @@ export function DashboardPage() {
                   {versions.slice(0, 4).map((version) => (
                     <li key={version.id}>
                       <Link to={`/resume/${version.id}`} className="flex justify-between gap-3">
-                        <span className="min-w-0 truncate">
+                        <span className="min-w-0 wrap-anywhere">
                           Version {version.version_number} · {version.company}
                         </span>
-                        <span className="tabular text-muted-foreground">
+                        <span className="shrink-0 tabular text-muted-foreground">
                           {new Date(version.created_at).toLocaleDateString()}
                         </span>
                       </Link>
@@ -193,7 +206,7 @@ export function DashboardPage() {
                 </ul>
               )}
             </div>
-            <div className="border-t border-border pt-4">
+            <div className="rounded-[var(--radius-lg)] border border-border/70 p-5">
               <h2 className="font-display text-lg font-semibold">Application pipeline</h2>
               {pipelineBits.length === 0 ? (
                 <p className="mt-2 text-sm text-muted-foreground">

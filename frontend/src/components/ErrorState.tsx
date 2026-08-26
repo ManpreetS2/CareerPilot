@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
-import { Button } from "./ui/button";
 import { Surface } from "./ui/surface";
 
 export function ErrorState({
@@ -21,7 +20,7 @@ export function ErrorState({
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         </div>
       </div>
-      {action ? action : <Button variant="secondary">Try again</Button>}
+      {action}
     </Surface>
   );
 }

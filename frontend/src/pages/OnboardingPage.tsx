@@ -133,7 +133,7 @@ export function OnboardingPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-background px-4 py-8">
+    <div className="cp-atmosphere relative min-h-[100dvh] bg-background px-4 py-8">
       <IntelligenceField />
       <div className="relative z-10 mx-auto max-w-2xl space-y-6">
         <div>
@@ -148,11 +148,11 @@ export function OnboardingPage() {
           <WorkflowPath
             className="mt-4"
             nodes={[
-              { id: "profile", label: "Profile", state: step >= 4 ? "complete" : step >= 3 ? "current" : "upcoming" },
-              { id: "jobs", label: "Jobs", state: "upcoming" },
-              { id: "match", label: "Match", state: "upcoming" },
+              { id: "profile", label: "Profile", state: step >= 4 ? "complete" : "current" },
+              { id: "discover", label: "Discover", state: "upcoming" },
+              { id: "analyze", label: "Analyze", state: "upcoming" },
               { id: "prepare", label: "Prepare", state: "upcoming" },
-              { id: "resume", label: "Resume", state: "upcoming" },
+              { id: "track", label: "Track", state: "upcoming" },
             ]}
           />
         </div>
@@ -169,7 +169,7 @@ export function OnboardingPage() {
             exit={{ opacity: reduce ? 1 : 0, y: reduce ? 0 : -8 }}
             transition={{ duration: reduce ? 0 : 0.18 }}
           >
-            <Glass variant="surface" refract className="rounded-[var(--radius-lg)] p-6">
+            <Glass variant="working" refract className="rounded-[var(--radius-lg)] p-6">
             {step === 1 ? (
               <p className="text-sm leading-relaxed text-muted-foreground">
                 CareerPilot grounds every later recommendation in your real profile. You can skip
@@ -322,7 +322,7 @@ export function OnboardingPage() {
         </AnimatePresence>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <button type="button" className="btn-ghost" onClick={onBack} disabled={step === 1 || busy}>
+          <button type="button" className="btn-ghost" data-testid="onboarding-back" onClick={onBack} disabled={step === 1 || busy}>
             Back
           </button>
           <div className="flex flex-wrap gap-2">

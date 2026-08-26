@@ -103,7 +103,7 @@ function ProductPreview() {
               </p>
             </div>
             <div className="flex min-w-0 items-start gap-3 rounded-[var(--radius-md)] border border-border/70 bg-background/50 p-3">
-              <ScoreOrb score={86} />
+              <ScoreOrb score={86} compact />
               <div className="min-w-0">
                 <p className="wrap-anywhere font-display text-sm font-semibold">Platform Engineer</p>
                 <p className="text-xs text-muted-foreground">Northwind · Remote</p>
@@ -129,7 +129,7 @@ export function LandingPage() {
     <div className="cp-atmosphere relative min-h-screen bg-background">
       <PointerHalo />
       <IntelligenceField />
-      <header className="safe-pad relative z-10 mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
+      <header className="safe-pad relative z-10 mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-5 sm:px-6">
         <span className="font-display text-lg font-semibold tracking-tight">{APP_NAME}</span>
         <div className="flex gap-2">
           <Link to="/login" className="btn-ghost">

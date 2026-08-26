@@ -18,10 +18,10 @@ export function DialogContent({
 }) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="command-tunnel fixed inset-0 z-50" />
+      <DialogPrimitive.Overlay className="command-tunnel fixed inset-0 z-[70]" />
       <DialogPrimitive.Content
         className={cn(
-          "glass-surface fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius-lg)] border border-border p-6 shadow-floating",
+          "glass-floating fixed left-1/2 top-1/2 z-[80] max-h-[min(90dvh,40rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[var(--radius-lg)] border border-border p-6 shadow-floating",
           className,
         )}
       >

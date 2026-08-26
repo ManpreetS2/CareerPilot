@@ -213,9 +213,14 @@ body {
   transition: opacity var(--motion-base) var(--ease-standard);
 }
 
-.glass-refract:hover::before,
 .glass-refract:focus-within::before {
   opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .glass-refract:hover::before {
+    opacity: 1;
+  }
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -278,6 +283,13 @@ body {
 .fixed.glass-surface,
 .fixed.glass-floating {
   position: fixed;
+}
+
+.sticky.glass-atmosphere,
+.sticky.glass-working,
+.sticky.glass-floating,
+.sticky-action-rail {
+  position: sticky;
 }
 
 .skip-link {
@@ -426,6 +438,30 @@ body {
 .score-orb-empty {
   background: var(--muted);
   color: var(--muted-foreground);
+}
+
+.score-orb-compact {
+  width: 3rem;
+  height: 3rem;
+}
+
+.score-orb-compact .score-orb-inner {
+  width: 2.15rem;
+  height: 2.15rem;
+  font-size: 0.75rem;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover {
+    background: var(--primary-hover);
+  }
+  .btn-secondary:hover {
+    background: var(--surface-secondary);
+  }
+  .btn-ghost:hover {
+    background: var(--muted);
+    color: var(--foreground);
+  }
 }
 
 .kanban-board {
@@ -582,14 +618,11 @@ body {
     @apply btn text-[var(--primary-foreground)];
     background: var(--primary);
   }
-  .btn-primary:hover {
-    background: var(--primary-hover);
-  }
   .btn-secondary {
-    @apply btn border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] hover:bg-[var(--surface-secondary)];
+    @apply btn border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)];
   }
   .btn-ghost {
-    @apply btn text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)];
+    @apply btn text-[var(--muted-foreground)];
   }
   .btn-danger {
     @apply btn text-white;

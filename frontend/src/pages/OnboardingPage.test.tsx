@@ -82,4 +82,24 @@ describe("OnboardingPage", () => {
     expect(await screen.findByTestId("onboarding-step-4")).toBeInTheDocument();
     expect(screen.getByText(/No parsed profile yet/i)).toBeInTheDocument();
   });
+
+  it("moves back to the previous step", async () => {
+    const user = userEvent.setup();
+    renderOnboarding();
+    await user.click(screen.getByTestId("onboarding-continue"));
+    expect(await screen.findByTestId("onboarding-step-2")).toBeInTheDocument();
+    await user.click(screen.getByTestId("onboarding-back"));
+    expect(await screen.findByTestId("onboarding-step-1")).toBeInTheDocument();
+  });
+
+  it("uses the Discover Analyze Prepare Track workflow labels", () => {
+    renderOnboarding();
+    const path = screen.getByTestId("workflow-path");
+    expect(path).toHaveTextContent("Discover");
+    expect(path).toHaveTextContent("Analyze");
+    expect(path).toHaveTextContent("Prepare");
+    expect(path).toHaveTextContent("Track");
+    expect(path).not.toHaveTextContent("Jobs");
+    expect(path).not.toHaveTextContent("Match");
+  });
 });

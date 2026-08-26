@@ -7,6 +7,7 @@ import { MatchBadge } from "../components/MatchBadge";
 import { LoadingState } from "../components/LoadingState";
 import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { ScoreOrb } from "../components/signature/ScoreOrb";
 import { Glass } from "../components/ui/glass";
 import { PageHeader } from "../components/ui/page-header";
 import { api } from "../lib/api";
@@ -181,7 +182,7 @@ export function JobsPage() {
         description="Discover and triage roles from Greenhouse, Lever, Remotive, Adzuna, RemoteOK, and manually added URLs. Scores already stored appear immediately. Selecting a job never scores or extracts on its own."
         actions={
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-primary" onClick={() => void loadJobs(true)} disabled={scouting}>
+            <button type="button" className="btn-primary btn-stable" onClick={() => void loadJobs(true)} disabled={scouting}>
               <RefreshCw className={`h-4 w-4 ${scouting ? "animate-spin" : ""}`} aria-hidden />
               {scouting ? "Finding…" : "Find Jobs"}
             </button>
@@ -199,8 +200,8 @@ export function JobsPage() {
 
       <ErrorBanner error={error} />
 
-      <Glass variant="subtle" className="grid gap-3 rounded-[var(--radius-lg)] p-4 lg:grid-cols-[1.4fr_1fr_auto_auto_auto]">
-        <label className="relative block">
+      <Glass variant="atmosphere" className="grid min-w-0 grid-cols-1 gap-3 rounded-[var(--radius-lg)] p-4 sm:grid-cols-2 xl:grid-cols-4">
+        <label className="relative block min-w-0">
           <span className="sr-only">Search jobs</span>
           <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <input
@@ -210,7 +211,7 @@ export function JobsPage() {
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Manual job URL</span>
           <input
             className="input"
@@ -219,7 +220,7 @@ export function JobsPage() {
             onChange={(event) => setManualUrl(event.target.value)}
           />
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Minimum match</span>
           <select className="input" value={minMatch} onChange={(event) => setMinMatch(event.target.value)}>
             <option value="0">Min match: any</option>
@@ -228,7 +229,7 @@ export function JobsPage() {
             <option value="85">Min match: 85%</option>
           </select>
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Location</span>
           <select className="input" value={location} onChange={(event) => setLocation(event.target.value)}>
             <option value="all">All locations</option>
@@ -239,7 +240,7 @@ export function JobsPage() {
             ))}
           </select>
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Status</span>
           <select className="input" value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="all">All statuses</option>
@@ -249,7 +250,7 @@ export function JobsPage() {
             <option value="stale">Stale</option>
           </select>
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Recommendation</span>
           <select
             className="input"
@@ -266,7 +267,7 @@ export function JobsPage() {
             <option value="unscored">Unscored</option>
           </select>
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Role type</span>
           <select
             className="input"
@@ -279,7 +280,7 @@ export function JobsPage() {
             <option value="full_time">Full-time</option>
           </select>
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Sort</span>
           <select className="input" value={sort} onChange={(event) => setSort(event.target.value as "match" | "title")}>
             <option value="match">Sort by match</option>
@@ -323,8 +324,8 @@ export function JobsPage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate font-semibold">{job.title}</p>
-                          <p className="truncate text-sm text-muted-foreground">{job.company}</p>
+                          <p className="wrap-anywhere font-semibold">{job.title}</p>
+                          <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
                         </div>
                         <MatchBadge score={match?.overall_score} recommendation={match?.recommendation} />
                       </div>
@@ -350,26 +351,29 @@ export function JobsPage() {
           </ul>
           <aside className="hidden lg:block">
             {selected ? (
-              <Glass variant="surface" refract className="sticky top-6 space-y-4 rounded-[var(--radius-lg)] p-6">
-                <div>
-                  <p className="text-sm text-muted-foreground">{selected.company}</p>
-                  <h2 className="font-display text-2xl font-semibold">{selected.title}</h2>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {selected.location || "Location n/a"}
-                    {selected.salary ? ` · ${selected.salary}` : ""}
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <StatusBadge status={selected.status} />
-                    <SourceBadge source={selected.source} />
-                    {scoutedTimeAgo(selected.date_scraped) ? (
-                      <span className="text-xs text-muted-foreground">{scoutedTimeAgo(selected.date_scraped)}</span>
-                    ) : null}
-                    <MatchBadge
-                      score={selectedMatch?.overall_score}
-                      recommendation={selectedMatch?.recommendation}
-                    />
+              <Glass variant="working" refract className="sticky top-6 min-w-0 space-y-4 rounded-[var(--radius-lg)] p-6">
+                <div className="flex min-w-0 items-start gap-4">
+                  <ScoreOrb score={selectedMatch?.overall_score} />
+                  <div className="min-w-0">
+                    <p className="wrap-anywhere text-sm text-muted-foreground">{selected.company}</p>
+                    <h2 className="wrap-anywhere font-display text-2xl font-semibold">{selected.title}</h2>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {selected.location || "Location n/a"}
+                      {selected.salary ? ` · ${selected.salary}` : ""}
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <StatusBadge status={selected.status} />
+                      <SourceBadge source={selected.source} />
+                      {scoutedTimeAgo(selected.date_scraped) ? (
+                        <span className="text-xs text-muted-foreground">{scoutedTimeAgo(selected.date_scraped)}</span>
+                      ) : null}
+                      <MatchBadge
+                        score={selectedMatch?.overall_score}
+                        recommendation={selectedMatch?.recommendation}
+                      />
+                    </div>
+                    {percentile ? <p className="mt-2 text-xs font-medium text-primary">{percentile}</p> : null}
                   </div>
-                  {percentile ? <p className="mt-2 text-xs font-medium text-primary">{percentile}</p> : null}
                 </div>
                 <p className="line-clamp-8 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
                   {selected.description}
