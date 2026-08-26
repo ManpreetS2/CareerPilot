@@ -362,6 +362,29 @@ def _usable_feedback_text(text: str | None) -> str:
     return text.strip()
 
 
+_FEEDBACK_PROVIDER_ERROR_PRIORITY: dict[type[BaseException], int] = {
+    # A provider that actually ran and failed says more than one that was
+    # never configured to begin with.
+    LLMProviderError: 40,
+    LLMEmptyResponseError: 40,
+    # Lowest: with a provider order like "ollama,gemini" and no Gemini key,
+    # this fires on every run and would otherwise bury the real failure,
+    # reporting interview feedback as unconfigured on a system that is
+    # configured and did run. Same defect previously fixed in
+    # job_intelligence_service, application_materials_agent, and
+    # candidate_profile_agent.
+    LLMConfigurationError: 10,
+}
+
+
+def _should_replace_feedback_error(current: Exception | None, new: Exception) -> bool:
+    if current is None:
+        return True
+    current_rank = _FEEDBACK_PROVIDER_ERROR_PRIORITY.get(type(current), 0)
+    new_rank = _FEEDBACK_PROVIDER_ERROR_PRIORITY.get(type(new), 0)
+    return new_rank > current_rank
+
+
 def _generate_answer_feedback(
     prompt: str,
     generate_fn: InterviewAnswerGenerateFn | None,
@@ -380,7 +403,8 @@ def _generate_answer_feedback(
             )
             return _usable_feedback_text(raw)
         except (LLMProviderError, LLMEmptyResponseError, LLMConfigurationError) as exc:
-            last_error = exc
+            if _should_replace_feedback_error(last_error, exc):
+                last_error = exc
             logger.info(
                 "interview_answer_feedback provider sequence failed category=%s job_pk=%s",
                 type(exc).__name__,

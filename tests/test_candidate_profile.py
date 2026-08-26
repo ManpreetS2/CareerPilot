@@ -13,6 +13,9 @@ from sqlalchemy.orm import Session
 from backend.db.models import Candidate, TargetPreference
 from backend.schemas.schemas import CandidateProfile, TargetPreferences
 from backend.services.candidate_profile_agent import (
+    _PROFILE_PROVIDER_ERROR_PRIORITY,
+    _should_replace_profile_error,
+    ProfileExtractionError,
     MAX_UPLOAD_BYTES,
     OCRUnavailableError,
     ProfileExtractionError,
@@ -28,7 +31,11 @@ from backend.services.candidate_profile_agent import (
     validate_pdf_upload,
 )
 from backend.services.candidate_service import mock_preferences
-from backend.services.llm_client import LLMProviderError
+from backend.services.llm_client import (
+    LLMConfigurationError,
+    LLMEmptyResponseError,
+    LLMProviderError,
+)
 from tests.pdf_fixtures import (
     SAMPLE_RESUME_TEXT,
     build_image_only_pdf,
@@ -1947,3 +1954,58 @@ University of North Texas, Denton, TX — May 2026
     profile, _ = validate_and_ground_profile(raw, resume)
     degrees = [e.degree for e in profile.education]
     assert "Master of Business Administration" not in degrees
+
+
+def test_an_unconfigured_later_provider_does_not_mask_a_real_parse_failure() -> None:
+    """Reported live: uploading a resume said "The resume parser is not
+    configured correctly. Check the local LLM configuration." on a correctly
+    configured system whose model server was simply unreachable. Ollama
+    failed, then Gemini — merely unconfigured — overwrote that as the error
+    the user saw, sending them to fix a setting that was never wrong."""
+    real = ProfileExtractionError("Could not reach the AI extraction service.")
+    config = LLMConfigurationError("GEMINI_API_KEY is not set.")
+
+    assert _should_replace_profile_error(None, real) is True
+    assert _should_replace_profile_error(real, config) is False
+    assert _should_replace_profile_error(config, real) is True
+
+
+def test_every_profile_provider_error_the_loop_catches_is_ranked() -> None:
+    """An unranked type defaults to 0, below even a configuration error, so
+    it would be the one silently discarded."""
+    for error_type in (
+        ProfileExtractionError,
+        ProfileGroundingError,
+        LLMProviderError,
+        LLMEmptyResponseError,
+        LLMConfigurationError,
+    ):
+        assert error_type in _PROFILE_PROVIDER_ERROR_PRIORITY, error_type
+
+
+def test_configuration_error_ranks_below_every_substantive_profile_failure() -> None:
+    config_rank = _PROFILE_PROVIDER_ERROR_PRIORITY[LLMConfigurationError]
+    others = [
+        rank
+        for error_type, rank in _PROFILE_PROVIDER_ERROR_PRIORITY.items()
+        if error_type is not LLMConfigurationError
+    ]
+    assert others
+    assert all(rank > config_rank for rank in others)
+
+
+def test_an_unreachable_provider_is_not_reported_as_a_bad_resume() -> None:
+    """A model server that cannot be reached is an infrastructure problem.
+    Telling the user their resume could not be processed sends them to
+    re-export a PDF that was never at fault."""
+    def _unreachable(prompt, system_prompt=None):
+        raise LLMProviderError("Ollama provider request failed.")
+
+    with pytest.raises(ProfileExtractionError) as exc_info:
+        extract_candidate_profile_with_llm(
+            "Alex Rivera\nEDUCATION\nState University", generate_fn=_unreachable
+        )
+
+    message = str(exc_info.value).lower()
+    assert "could not reach" in message
+    assert "resume" not in message

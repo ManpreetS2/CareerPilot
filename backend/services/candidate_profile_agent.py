@@ -131,6 +131,30 @@ class ProfileGroundingError(CandidateProfileError):
     """Profile failed validation/grounding in a fatal way (e.g. missing name)."""
 
 
+_PROFILE_PROVIDER_ERROR_PRIORITY: dict[type[BaseException], int] = {
+    # A provider that ran and produced something we rejected explains far
+    # more than one that was never configured to begin with.
+    ProfileGroundingError: 50,
+    ProfileExtractionError: 50,
+    LLMProviderError: 40,
+    LLMEmptyResponseError: 40,
+    # Lowest: with a provider order like "ollama,gemini" and no Gemini key,
+    # this fires on every run and would otherwise bury the real failure,
+    # telling the user their resume parser is misconfigured when it is
+    # configured and did run. Mirrors the maps in job_intelligence_service
+    # and application_materials_agent, which had this same defect.
+    LLMConfigurationError: 10,
+}
+
+
+def _should_replace_profile_error(current: Exception | None, new: Exception) -> bool:
+    if current is None:
+        return True
+    current_rank = _PROFILE_PROVIDER_ERROR_PRIORITY.get(type(current), 0)
+    new_rank = _PROFILE_PROVIDER_ERROR_PRIORITY.get(type(new), 0)
+    return new_rank > current_rank
+
+
 @dataclass
 class ExtractionResult:
     text: str
@@ -1264,8 +1288,14 @@ def extract_candidate_profile_with_llm(
             raise
         except LLMProviderError as exc:
             # Provider retries (if any) already happened inside LLMClient.
+            # Distinct wording from the cases below: this is the provider
+            # failing to answer at all — an unreachable or erroring model
+            # server — not the model returning something unusable. Blaming
+            # the resume here sends the user to re-export a PDF that was
+            # never the problem.
             raise ProfileExtractionError(
-                "The AI extraction service could not process this resume. Please try again."
+                "Could not reach the AI extraction service. Check that your model "
+                "provider is running, then try again."
             ) from exc
         except LLMEmptyResponseError as exc:
             last_error = ProfileExtractionError(
@@ -1630,7 +1660,8 @@ def _complete_profile_from_text(
             LLMEmptyResponseError,
             LLMConfigurationError,
         ) as exc:
-            last_error = exc
+            if _should_replace_profile_error(last_error, exc):
+                last_error = exc
             logger.warning(
                 "candidate provider sequence failed category=%s",
                 type(exc).__name__,

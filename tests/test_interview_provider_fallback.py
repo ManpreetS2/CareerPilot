@@ -297,3 +297,62 @@ def test_feedback_http_uses_provider_order_without_injected_generator(
     assert response.json()["feedback"] == SECRET_FEEDBACK
     assert scripted.calls == ["ollama"]
     assert SECRET_ANSWER not in response.text or response.json()["answer"] == SECRET_ANSWER
+
+
+def test_unconfigured_later_provider_does_not_mask_the_real_failure(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With LLM_PROVIDER_ORDER="ollama,gemini" and no Gemini key, Ollama can
+    fail for a real reason and Gemini's "not configured" error would then
+    overwrite it as the error the user sees — reporting a configuration
+    problem on a system that is configured and did run, and sending the user
+    to fix a setting that was never wrong.
+
+    test_all_providers_fail_raises_sanitized_llm_error above accepts any of
+    the three error types, so it passes either way; this pins which one.
+    """
+    _order(monkeypatch, "ollama,gemini")
+    job, question = _ready(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", LLMProviderError("Ollama provider request failed."))
+    scripted.script("gemini", LLMConfigurationError("Gemini is not configured."))
+    _patch_clients(monkeypatch, scripted, *_interview_modules())
+
+    with pytest.raises(LLMProviderError):
+        get_interview_answer_feedback(
+            isolated_session, job.public_id, TEST_USER_ID, question, SECRET_ANSWER
+        )
+    assert scripted.calls == ["ollama", "gemini"]
+
+
+def test_a_configuration_error_still_surfaces_when_it_is_the_only_failure(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ranking must not suppress a configuration error outright — when
+    nothing else went wrong, being unconfigured is the actionable truth."""
+    _order(monkeypatch, "gemini")
+    job, question = _ready(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("gemini", LLMConfigurationError("Gemini is not configured."))
+    _patch_clients(monkeypatch, scripted, *_interview_modules())
+
+    with pytest.raises(LLMConfigurationError):
+        get_interview_answer_feedback(
+            isolated_session, job.public_id, TEST_USER_ID, question, SECRET_ANSWER
+        )
+
+
+def test_an_empty_response_is_not_masked_by_a_later_configuration_error(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    job, question = _ready(isolated_session)
+    scripted = ScriptedProviders()
+    scripted.script("ollama", LLMEmptyResponseError("empty"))
+    scripted.script("gemini", LLMConfigurationError("Gemini is not configured."))
+    _patch_clients(monkeypatch, scripted, *_interview_modules())
+
+    with pytest.raises(LLMEmptyResponseError):
+        get_interview_answer_feedback(
+            isolated_session, job.public_id, TEST_USER_ID, question, SECRET_ANSWER
+        )
