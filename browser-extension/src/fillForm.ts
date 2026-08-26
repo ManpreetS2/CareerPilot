@@ -1,128 +1,27 @@
-const BACKEND_URL = "http://localhost:8000";
-// Must match backend/core/config.py's session_cookie_name / session_header_name.
-const SESSION_COOKIE_NAME = "careerpilot_session";
-const SESSION_HEADER_NAME = "X-CareerPilot-Session";
+// Ported from the original browser-extension/popup.js (now retired in favor
+// of the side panel) with no behavioral changes — see git history for that
+// file if a byte-for-byte diff is ever needed. This function's contract is
+// safety-critical: it is passed by reference to
+// chrome.scripting.executeScript({ func: fillFormInPage, args: [data] }),
+// which serializes and re-runs it inside the real page's own isolated
+// context. That means it MUST stay fully self-contained — no reference to
+// anything outside its own parameter and its own nested helpers, since
+// Chrome does not carry this module's closure/imports along with it.
+//
+// Field-detection logic mirrors backend/services/form_fill_service.py:
+// known selectors per platform first, falling back to matching an input by
+// its associated label text, then flagging anything still required and
+// unfilled. Never calls .submit() or simulates a keypress. The one
+// exception to "no clicks" is Greenhouse's scoped "Enter manually" toggle
+// for Cover Letter, which only reveals a text field — nothing that submits
+// or navigates is ever clicked.
 
-const button = document.getElementById("fill-btn");
-const statusEl = document.getElementById("status");
-
-button.addEventListener("click", () => {
-  void runFill();
-});
-
-async function runFill() {
-  button.disabled = true;
-  statusEl.innerHTML = "Looking up this job…";
-
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.id || !tab.url) {
-      throw new Error("Could not read the current tab.");
-    }
-
-    // The extension has no login UI of its own — it rides on whatever
-    // session you already have from logging in at the CareerPilot web app
-    // in a regular tab. It CANNOT get there via `credentials: "include"`
-    // the way the web app does: this fetch is chrome-extension://<id> to
-    // http://localhost:8000, a cross-site request from the browser's point
-    // of view, and the session cookie is SameSite=Lax — Lax cookies only
-    // ride along on top-level navigations, never on a subresource fetch
-    // from a different site, so the browser would silently omit it here.
-    // Instead, the privileged chrome.cookies API (not subject to that
-    // restriction) reads the cookie's value directly, and it's sent back as
-    // X-CareerPilot-Session — accepted only by /api/extension/autofill.
-    const sessionCookie = await chrome.cookies.get({ url: BACKEND_URL, name: SESSION_COOKIE_NAME });
-    if (!sessionCookie) {
-      throw new Error("Log in to CareerPilot in your browser first, then try again.");
-    }
-
-    const response = await fetch(`${BACKEND_URL}/api/extension/autofill?url=${encodeURIComponent(tab.url)}`, {
-      headers: { [SESSION_HEADER_NAME]: sessionCookie.value },
-    });
-    const body = await response.json().catch(() => ({}));
-    if (response.status === 401) {
-      throw new Error("Log in to CareerPilot in your browser first, then try again.");
-    }
-    if (!response.ok) {
-      throw new Error(body.detail || `Request failed (${response.status})`);
-    }
-
-    statusEl.innerHTML = "Filling the form…";
-
-    const injection = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: fillFormInPage,
-      args: [body],
-    }); // executeScript awaits fillFormInPage's returned promise before resolving `result`
-
-    renderResult(injection?.[0]?.result);
-  } catch (err) {
-    statusEl.innerHTML = `<span class="error">${escapeHtml(err instanceof Error ? err.message : String(err))}</span>`;
-  } finally {
-    button.disabled = false;
-  }
-}
-
-function renderResult(result) {
-  if (!result) {
-    statusEl.innerHTML = '<span class="error">No result returned from the page.</span>';
-    return;
-  }
-  const parts = [];
-  if (result.filled.length > 0) {
-    parts.push(
-      '<div class="section-title">Filled automatically</div><ul>' +
-        result.filled.map((f) => `<li class="filled-item">${escapeHtml(f.name)}</li>`).join("") +
-        "</ul>",
-    );
-  }
-  if (result.flagged.length > 0) {
-    parts.push(
-      '<div class="section-title">Needs your input</div><ul>' +
-        result.flagged
-          .map((f) => `<li class="flagged-item">${escapeHtml(f.name)} — ${escapeHtml(f.reason)}</li>`)
-          .join("") +
-        "</ul>",
-    );
-  }
-  statusEl.innerHTML = parts.join("") || "Nothing on this page matched.";
-}
-
-function escapeHtml(value) {
-  const div = document.createElement("div");
-  div.textContent = value;
-  return div.innerHTML;
-}
-
-/**
- * Runs inside the real page via chrome.scripting.executeScript — cannot
- * reference anything from popup.js's own scope, only browser DOM APIs and
- * whatever's passed in `data`. Never calls .submit() or simulates a
- * keypress. The one exception to "no clicks" is Greenhouse's scoped
- * "Enter manually" toggle for Cover Letter, which only reveals a text
- * field — nothing that submits or navigates is ever clicked. Declared
- * async because that click needs a tick for the revealed textarea to
- * exist; chrome.scripting.executeScript awaits the returned promise
- * before resolving `result`, so the caller needs no change.
- *
- * Field-detection logic mirrors backend/services/form_fill_service.py:
- * known selectors per platform first, falling back to matching an input
- * by its associated label text, then flagging anything still required and
- * unfilled (using the nearest ancestor <label> as a human-readable name
- * when the field has no name/id/aria-label at all — needed for modern
- * Greenhouse's hidden validation-proxy inputs on custom questions).
- *
- * `filled`/`flagged` hold {name, value}/{name, reason} objects, not
- * pre-joined display strings — deduping against a joined "name — reason"
- * string would silently miss a match whenever the reason text differs
- * (e.g. a field already flagged for one reason, then found again by the
- * required-field sweep with a different generic reason, would otherwise
- * show up twice for the same field).
- */
-async function fillFormInPage(data) {
-  function setNativeValue(el, value) {
-    const proto =
-      el.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+export async function fillFormInPage(data: {
+  platform: string;
+  fields: Record<string, unknown>;
+}): Promise<{ filled: { name: string; value: unknown }[]; flagged: { name: string; reason: string }[] }> {
+  function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+    const proto = el.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
     if (setter) {
       setter.call(el, value);
@@ -133,9 +32,9 @@ async function fillFormInPage(data) {
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function tryFillBySelectors(selectors, value) {
+  function tryFillBySelectors(selectors: string[], value: string): boolean {
     for (const selector of selectors) {
-      const el = document.querySelector(selector);
+      const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
       if (el) {
         setNativeValue(el, value);
         return true;
@@ -144,14 +43,14 @@ async function fillFormInPage(data) {
     return false;
   }
 
-  function tryFillByLabel(patterns, value) {
+  function tryFillByLabel(patterns: string[], value: string): boolean {
     const labels = [...document.querySelectorAll("label")];
     for (const pattern of patterns) {
       const re = new RegExp(pattern, "i");
       const label = labels.find((l) => re.test(l.textContent || ""));
       if (!label) continue;
-      let input = null;
-      if (label.htmlFor) input = document.getElementById(label.htmlFor);
+      let input: HTMLInputElement | HTMLTextAreaElement | null = null;
+      if (label.htmlFor) input = document.getElementById(label.htmlFor) as HTMLInputElement | null;
       if (!input) input = label.querySelector("input, textarea");
       if (input) {
         setNativeValue(input, value);
@@ -166,25 +65,25 @@ async function fillFormInPage(data) {
   // option text (a saved answer like "May 2027" won't always match a
   // posting's exact option wording) — returns false rather than picking an
   // unconfident option when nothing matches closely enough.
-  function trySelectByLabel(patterns, value) {
+  function trySelectByLabel(patterns: string[], value: string): boolean {
     const labels = [...document.querySelectorAll("label")];
     for (const pattern of patterns) {
       const re = new RegExp(pattern, "i");
       const label = labels.find((l) => re.test(l.textContent || ""));
       if (!label) continue;
-      let select = null;
-      if (label.htmlFor) select = document.getElementById(label.htmlFor);
+      let select: HTMLSelectElement | null = null;
+      if (label.htmlFor) select = document.getElementById(label.htmlFor) as HTMLSelectElement | null;
       if (!select) select = label.querySelector("select");
       if (!select || select.tagName !== "SELECT") continue;
       const options = [...select.options];
       const needle = value.trim().toLowerCase();
-      let match = options.find((o) => o.textContent.trim().toLowerCase() === needle);
+      let match = options.find((o) => o.textContent!.trim().toLowerCase() === needle);
       if (!match) {
         // Bidirectional: a saved value can be the more specific side ("Bachelor's
         // in Computer Science" vs. a plain option "Bachelor's") or the option can
         // be more specific ("Yes" vs. an option worded "Yes, I will need sponsorship").
         match = options.find((o) => {
-          const text = o.textContent.trim().toLowerCase();
+          const text = o.textContent!.trim().toLowerCase();
           return text.includes(needle) || needle.includes(text);
         });
       }
@@ -217,16 +116,17 @@ async function fillFormInPage(data) {
   // option here is a data-entry action exactly like setting a native
   // select's value or filling a text field — it never touches submit or
   // the privacy-policy checkbox, same boundary as revealAndFillCoverLetter.
-  async function tryReactSelectByLabel(patterns, value) {
+  async function tryReactSelectByLabel(patterns: string[], value: string): Promise<boolean> {
     // Confirmed live: opening reliably needs the input actually focused
     // first, plus both pointer and mouse events — mousedown/mouseup/click
     // alone opened most instances but silently failed on some (e.g. the
     // Gender field) despite working on others (Sponsorship, Enrolled,
     // Degree) on the very same page.
-    function fire(el, type, Ctor) {
-      el.dispatchEvent(new (Ctor || MouseEvent)(type, { bubbles: true, cancelable: true, view: window, button: 0 }));
+    function fire(el: Element, type: string, Ctor?: typeof MouseEvent | typeof PointerEvent) {
+      const EventCtor = Ctor || MouseEvent;
+      el.dispatchEvent(new EventCtor(type, { bubbles: true, cancelable: true, view: window, button: 0 }));
     }
-    function openAndClick(el) {
+    function openAndClick(el: Element) {
       fire(el, "pointerdown", window.PointerEvent);
       fire(el, "mousedown");
       fire(el, "pointerup", window.PointerEvent);
@@ -241,8 +141,8 @@ async function fillFormInPage(data) {
       const input = label.htmlFor ? document.getElementById(label.htmlFor) : null;
       if (!input || input.getAttribute("role") !== "combobox") continue;
       const control = input.closest('[class*="__control"]') || input.parentElement;
-      input.focus();
-      openAndClick(control);
+      (input as HTMLElement).focus();
+      if (control) openAndClick(control);
       await new Promise((resolve) => setTimeout(resolve, 80));
       // Scoped to this specific combobox instance — react-select's option
       // ids embed the input's own id ("react-select-<input-id>-option-0"),
@@ -252,19 +152,19 @@ async function fillFormInPage(data) {
       // to only the menu that belongs to the field being filled right now).
       const options = [...document.querySelectorAll(`[id^="react-select-${CSS.escape(input.id)}-option-"]`)];
       if (options.length === 0) {
-        input.blur();
+        (input as HTMLElement).blur();
         continue;
       }
       const needle = value.trim().toLowerCase();
-      let match = options.find((o) => o.textContent.trim().toLowerCase() === needle);
+      let match = options.find((o) => o.textContent!.trim().toLowerCase() === needle);
       if (!match) {
         match = options.find((o) => {
-          const text = o.textContent.trim().toLowerCase();
+          const text = o.textContent!.trim().toLowerCase();
           return text.includes(needle) || needle.includes(text);
         });
       }
       if (!match) {
-        input.blur();
+        (input as HTMLElement).blur();
         continue;
       }
       openAndClick(match);
@@ -274,7 +174,7 @@ async function fillFormInPage(data) {
     return false;
   }
 
-  async function trySelectOrReactSelectByLabel(patterns, value) {
+  async function trySelectOrReactSelectByLabel(patterns: string[], value: string): Promise<boolean> {
     if (trySelectByLabel(patterns, value)) return true;
     if (platform === "greenhouse") return tryReactSelectByLabel(patterns, value);
     return false;
@@ -289,24 +189,27 @@ async function fillFormInPage(data) {
   // stays a deliberate human click on every application, never something
   // this extension answers on the candidate's behalf.
   async function fillSharedReusableFields() {
-    if (fields.legal_name && tryFillByLabel(["legal\\s*name"], fields.legal_name)) {
+    if (fields.legal_name && tryFillByLabel(["legal\\s*name"], fields.legal_name as string)) {
       filled.push({ name: "legal name", value: fields.legal_name });
     }
     if (
       fields.earliest_start_date &&
-      tryFillByLabel(["start\\s*date", "available.*start", "earliest.*start"], fields.earliest_start_date)
+      tryFillByLabel(["start\\s*date", "available.*start", "earliest.*start"], fields.earliest_start_date as string)
     ) {
       filled.push({ name: "earliest start date", value: fields.earliest_start_date });
     }
-    if (fields.expected_graduation && (await trySelectOrReactSelectByLabel(["graduat"], fields.expected_graduation))) {
+    if (
+      fields.expected_graduation &&
+      (await trySelectOrReactSelectByLabel(["graduat"], fields.expected_graduation as string))
+    ) {
       filled.push({ name: "expected graduation", value: fields.expected_graduation });
     }
-    if (fields.degree_pursuing && (await trySelectOrReactSelectByLabel(["degree"], fields.degree_pursuing))) {
+    if (fields.degree_pursuing && (await trySelectOrReactSelectByLabel(["degree"], fields.degree_pursuing as string))) {
       filled.push({ name: "degree pursuing", value: fields.degree_pursuing });
     }
     if (
       fields.currently_enrolled_in_program &&
-      (await trySelectOrReactSelectByLabel(["currently\\s*enrolled"], fields.currently_enrolled_in_program))
+      (await trySelectOrReactSelectByLabel(["currently\\s*enrolled"], fields.currently_enrolled_in_program as string))
     ) {
       filled.push({ name: "currently enrolled in program", value: fields.currently_enrolled_in_program });
     }
@@ -316,28 +219,28 @@ async function fillFormInPage(data) {
         filled.push({ name: "sponsorship required", value: answer });
       }
     }
-    const eeoFields = [
+    const eeoFields: [string, string[]][] = [
       ["gender", ["^gender$"]],
       ["race_ethnicity", ["hispanic", "latino"]],
       ["veteran_status", ["veteran"]],
       ["disability_status", ["disability"]],
     ];
     for (const [key, patterns] of eeoFields) {
-      const value = fields[key];
+      const value = fields[key] as string | undefined;
       if (value && (await trySelectOrReactSelectByLabel(patterns, value))) {
         filled.push({ name: key.replace(/_/g, " "), value });
       }
     }
   }
 
-  function nearestLabelText(el) {
-    let node = el;
+  function nearestLabelText(el: Element): string | null {
+    let node: Element | null = el;
     for (let i = 0; i < 6 && node; i++) {
       node = node.parentElement;
       if (!node) break;
       const label = node.querySelector("label");
-      if (label && label.textContent.trim()) {
-        return label.textContent.trim().replace(/\*$/, "").trim();
+      if (label && label.textContent!.trim()) {
+        return label.textContent!.trim().replace(/\*$/, "").trim();
       }
     }
     return null;
@@ -350,12 +253,10 @@ async function fillFormInPage(data) {
   // clicks the one whose nearest ancestor text starts with "Cover Letter".
   // Excludes the page's unrelated reCAPTCHA textarea rather than filling
   // "any textarea" once one is revealed.
-  async function revealAndFillCoverLetter(value) {
-    const buttons = [...document.querySelectorAll("button")].filter(
-      (b) => (b.textContent || "").trim() === "Enter manually",
-    );
+  async function revealAndFillCoverLetter(value: string): Promise<boolean> {
+    const buttons = [...document.querySelectorAll("button")].filter((b) => (b.textContent || "").trim() === "Enter manually");
     for (const button of buttons) {
-      let node = button;
+      let node: Element | null = button;
       let inCoverLetterSection = false;
       for (let i = 0; i < 8 && node; i++) {
         if ((node.textContent || "").trim().startsWith("Cover Letter")) {
@@ -378,8 +279,8 @@ async function fillFormInPage(data) {
     return false;
   }
 
-  const filled = [];
-  const flagged = [];
+  const filled: { name: string; value: unknown }[] = [];
+  const flagged: { name: string; reason: string }[] = [];
   const fields = data.fields || {};
   const platform = data.platform;
 
@@ -392,17 +293,17 @@ async function fillFormInPage(data) {
           email: ["#email", "input[name='job_application[email]']"],
           phone: ["#phone", "input[name='job_application[phone]']"],
           company: ["#company", "input[name='job_application[company]']"],
-          location: [],
-          linkedin: [],
-          github: [],
-          portfolio: [],
+          location: [] as string[],
+          linkedin: [] as string[],
+          github: [] as string[],
+          portfolio: [] as string[],
           coverLetter: ["#cover_letter_text", "textarea[name*='cover_letter']"],
           resume: ["#resume", "input[type='file']"],
         }
       : {
           fullName: ["input[name='name']"],
-          firstName: [],
-          lastName: [],
+          firstName: [] as string[],
+          lastName: [] as string[],
           email: ["input[name='email']"],
           phone: ["input[name='phone']"],
           company: ["input[name='org']"],
@@ -414,26 +315,31 @@ async function fillFormInPage(data) {
           resume: ["input[name='resume']"],
         };
 
-  if (fields.full_name && tryFillBySelectors(selectorSets.fullName, fields.full_name)) {
-    filled.push({ name: "full name", value: fields.full_name });
+  const fullName = fields.full_name as string | undefined;
+  const firstName = fields.first_name as string | undefined;
+  const lastName = fields.last_name as string | undefined;
+
+  if (fullName && tryFillBySelectors(selectorSets.fullName, fullName)) {
+    filled.push({ name: "full name", value: fullName });
   } else {
-    const firstOk = fields.first_name && tryFillBySelectors(selectorSets.firstName, fields.first_name);
-    const lastOk = fields.last_name && tryFillBySelectors(selectorSets.lastName, fields.last_name);
-    if (firstOk || (fields.first_name && tryFillByLabel(["first\\s*name"], fields.first_name))) {
-      filled.push({ name: "first name", value: fields.first_name });
-    } else if (fields.first_name) {
+    const firstOk = firstName && tryFillBySelectors(selectorSets.firstName, firstName);
+    const lastOk = lastName && tryFillBySelectors(selectorSets.lastName, lastName);
+    if (firstOk || (firstName && tryFillByLabel(["first\\s*name"], firstName))) {
+      filled.push({ name: "first name", value: firstName });
+    } else if (firstName) {
       flagged.push({ name: "first name", reason: "no matching field found" });
     }
-    if (lastOk || (fields.last_name && tryFillByLabel(["last\\s*name"], fields.last_name))) {
-      filled.push({ name: "last name", value: fields.last_name });
-    } else if (fields.last_name) {
+    if (lastOk || (lastName && tryFillByLabel(["last\\s*name"], lastName))) {
+      filled.push({ name: "last name", value: lastName });
+    } else if (lastName) {
       flagged.push({ name: "last name", reason: "no matching field found" });
     }
   }
 
-  if (fields.email) {
-    if (tryFillBySelectors(selectorSets.email, fields.email) || tryFillByLabel(["email"], fields.email)) {
-      filled.push({ name: "email", value: fields.email });
+  const email = fields.email as string | undefined;
+  if (email) {
+    if (tryFillBySelectors(selectorSets.email, email) || tryFillByLabel(["email"], email)) {
+      filled.push({ name: "email", value: email });
     } else {
       flagged.push({ name: "email", reason: "no matching field found" });
     }
@@ -441,57 +347,55 @@ async function fillFormInPage(data) {
     flagged.push({ name: "email", reason: "candidate profile has no email on file" });
   }
 
-  if (fields.phone) {
-    if (tryFillBySelectors(selectorSets.phone, fields.phone) || tryFillByLabel(["phone"], fields.phone)) {
-      filled.push({ name: "phone", value: fields.phone });
+  const phone = fields.phone as string | undefined;
+  if (phone) {
+    if (tryFillBySelectors(selectorSets.phone, phone) || tryFillByLabel(["phone"], phone)) {
+      filled.push({ name: "phone", value: phone });
     } else {
       flagged.push({ name: "phone", reason: "no matching field found" });
     }
   }
 
-  if (fields.current_company) {
+  const currentCompany = fields.current_company as string | undefined;
+  if (currentCompany) {
     const ok =
-      tryFillBySelectors(selectorSets.company, fields.current_company) ||
-      tryFillByLabel(["current\\s*company", "^company$"], fields.current_company);
-    if (ok) filled.push({ name: "current company", value: fields.current_company });
+      tryFillBySelectors(selectorSets.company, currentCompany) ||
+      tryFillByLabel(["current\\s*company", "^company$"], currentCompany);
+    if (ok) filled.push({ name: "current company", value: currentCompany });
   }
 
-  if (fields.location) {
-    const ok =
-      tryFillBySelectors(selectorSets.location, fields.location) ||
-      tryFillByLabel(["location.*city", "^location$"], fields.location);
-    if (ok) filled.push({ name: "location", value: fields.location });
+  const location = fields.location as string | undefined;
+  if (location) {
+    const ok = tryFillBySelectors(selectorSets.location, location) || tryFillByLabel(["location.*city", "^location$"], location);
+    if (ok) filled.push({ name: "location", value: location });
   }
 
-  if (fields.linkedin_url) {
-    const ok =
-      tryFillBySelectors(selectorSets.linkedin, fields.linkedin_url) || tryFillByLabel(["linkedin"], fields.linkedin_url);
-    if (ok) filled.push({ name: "LinkedIn profile", value: fields.linkedin_url });
+  const linkedinUrl = fields.linkedin_url as string | undefined;
+  if (linkedinUrl) {
+    const ok = tryFillBySelectors(selectorSets.linkedin, linkedinUrl) || tryFillByLabel(["linkedin"], linkedinUrl);
+    if (ok) filled.push({ name: "LinkedIn profile", value: linkedinUrl });
   }
 
-  if (fields.github_url) {
-    const ok =
-      tryFillBySelectors(selectorSets.github, fields.github_url) || tryFillByLabel(["github"], fields.github_url);
-    if (ok) filled.push({ name: "GitHub profile", value: fields.github_url });
+  const githubUrl = fields.github_url as string | undefined;
+  if (githubUrl) {
+    const ok = tryFillBySelectors(selectorSets.github, githubUrl) || tryFillByLabel(["github"], githubUrl);
+    if (ok) filled.push({ name: "GitHub profile", value: githubUrl });
   }
 
-  if (fields.portfolio_url) {
-    const ok =
-      tryFillBySelectors(selectorSets.portfolio, fields.portfolio_url) ||
-      tryFillByLabel(["portfolio", "website"], fields.portfolio_url);
-    if (ok) filled.push({ name: "portfolio URL", value: fields.portfolio_url });
+  const portfolioUrl = fields.portfolio_url as string | undefined;
+  if (portfolioUrl) {
+    const ok = tryFillBySelectors(selectorSets.portfolio, portfolioUrl) || tryFillByLabel(["portfolio", "website"], portfolioUrl);
+    if (ok) filled.push({ name: "portfolio URL", value: portfolioUrl });
   }
 
-  if (fields.cover_letter) {
-    if (tryFillBySelectors(selectorSets.coverLetter, fields.cover_letter)) {
-      filled.push({ name: "cover letter", value: fields.cover_letter });
-    } else if (platform === "greenhouse" && (await revealAndFillCoverLetter(fields.cover_letter))) {
-      filled.push({ name: "cover letter", value: fields.cover_letter });
+  const coverLetter = fields.cover_letter as string | undefined;
+  if (coverLetter) {
+    if (tryFillBySelectors(selectorSets.coverLetter, coverLetter)) {
+      filled.push({ name: "cover letter", value: coverLetter });
+    } else if (platform === "greenhouse" && (await revealAndFillCoverLetter(coverLetter))) {
+      filled.push({ name: "cover letter", value: coverLetter });
     } else {
-      flagged.push({
-        name: "cover letter",
-        reason: "no text field found — this posting may require a file upload instead",
-      });
+      flagged.push({ name: "cover letter", reason: "no text field found — this posting may require a file upload instead" });
     }
   }
 
@@ -501,18 +405,14 @@ async function fillFormInPage(data) {
 
   await fillSharedReusableFields();
 
-  const requiredEls = [
-    ...document.querySelectorAll("input[required], textarea[required], select[required]"),
-  ].slice(0, 50);
+  const requiredEls = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+    "input[required], textarea[required], select[required]",
+  )].slice(0, 50);
   const alreadyLower = new Set([...filled, ...flagged].map((f) => f.name.toLowerCase()));
   for (const el of requiredEls) {
     if ((el.value || "").trim()) continue;
     const name =
-      el.getAttribute("name") ||
-      el.getAttribute("id") ||
-      el.getAttribute("aria-label") ||
-      nearestLabelText(el) ||
-      "an unlabeled required field";
+      el.getAttribute("name") || el.getAttribute("id") || el.getAttribute("aria-label") || nearestLabelText(el) || "an unlabeled required field";
     if (alreadyLower.has(name.toLowerCase())) continue;
     flagged.push({ name, reason: "required field with no confident mapping" });
     alreadyLower.add(name.toLowerCase());

@@ -46,8 +46,28 @@ from backend.db.models import (
     JobRecord,
     TargetPreference,
 )
-from backend.schemas.schemas import AutofillFields, AutofillResponse, FilledField, FlaggedField, FormFillResult
-from backend.services.application_materials_agent import is_package_ready_for_apply
+from backend.schemas.schemas import (
+    AutofillFields,
+    AutofillResponse,
+    ExtensionPanelData,
+    FilledField,
+    FlaggedField,
+    FormFillResult,
+)
+from backend.services.analysis_service import (
+    JobNotFoundError,
+    StoredScoreNotFoundError,
+    get_stored_match_score,
+)
+from backend.services.application_materials_agent import (
+    StaleApplicationMaterialsError,
+    is_package_ready_for_apply,
+)
+from backend.services.application_service import (
+    StoredMaterialsNotFoundError,
+    get_stored_application_package,
+)
+from backend.services.job_service import record_to_job
 
 logger = logging.getLogger(__name__)
 
@@ -700,6 +720,41 @@ def get_autofill_data(db: Session, url: str, user_id: int) -> AutofillResponse:
             veteran_status=fields.veteran_status,
             disability_status=fields.disability_status,
         ),
+    )
+
+
+def get_extension_panel_data(db: Session, url: str, user_id: int) -> ExtensionPanelData:
+    """Read-only status for the extension side panel. Deliberately returns
+    tracked=False (200) for an unmatched URL rather than 404 — unlike
+    get_autofill_data above, which is a hard action expected to fail loudly,
+    this is a passive status poll where "not tracked yet" is the normal,
+    common state, not an error. Never requires an approved package (that
+    gate is specific to assisted apply) and never generates/writes/calls a
+    provider — reuses the same stored-lookup functions the main web app's
+    read-only views already use, catching their "not found"/"stale"
+    signals to build the response instead of letting them 404/409."""
+    job = find_job_by_url(db, url)
+    if job is None:
+        return ExtensionPanelData(tracked=False)
+
+    try:
+        score = get_stored_match_score(db, job.public_id, user_id)
+    except (StoredScoreNotFoundError, JobNotFoundError):
+        score = None
+
+    try:
+        get_stored_application_package(db, job.public_id, user_id)
+        materials_status: str | None = "current"
+    except StoredMaterialsNotFoundError:
+        materials_status = "missing"
+    except StaleApplicationMaterialsError as exc:
+        materials_status = "stale_reviewed" if exc.reviewed else "stale_pending"
+
+    return ExtensionPanelData(
+        tracked=True,
+        job=record_to_job(job),
+        score=score,
+        materials_status=materials_status,  # type: ignore[arg-type]
     )
 
 

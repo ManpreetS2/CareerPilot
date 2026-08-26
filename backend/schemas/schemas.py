@@ -263,6 +263,18 @@ class AutofillResponse(BaseModel):
     fields: AutofillFields
 
 
+class ExtensionPanelData(BaseModel):
+    """Read-only status for the extension side panel: is the active tab's
+    URL a job CareerPilot has seen, and if so, its score/materials status.
+    Never generates, writes, or calls a provider — a passive status poll,
+    unlike /api/extension/autofill which requires an approved package."""
+
+    tracked: bool
+    job: Job | None = None
+    score: MatchScore | None = None
+    materials_status: Literal["missing", "current", "stale_pending", "stale_reviewed"] | None = None
+
+
 TrackerStatus = Literal[
     "saved",
     "pending_review",

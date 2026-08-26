@@ -28,6 +28,7 @@ from backend.db.models import (
     Candidate,
     FormFillAttemptRecord,
     JobRecord,
+    MatchScoreRecord,
     TargetPreference,
 )
 from backend.services import form_fill_service
@@ -45,8 +46,10 @@ from backend.services.form_fill_service import (
     detect_ats_platform,
     find_job_by_url,
     get_autofill_data,
+    get_extension_panel_data,
     run_assisted_apply,
 )
+from tests.mvp_helpers import ensure_user
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "ats_forms"
 
@@ -1090,6 +1093,184 @@ def test_extension_autofill_rejects_cookie_only_auth(isolated_client) -> None:
         params={"url": "https://example.com/nope"},
     )
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /api/extension/panel-data — read-only side-panel status
+# ---------------------------------------------------------------------------
+
+
+def _score(session, job: JobRecord, candidate: Candidate, **overrides) -> MatchScoreRecord:
+    defaults = dict(
+        job_id=job.id,
+        candidate_id=candidate.id,
+        overall_score=82.0,
+        matched_skills=["Python"],
+        partial_matches=[],
+        missing_skills=["Docker"],
+        recommendation="apply",
+        rationale="Strong skills overlap.",
+    )
+    defaults.update(overrides)
+    record = MatchScoreRecord(**defaults)
+    session.add(record)
+    session.commit()
+    return record
+
+
+def test_panel_data_returns_tracked_false_for_unknown_url(isolated_session) -> None:
+    """A URL with no matching job is the panel's normal empty state, not an
+    error — 200 + tracked=false, unlike autofill's 404 for the same case."""
+    result = get_extension_panel_data(isolated_session, "https://example.com/nope", TEST_USER_ID)
+    assert result.tracked is False
+    assert result.job is None
+    assert result.score is None
+    assert result.materials_status is None
+
+
+def test_panel_data_lever_apply_suffix_matches(isolated_session) -> None:
+    job = _job(isolated_session, url="https://jobs.lever.co/acme/abc-123")
+    result = get_extension_panel_data(
+        isolated_session, "https://jobs.lever.co/acme/abc-123/apply", TEST_USER_ID
+    )
+    assert result.tracked is True
+    assert result.job.id == job.public_id
+
+
+def test_panel_data_does_not_require_approval(isolated_session) -> None:
+    """Regression for the actual gap this closes: a pending-review (never
+    approved) package must still surface real data, not the 409
+    autofill would raise for the same package."""
+    job = _job(isolated_session)
+    candidate = _seed_candidate(isolated_session)
+    package = ApplicationPackageRecord(
+        job_id=job.id,
+        user_id=TEST_USER_ID,
+        candidate_id=candidate.id,
+        tailored_bullets=["Built Python APIs."],
+        cover_letter_draft="Dear team,",
+        recruiter_message="Hello,",
+        source_traceability_notes=["Python <- skills"],
+        approval_status="pending_review",
+        grounded=True,
+    )
+    isolated_session.add(package)
+    isolated_session.commit()
+    _score(isolated_session, job, candidate)
+
+    result = get_extension_panel_data(isolated_session, job.url, TEST_USER_ID)
+    assert result.tracked is True
+    assert result.materials_status == "current"
+    assert result.score is not None
+    assert result.score.overall_score == 82.0
+
+
+def test_panel_data_missing_materials_reports_missing_not_an_error(isolated_session) -> None:
+    job = _job(isolated_session)
+    _seed_candidate(isolated_session)
+    result = get_extension_panel_data(isolated_session, job.url, TEST_USER_ID)
+    assert result.tracked is True
+    assert result.materials_status == "missing"
+    assert result.score is None
+
+
+@pytest.mark.parametrize(
+    ("reviewed", "expected"),
+    [(False, "stale_pending"), (True, "stale_reviewed")],
+)
+def test_panel_data_stale_materials_status(isolated_session, reviewed: bool, expected: str) -> None:
+    """Stale materials (belonging to a since-replaced candidate profile)
+    still return 200 with a status the panel can render, not a 409."""
+    job = _job(isolated_session)
+    old_candidate = _seed_candidate(isolated_session)
+    approval_status = "approved" if reviewed else "pending_review"
+    package = ApplicationPackageRecord(
+        job_id=job.id,
+        user_id=TEST_USER_ID,
+        candidate_id=old_candidate.id,
+        tailored_bullets=["Built Python APIs."],
+        cover_letter_draft="Dear team,",
+        recruiter_message="Hello,",
+        source_traceability_notes=["Python <- skills"],
+        approval_status=approval_status,
+        grounded=True,
+    )
+    isolated_session.add(package)
+    isolated_session.commit()
+    # Replace the candidate profile — the stored package now belongs to a
+    # previous, no-longer-current profile revision.
+    isolated_session.query(Candidate).filter(Candidate.id == old_candidate.id).update({"user_id": None})
+    isolated_session.add(_candidate())
+    isolated_session.commit()
+
+    result = get_extension_panel_data(isolated_session, job.url, TEST_USER_ID)
+    assert result.tracked is True
+    assert result.materials_status == expected
+
+
+def test_panel_data_missing_candidate_profile_is_graceful(isolated_session) -> None:
+    """No candidate at all degrades to null score/materials, not an error —
+    matches list_stored_match_scores's existing no-candidate behavior."""
+    job = _job(isolated_session)
+    result = get_extension_panel_data(isolated_session, job.url, TEST_USER_ID)
+    assert result.tracked is True
+    assert result.score is None
+    assert result.materials_status == "missing"
+
+
+def test_panel_data_scopes_score_and_materials_to_requesting_user(isolated_session) -> None:
+    """Jobs are global/shared (JobRecord has no user_id) — score and
+    materials must still never leak across users hitting the same job."""
+    job = _job(isolated_session)
+    owner = _seed_candidate(isolated_session)
+    _score(isolated_session, job, owner, overall_score=91.0)
+    isolated_session.add(
+        ApplicationPackageRecord(
+            job_id=job.id,
+            user_id=TEST_USER_ID,
+            candidate_id=owner.id,
+            tailored_bullets=["Owner's tailored bullet."],
+            cover_letter_draft="Owner's cover letter.",
+            recruiter_message="Owner's message.",
+            source_traceability_notes=["note"],
+            approval_status="approved",
+            grounded=True,
+        )
+    )
+    isolated_session.commit()
+
+    other_user = ensure_user(isolated_session, user_id=TEST_USER_ID + 1, email="other@example.com")
+    result = get_extension_panel_data(isolated_session, job.url, other_user.id)
+    assert result.tracked is True
+    assert result.score is None
+    assert result.materials_status == "missing"
+
+
+def test_panel_data_route_rejects_cookie_only_auth(isolated_client) -> None:
+    client, _SessionLocal = isolated_client
+    response = client.get("/api/extension/panel-data", params={"url": "https://example.com/nope"})
+    assert response.status_code == 401
+
+
+def test_panel_data_route_returns_tracked_status(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(db, url="https://job-boards.greenhouse.io/acme/jobs/1")
+        candidate = _seed_candidate(db)
+        _score(db, job, candidate)
+
+    headers = _extension_auth_headers(client)
+    client.cookies.clear()
+    response = client.get(
+        "/api/extension/panel-data",
+        params={"url": "https://job-boards.greenhouse.io/acme/jobs/1"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tracked"] is True
+    assert body["score"]["overall_score"] == 82.0
+    assert body["materials_status"] == "missing"
 
 
 # ---------------------------------------------------------------------------
