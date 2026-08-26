@@ -829,3 +829,199 @@ def test_stale_same_row_generate_requires_discard(isolated_session) -> None:
     assert isolated_session.query(ApplicationPackageRecord).count() == 1
     discard_stale_reviewed_package(isolated_session, job.public_id, TEST_USER_ID)
     assert isolated_session.query(ApplicationPackageRecord).count() == 0
+
+
+def test_distinct_content_version_number_collision_retries(
+    isolated_session, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    job, candidate = _approved_package(isolated_session)
+    first = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    original_bullets = list(first.tailored_bullets)
+    package = isolated_session.query(ApplicationPackageRecord).one()
+    package.tailored_bullets = list(package.tailored_bullets) + [
+        "Shipped additional FastAPI work at Northstar Labs."
+    ]
+    package.approval_status = "pending_review"
+    isolated_session.commit()
+    _approve(isolated_session, job.public_id)
+
+    real_commit = isolated_session.commit
+    raced = {"done": False}
+
+    def _commit_with_collision():
+        if not raced["done"]:
+            raced["done"] = True
+            Other = sessionmaker(bind=isolated_session.get_bind(), autocommit=False, autoflush=False)
+            with Other() as other:
+                other.add(
+                    ResumeVersionRecord(
+                        public_id="rv-collision-other",
+                        job_id=job.id,
+                        user_id=TEST_USER_ID,
+                        candidate_id=candidate.id,
+                        version_number=2,
+                        tailored_bullets=["Competing distinct bullet about SQL."],
+                        source_traceability_notes=["SQL <- skills"],
+                        resume_input_snapshot={"name": "Jordan Avery"},
+                        content_hash="b" * 64,
+                    )
+                )
+                other.commit()
+        return real_commit()
+
+    monkeypatch.setattr(isolated_session, "commit", _commit_with_collision)
+    second = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    assert second.version_number == 3
+    assert second.id != first.id
+    rows = isolated_session.query(ResumeVersionRecord).order_by(ResumeVersionRecord.version_number).all()
+    assert len(rows) == 3
+    assert rows[0].tailored_bullets == original_bullets
+    assert rows[1].public_id == "rv-collision-other"
+    assert "UNIQUE constraint failed" not in caplog.text
+    assert "resume_input_snapshot" not in caplog.text
+    assert "jordan@example.com" not in caplog.text
+
+
+def test_owner_can_list_global_resume_versions_newest_first(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    _seed_approved_for_client(SessionLocal, public_id="manual-abc123", user_id=client.test_user_id)
+    first = client.post("/api/jobs/manual-abc123/resume-versions")
+    assert first.status_code == 201
+    _seed_approved_for_client(SessionLocal, public_id="manual-def456", user_id=client.test_user_id)
+    second = client.post("/api/jobs/manual-def456/resume-versions")
+    assert second.status_code == 201
+    listed = client.get("/api/resume-versions")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert [item["id"] for item in body] == [second.json()["id"], first.json()["id"]]
+    assert body[0]["job_id"] == "manual-def456"
+    assert body[0]["job_title"]
+    assert body[0]["company"]
+    assert body[0]["bullet_count"] >= 1
+    assert body[0]["provenance_status"] == "approved_snapshot"
+    assert body[0]["matches_current_profile"] is True
+    dumped = json.dumps(body)
+    assert "content_hash" not in dumped
+    assert "candidate_profile_fingerprint" not in dumped
+    assert "approved_materials_hash" not in dumped
+    assert "resume_input_snapshot" not in dumped
+    assert "salary_min" not in dumped
+    assert "work_authorization" not in dumped
+
+
+def test_owner_can_get_global_resume_version_detail(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job, candidate = seed_materials_prerequisites(db, user_id=client.test_user_id)
+        pref = db.query(TargetPreference).filter_by(user_id=candidate.user_id).one()
+        pref.salary_min = 135000
+        pref.work_authorization = "US Citizen"
+        pref.gender = "prefer_not_to_say"
+        pref.race_ethnicity = "Decline to answer"
+        pref.veteran_status = "I am not a veteran"
+        pref.disability_status = "No"
+        pref.legal_name = "Jordan Avery"
+        pref.linkedin_url = "https://linkedin.com/in/jordanavery"
+        pref.github_url = "https://github.com/example-user"
+        pref.portfolio_url = "https://example.com/portfolio"
+        db.commit()
+        insert_grounded_package(db, job, candidate=candidate, user_id=client.test_user_id)
+        _approve(db, job.public_id, client.test_user_id)
+    created = client.post("/api/jobs/manual-abc123/resume-versions")
+    assert created.status_code == 201
+    version_id = created.json()["id"]
+    detail = client.get(f"/api/resume-versions/{version_id}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["id"] == version_id
+    assert body["tailored_bullets"]
+    assert body["source_traceability_notes"]
+    assert body["profile"]["name"] == "Jordan Avery"
+    assert body["profile"]["legal_name"] == "Jordan Avery"
+    assert body["profile"]["linkedin_url"] == "https://linkedin.com/in/jordanavery"
+    dumped = json.dumps(body)
+    assert "content_hash" not in dumped
+    assert "resume_input_snapshot" not in dumped
+    assert "salary_min" not in dumped
+    assert "work_authorization" not in dumped
+    assert "prefer_not_to_say" not in dumped
+    assert "gender" not in dumped
+    assert "race_ethnicity" not in dumped
+
+
+def test_global_resume_routes_are_read_only_and_provider_free(
+    isolated_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, SessionLocal = isolated_client
+    _seed_approved_for_client(SessionLocal, user_id=client.test_user_id)
+    created = client.post("/api/jobs/manual-abc123/resume-versions").json()
+
+    def _blocked(*_a, **_k):
+        raise AssertionError("LLM must not be called")
+
+    monkeypatch.setattr("backend.services.llm_client.LLMClient.generate", _blocked)
+    listed = client.get("/api/resume-versions")
+    fetched = client.get(f"/api/resume-versions/{created['id']}")
+    assert listed.status_code == 200
+    assert fetched.status_code == 200
+    with SessionLocal() as db:
+        assert db.query(ResumeVersionRecord).count() == 1
+        row = db.query(ResumeVersionRecord).one()
+        created_at = row.created_at
+        content_hash = row.content_hash
+    listed_again = client.get("/api/resume-versions")
+    assert listed_again.status_code == 200
+    with SessionLocal() as db:
+        row = db.query(ResumeVersionRecord).one()
+        assert row.created_at == created_at
+        assert row.content_hash == content_hash
+
+
+def test_global_resume_list_and_detail_are_owner_scoped(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    _seed_approved_for_client(SessionLocal, user_id=client.test_user_id)
+    created = client.post("/api/jobs/manual-abc123/resume-versions").json()
+    client.post("/api/auth/logout")
+    signup = client.post(
+        "/api/auth/signup",
+        json={"email": "other-resume@example.com", "password": "test-password-123"},
+    )
+    assert signup.status_code == 201
+    listed = client.get("/api/resume-versions")
+    fetched = client.get(f"/api/resume-versions/{created['id']}")
+    assert listed.status_code == 200
+    assert listed.json() == []
+    assert fetched.status_code == 404
+    detail = fetched.json()["detail"]
+    assert "not found" in detail.lower()
+    assert created["id"] not in detail
+    assert "user" not in detail.lower()
+
+
+def test_global_detail_stays_historical_after_display_profile_change(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job, candidate = seed_materials_prerequisites(db, user_id=client.test_user_id)
+        pref = db.query(TargetPreference).filter_by(user_id=candidate.user_id).one()
+        pref.legal_name = "Jordan Avery"
+        pref.linkedin_url = "https://linkedin.com/in/jordanavery"
+        db.commit()
+        insert_grounded_package(db, job, candidate=candidate, user_id=client.test_user_id)
+        _approve(db, job.public_id, client.test_user_id)
+    created = client.post("/api/jobs/manual-abc123/resume-versions")
+    version_id = created.json()["id"]
+    with SessionLocal() as db:
+        pref = db.query(TargetPreference).filter_by(user_id=client.test_user_id).one()
+        pref.legal_name = "Riley Chen Legal"
+        pref.linkedin_url = "https://linkedin.com/in/riley-b"
+        db.commit()
+    listed = client.get("/api/resume-versions")
+    detail = client.get(f"/api/resume-versions/{version_id}")
+    assert listed.status_code == 200
+    assert listed.json()[0]["matches_current_profile"] is False
+    body = detail.json()
+    assert body["matches_current_profile"] is False
+    assert body["profile"]["legal_name"] == "Jordan Avery"
+    assert body["profile"]["linkedin_url"] == "https://linkedin.com/in/jordanavery"
+    assert "Riley Chen Legal" not in json.dumps(body)

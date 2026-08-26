@@ -166,6 +166,43 @@ class ResumeVersion(BaseModel):
     created_at: datetime
 
 
+class ResumeVersionSummary(BaseModel):
+    id: str
+    job_id: str
+    job_title: str
+    company: str
+    version_number: int = Field(ge=1)
+    created_at: datetime
+    bullet_count: int = Field(ge=0)
+    provenance_status: Literal["approved_snapshot"] = "approved_snapshot"
+    matches_current_profile: bool
+
+
+class ResumeVersionProfile(BaseModel):
+    """Allowlisted historical display fields from one immutable version."""
+
+    name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    skills: list | None = None
+    projects: list | None = None
+    experience: list | None = None
+    education: list | None = None
+    certifications: list | None = None
+    strengths: list | None = None
+    evidence_links: list | None = None
+    legal_name: str | None = None
+    linkedin_url: str | None = None
+    github_url: str | None = None
+    portfolio_url: str | None = None
+
+
+class ResumeVersionDetail(ResumeVersionSummary):
+    tailored_bullets: list[str] = Field(default_factory=list)
+    source_traceability_notes: list[str] = Field(default_factory=list)
+    profile: ResumeVersionProfile
+
+
 class InterviewPrep(BaseModel):
     job_id: str
     likely_questions: list[str] = Field(default_factory=list)

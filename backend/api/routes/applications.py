@@ -18,6 +18,8 @@ from backend.schemas.schemas import (
     ExtensionPanelData,
     FormFillResult,
     ResumeVersion,
+    ResumeVersionDetail,
+    ResumeVersionSummary,
 )
 from backend.services.application_service import (
     StoredMaterialsNotFoundError,
@@ -33,7 +35,9 @@ from backend.services.resume_version_service import (
     ResumeVersionNotFoundError,
     ResumeVersionPersistenceError,
     get_resume_version,
+    get_user_resume_version,
     list_resume_versions,
+    list_user_resume_versions,
     save_resume_version,
 )
 
@@ -151,6 +155,28 @@ def get_resume_version_route(
     """Return one owned resume version. Cross-user access is a sanitized 404."""
     try:
         return get_resume_version(db, job_id, version_id, user.id)
+    except ResumeVersionNotFoundError as exc:
+        raise _http_for_resume_version_error(exc) from exc
+
+
+@router.get("/resume-versions", response_model=list[ResumeVersionSummary])
+def list_all_resume_versions_route(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[ResumeVersionSummary]:
+    """List the current user's resume versions across jobs. Never writes or generates."""
+    return list_user_resume_versions(db, user.id)
+
+
+@router.get("/resume-versions/{version_id}", response_model=ResumeVersionDetail)
+def get_user_resume_version_route(
+    version_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ResumeVersionDetail:
+    """Return one owned historical resume version. Cross-user access is a sanitized 404."""
+    try:
+        return get_user_resume_version(db, version_id, user.id)
     except ResumeVersionNotFoundError as exc:
         raise _http_for_resume_version_error(exc) from exc
 
