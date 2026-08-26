@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     adzuna_app_key: str | None = None
     adzuna_country: str = "us"
 
+    # Greenhouse/Lever have no cross-company search — each board/company is
+    # listed individually — so discovery is comma-separated board tokens /
+    # company slugs to watch, not a free-text query. Ships with a small
+    # verified-working default so "Find Jobs" shows results with zero
+    # configuration; override to watch different companies.
+    greenhouse_board_tokens: str = "stripe,airbnb,robinhood,discord,reddit,gitlab"
+    lever_company_slugs: str = "ro"
+
     scout_results_per_source: int = 25
     http_timeout_seconds: float = 15.0
     http_user_agent: str = "CareerPilotAI/0.1 (job search assistant; +https://github.com/ManpreetS2/CareerPilot)"

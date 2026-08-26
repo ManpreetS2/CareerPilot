@@ -9,7 +9,7 @@ verified — the whole point is surfacing doubt, not resolving it automatically.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import HTTPException, status as http_status
@@ -25,6 +25,13 @@ from backend.services.url_safety import UnsafeURLError, fetch_url_safely
 logger = logging.getLogger(__name__)
 
 DEFAULT_STALE_AFTER_DAYS = 45
+
+# Shorter than DEFAULT_STALE_AFTER_DAYS: a job vanishing from a live source's
+# feed is a stronger signal than "posted a while ago." Manual is excluded —
+# a manually-pasted job is never re-discovered by a scout, so absence from a
+# scout run means nothing for it.
+DEFAULT_ABSENCE_STALE_AFTER_DAYS = 14
+_SCOUT_MANAGED_SOURCES = frozenset({"adzuna", "remoteok", "greenhouse", "lever", "remotive"})
 
 # Phrases a job board shows on an expired/filled/removed posting. Checked as
 # case-insensitive substrings of the fetched page body.
@@ -262,3 +269,37 @@ def verify_all(status_filter: str | None = "discovered") -> list[Job]:
             results.append(record_to_job(record))
         db.commit()
         return results
+
+
+def mark_stale_if_unseen(max_absence_days: int = DEFAULT_ABSENCE_STALE_AFTER_DAYS) -> int:
+    """Mark discovered/verified jobs stale if no scout run has seen them in
+    max_absence_days — a job silently dropping out of a source's live feed,
+    as distinct from check_staleness's posting-age-only signal.
+
+    Assumes every scout run queries every configured source with the same
+    query — true today, since there is no user-facing search query yet
+    (run_scout always uses the backend's own default). If a query field is
+    ever added to "Find Jobs", this would need to become query-aware: a job
+    still live but not matching a one-off different query would otherwise
+    look incorrectly "unseen" and eventually get swept as stale.
+
+    Single session, unlike verify_all's two-phase read/write split — that
+    split exists specifically to avoid holding a write lock across N slow
+    HTTP checks, which doesn't apply here (pure DB read+write, no network).
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_absence_days)
+    with SessionLocal() as db:
+        candidates = (
+            db.query(JobRecord)
+            .filter(JobRecord.status.in_(("discovered", "verified")))
+            .filter(JobRecord.source.in_(_SCOUT_MANAGED_SOURCES))
+            .filter(JobRecord.date_scraped < cutoff)
+            .all()
+        )
+        marked_at = datetime.now(timezone.utc)
+        for record in candidates:
+            record.status = "stale"
+            record.verification_notes = f"Not seen in a scout run for over {max_absence_days} days."
+            record.verified_at = marked_at
+        db.commit()
+        return len(candidates)
