@@ -148,9 +148,14 @@ export const api = {
   getStoredMaterials: (jobId: string, init?: RequestInit) =>
     request<ApplicationPackage>(`/api/jobs/${jobId}/materials`, init),
 
-  generateMaterials: (jobId: string) =>
+  // overrideGrounding is the owner's explicit, per-job decision to keep a
+  // draft whose claims could not all be verified against their resume. It is
+  // sent only when they ask for it and is never remembered between calls.
+  generateMaterials: (jobId: string, overrideGrounding = false) =>
     request<ApplicationPackage>(`/api/jobs/${jobId}/generate-materials`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ override_grounding: overrideGrounding }),
     }),
 
   discardStaleMaterials: (jobId: string) =>

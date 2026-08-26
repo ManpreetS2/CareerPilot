@@ -30,6 +30,18 @@ function materialsStateFromError(err: unknown): "missing" | "stale_pending" | "s
   return "error";
 }
 
+/** Matches only the grounding refusal, not every 409 this endpoint can
+ * return (missing profile, missing requirements, a protected package) —
+ * offering an "ignore evidence checks" button for an unrelated conflict
+ * would be misleading and would not fix it. */
+function isGroundingRefusal(err: unknown): boolean {
+  return (
+    err instanceof ApiClientError &&
+    err.status === 409 &&
+    err.message.toLowerCase().includes("not supported by stored evidence")
+  );
+}
+
 export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
   const queryClient = useQueryClient();
   const [acting, setActing] = useState(false);
@@ -42,6 +54,10 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
   const [decisionNotes, setDecisionNotes] = useState("");
   const [scoreAssembling, setScoreAssembling] = useState(false);
   const [lockedIn, setLockedIn] = useState(false);
+  // Set only after a generate attempt is refused for grounding, so the
+  // override is offered as a considered response to a specific failure
+  // rather than sitting on the page as a shortcut past evidence checks.
+  const [groundingRefused, setGroundingRefused] = useState(false);
 
   const jobQuery = useQuery({
     queryKey: queryKeys.job(jobId),
@@ -79,6 +95,7 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
 
   useEffect(() => {
     if (jobId) saveSelectedJobId(jobId);
+    setGroundingRefused(false);
   }, [jobId]);
 
   useEffect(() => {
@@ -104,14 +121,16 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
     }
   }
 
-  async function generateMaterials() {
+  async function generateMaterials(overrideGrounding: boolean) {
     setGenerating(true);
     setActionError(null);
     try {
-      const next = await api.generateMaterials(jobId);
+      const next = await api.generateMaterials(jobId, overrideGrounding);
       queryClient.setQueryData(queryKeys.materials(jobId), next);
+      setGroundingRefused(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys.materials(jobId) });
     } catch (err) {
+      if (!overrideGrounding && isGroundingRefusal(err)) setGroundingRefused(true);
       setActionError(err);
     } finally {
       setGenerating(false);
@@ -286,7 +305,7 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
               className="btn-primary"
               data-testid="generate-materials"
               disabled={generating}
-              onClick={() => void generateMaterials()}
+              onClick={() => void generateMaterials(false)}
             >
               <Wand2 className={`h-4 w-4 ${generating ? "animate-pulse" : ""}`} aria-hidden />
               {generating
@@ -297,6 +316,46 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
             </button>
           )}
         </div>
+        {groundingRefused && !materials ? (
+          <div role="alert" className="mt-3 card border-warning/40 bg-surface-secondary p-4">
+            <p className="text-sm font-semibold">The draft claimed things your resume does not show</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Nothing was saved. You can generate anyway for this job — the draft will be kept
+              without evidence checks and marked unverified everywhere, including in the browser
+              extension before it fills a real application. Read it closely before you submit it.
+            </p>
+            <button
+              type="button"
+              className="btn-secondary mt-3"
+              data-testid="generate-materials-override"
+              disabled={generating}
+              onClick={() => void generateMaterials(true)}
+            >
+              {generating ? "Generating…" : "Generate anyway for this job"}
+            </button>
+          </div>
+        ) : null}
+        {materials?.grounding_override ? (
+          <div role="alert" className="mt-3 card border-warning/40 bg-surface-secondary p-4">
+            <p className="text-sm font-semibold">Unverified materials</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              These were kept without evidence checks at your request. Review every claim before
+              approving — they may assert experience your resume does not support. Unsupported
+              claims require careful human review.
+            </p>
+            {(materials.unsupported_claims?.length ?? 0) > 0 ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Unsupported:{" "}
+                {(materials.unsupported_claims ?? []).map((claim, index) => (
+                  <span key={`${claim}-${index}`}>
+                    {index > 0 ? ", " : ""}
+                    {claim.replace(/_/g, " ")}
+                  </span>
+                ))}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         {!materials ? (
           <p className="mt-3 text-sm text-muted-foreground">
             No grounded materials stored yet. Generate materials after a fit score exists.

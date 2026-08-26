@@ -21,7 +21,10 @@ from backend.db.models import (
 from backend.services import application_service
 from tests.mvp_helpers import TEST_USER_ID, insert_candidate
 from backend.services.application_materials_agent import (
+    _MATERIALS_PROVIDER_ERROR_PRIORITY,
+    _should_replace_materials_error,
     ApplicationMaterialsDraft,
+    ApplicationMaterialsGroundingError,
     ApplicationMaterialsParseError,
     ApplicationMaterialsStructuredOutput,
     MaterialsClaimEvidence,
@@ -34,8 +37,15 @@ from backend.services.application_materials_agent import (
     draft_to_application_package,
     generate_grounded_application_materials,
     ground_application_materials,
+    is_grounded_package_record,
+    is_override_package_record,
     load_application_materials_context,
     parse_application_materials_json,
+)
+from backend.services.llm_client import (
+    LLMConfigurationError,
+    LLMEmptyResponseError,
+    LLMProviderError,
 )
 
 
@@ -487,3 +497,113 @@ def test_production_generate_materials_uses_grounded_generator(isolated_client) 
     source = inspect.getsource(application_service.get_or_generate_application_package)
     assert "generate_grounded_application_materials(" in source
     assert not hasattr(application_service, "_mock_materials")
+
+
+# ---------------------------------------------------------------------------
+# Provider fallback: which failure the user is actually told about
+# ---------------------------------------------------------------------------
+
+
+def test_a_later_unconfigured_provider_does_not_mask_a_real_failure() -> None:
+    """With LLM_PROVIDER_ORDER="ollama,gemini" and no Gemini key, Ollama can
+    run, produce output, and have it rejected by grounding — and then Gemini's
+    "no API key" error would overwrite that as the error the user sees. The
+    result was a 503 "generation is not configured" on a system that was
+    configured and had just run, sending the user to fix a setting that was
+    never wrong. Rank substantive failures above configuration ones.
+    """
+    grounding = ApplicationMaterialsGroundingError()
+    config = LLMConfigurationError("GEMINI_API_KEY is not set.")
+
+    assert _should_replace_materials_error(None, grounding) is True
+    # The real failure must survive the unconfigured provider tried after it.
+    assert _should_replace_materials_error(grounding, config) is False
+    # ...and a real failure still replaces a config error seen first.
+    assert _should_replace_materials_error(config, grounding) is True
+
+
+def test_equal_severity_failures_keep_the_first_provider_error() -> None:
+    first = ApplicationMaterialsGroundingError()
+    second = ApplicationMaterialsGroundingError()
+    assert _should_replace_materials_error(first, second) is False
+
+
+def test_every_error_the_provider_loop_catches_is_ranked() -> None:
+    """An unranked error type defaults to 0, below even a configuration
+    error, so it would be the one silently discarded. Anything the loop
+    catches must therefore have an explicit rank."""
+    for error_type in (
+        ApplicationMaterialsParseError,
+        ApplicationMaterialsGroundingError,
+        LLMProviderError,
+        LLMEmptyResponseError,
+        LLMConfigurationError,
+    ):
+        assert error_type in _MATERIALS_PROVIDER_ERROR_PRIORITY, error_type
+
+
+def test_configuration_error_ranks_below_every_substantive_failure() -> None:
+    config_rank = _MATERIALS_PROVIDER_ERROR_PRIORITY[LLMConfigurationError]
+    others = [
+        rank
+        for error_type, rank in _MATERIALS_PROVIDER_ERROR_PRIORITY.items()
+        if error_type is not LLMConfigurationError
+    ]
+    assert others, "expected other ranked provider errors"
+    assert all(rank > config_rank for rank in others)
+
+
+# ---------------------------------------------------------------------------
+# Explicit per-job grounding override
+# ---------------------------------------------------------------------------
+
+
+def _ungrounded_record(**overrides) -> ApplicationPackageRecord:
+    defaults = dict(
+        job_id=1,
+        user_id=1,
+        candidate_id=1,
+        tailored_bullets=["Led a global engineering team of 40."],
+        cover_letter_draft="I have ten years of production Spark experience.",
+        recruiter_message="Hello,",
+        source_traceability_notes=["unverified"],
+        approval_status="pending_review",
+        grounded=False,
+        grounding_override=True,
+        unsupported_claims=["experience", "skills"],
+    )
+    defaults.update(overrides)
+    return ApplicationPackageRecord(**defaults)
+
+
+def test_override_package_is_never_reported_as_grounded() -> None:
+    """`grounded` must keep meaning "every claim was verified". An override
+    waives the check; it does not turn an unverified package into a
+    verified one, and anything reading `grounded` must still see False."""
+    record = _ungrounded_record()
+    assert is_grounded_package_record(record) is False
+    assert is_override_package_record(record) is True
+
+
+def test_override_does_not_apply_without_the_explicit_flag() -> None:
+    """An ungrounded package that was never explicitly overridden — a
+    legacy row, or one written by some other path — must not be treated as
+    an override and must stay unusable for assisted apply."""
+    record = _ungrounded_record(grounding_override=False)
+    assert is_grounded_package_record(record) is False
+    assert is_override_package_record(record) is False
+
+
+def test_override_still_requires_real_content() -> None:
+    """The override waives evidence verification only. A package with no
+    usable content is still not something to fill a form from."""
+    record = _ungrounded_record(
+        tailored_bullets=[], cover_letter_draft=None, recruiter_message=None
+    )
+    assert is_override_package_record(record) is False
+
+
+def test_override_records_which_claims_were_unsupported() -> None:
+    """Review is only informed if the reviewer can see what is unverified."""
+    record = _ungrounded_record()
+    assert record.unsupported_claims == ["experience", "skills"]

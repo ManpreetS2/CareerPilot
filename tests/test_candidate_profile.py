@@ -1858,3 +1858,92 @@ def test_parse_resume_note_uses_total_rejected(isolated_client) -> None:
     note = response.json()["note"]
     assert "Rejected unsupported claims: 1." in note
     assert "InventedSkillXYZ" not in note
+
+
+def test_education_keeps_a_degree_written_above_its_institution() -> None:
+    """Reported from a real resume: a BS in Computer Science from UNT came
+    back with degree/field null, so downstream scoring reported a STEM
+    degree as missing on a candidate who plainly had one. The institution
+    was the only grounding anchor and the context only expanded forward, so
+    a degree printed above its own institution — a common resume layout —
+    fell outside the window and was stripped as unsupported."""
+    resume = """
+Alex Rivera
+EDUCATION
+Bachelor of Science in Computer Science
+University of North Texas, Denton, TX — May 2026
+""".strip()
+    raw = _grounded_llm_payload()
+    raw["skills"] = []
+    raw["projects"] = []
+    raw["experience"] = []
+    raw["certifications"] = []
+    raw["evidence_links"] = []
+    raw["education"] = [
+        {
+            "institution": "University of North Texas",
+            "degree": "Bachelor of Science",
+            "field": "Computer Science",
+            "graduation_year": "May 2026",
+        }
+    ]
+    profile, report = validate_and_ground_profile(raw, resume)
+    assert profile.education[0].degree == "Bachelor of Science"
+    assert profile.education[0].field == "Computer Science"
+    assert profile.education[0].graduation_year == "May 2026"
+    assert report.as_counts().get("removed_education_fields") is None
+
+
+def test_education_keeps_a_degree_on_the_same_line_as_its_institution() -> None:
+    resume = """
+Alex Rivera
+EDUCATION
+University of North Texas — Bachelor of Science in Computer Science, May 2026
+""".strip()
+    raw = _grounded_llm_payload()
+    raw["skills"] = []
+    raw["projects"] = []
+    raw["experience"] = []
+    raw["certifications"] = []
+    raw["evidence_links"] = []
+    raw["education"] = [
+        {
+            "institution": "University of North Texas",
+            "degree": "Bachelor of Science",
+            "field": "Computer Science",
+            "graduation_year": "2026",
+        }
+    ]
+    profile, _ = validate_and_ground_profile(raw, resume)
+    assert profile.education[0].degree == "Bachelor of Science"
+    assert profile.education[0].field == "Computer Science"
+
+
+def test_inverted_education_layout_does_not_borrow_the_previous_degree() -> None:
+    """The widened window must not reach into the entry above it: with two
+    degrees stacked, each must still ground only against its own block."""
+    resume = """
+Alex Rivera
+EDUCATION
+Master of Business Administration
+Harvard University, Cambridge, MA — May 2028
+Bachelor of Science in Computer Science
+University of North Texas, Denton, TX — May 2026
+""".strip()
+    raw = _grounded_llm_payload()
+    raw["skills"] = []
+    raw["projects"] = []
+    raw["experience"] = []
+    raw["certifications"] = []
+    raw["evidence_links"] = []
+    raw["education"] = [
+        {
+            "institution": "University of North Texas",
+            "degree": "Master of Business Administration",  # belongs to Harvard
+            "field": "Computer Science",
+            "graduation_year": "2026",
+        }
+    ]
+    profile, _ = validate_and_ground_profile(raw, resume)
+    degrees = [e.degree for e in profile.education]
+    assert "Master of Business Administration" not in degrees

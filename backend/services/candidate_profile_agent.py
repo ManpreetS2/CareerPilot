@@ -1412,11 +1412,23 @@ def validate_and_ground_profile(
     profile.experience = grounded_experience
 
     grounded_education: list[Education] = []
+    # Anchor on the degree as well as the institution, the way experience
+    # anchors on both title and company. With the institution as the only
+    # anchor the core is that one line and the context only expands forward,
+    # so a resume written as
+    #     Bachelor of Science in Computer Science
+    #     University of North Texas, Denton, TX — May 2026
+    # put the degree above its own anchor, outside the window, and grounding
+    # then stripped a degree that was plainly on the page. Including it in
+    # the anchor group makes the core span both in whichever order they
+    # appear. Entries whose degree the model did not propose keep the
+    # institution-only anchor, and lookback covers the same inversion for
+    # the field/year on those.
     education_contexts = allocate_parent_contexts(
         resume_text,
-        [[edu.institution] for edu in profile.education],
-        max_span=2,
-        lookback=0,
+        [[edu.institution, edu.degree] if edu.degree else [edu.institution] for edu in profile.education],
+        max_span=3,
+        lookback=2,
         kind="education",
     )
     for edu, parent in zip(profile.education, education_contexts, strict=True):

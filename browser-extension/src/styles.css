@@ -15,14 +15,19 @@
   --muted: #64748b;
 }
 
-.dark {
-  color-scheme: dark;
-  --bg: #0b0f14;
-  --fg: #e5e7eb;
-  --card: #121821;
-  --line: #253041;
-  --accent: #7dd3fc;
-  --muted: #94a3b8;
+/* Matches tailwind.config.js's darkMode:"media" — the panel follows the
+   browser/OS setting rather than the web app's class toggle, so these have
+   to switch on the same signal the dark: variants compile against. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f14;
+    --fg: #e5e7eb;
+    --card: #121821;
+    --line: #253041;
+    --accent: #7dd3fc;
+    --muted: #94a3b8;
+  }
 }
 
 html,

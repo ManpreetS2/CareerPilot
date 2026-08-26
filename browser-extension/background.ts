@@ -3,9 +3,12 @@
 // the piece that needs the "tabs" permission — a background context has no
 // user gesture of its own to unlock "activeTab", so without "tabs" the Tab
 // objects delivered here would have their url/title withheld.
-chrome.runtime.onInstalled.addListener(() => {
-  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-});
+// Set at worker startup rather than only in onInstalled: onInstalled fires
+// once, and if that single call ever fails or is missed the toolbar icon
+// does nothing at all and the extension looks broken with no way to
+// recover. This runs on every service-worker wake, and setting it to the
+// value it already has is a no-op.
+void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
 function notifyPanel(url: string | undefined) {
   if (!url) return;

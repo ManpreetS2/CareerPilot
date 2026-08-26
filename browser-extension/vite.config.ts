@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
@@ -10,6 +11,12 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 // manifest.background.service_worker as a fixed path, so it must not be
 // code-split or hashed).
 export default defineConfig({
+  // jsdom, not node: render.ts escapes HTML through a real DOM element and
+  // the panel module drives document directly.
+  test: {
+    environment: "jsdom",
+    include: ["tests/**/*.test.ts"],
+  },
   // Root-relative ("/sidepanel.js") asset paths break once this HTML file
   // is loaded as chrome-extension://<id>/dist/sidepanel.html — "/" would
   // resolve to the extension root, not this file's own directory. Relative

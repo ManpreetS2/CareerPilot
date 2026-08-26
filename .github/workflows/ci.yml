@@ -52,6 +52,15 @@ jobs:
         working-directory: browser-extension
         run: npm run build
 
+      - name: Browser extension tests
+        working-directory: browser-extension
+        # A non-UTC zone on purpose: the panel renders naive UTC timestamps
+        # from the backend, and running these only under the runner's default
+        # UTC would hide exactly the local-time parsing bug they cover.
+        env:
+          TZ: Asia/Kolkata
+        run: npm test
+
       - name: Run backend tests
         run: python -m pytest -q
 

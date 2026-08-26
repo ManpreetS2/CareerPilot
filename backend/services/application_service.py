@@ -29,6 +29,7 @@ from backend.services.application_materials_agent import (
     StaleApplicationMaterialsError,
     generate_grounded_application_materials,
     is_grounded_package_record,
+    is_override_package_record,
     is_package_ready_for_apply,
 )
 from backend.services.candidate_provenance import (
@@ -76,6 +77,8 @@ def _record_to_package(record: ApplicationPackageRecord, job_public_id: str) -> 
         eligibility_notes=record.eligibility_notes,
         decision_notes=record.decision_notes,
         grounded=bool(getattr(record, "grounded", False)) and is_grounded_package_record(record),
+        grounding_override=bool(getattr(record, "grounding_override", False)),
+        unsupported_claims=list(getattr(record, "unsupported_claims", None) or []),
     )
 
 
@@ -91,10 +94,21 @@ def _owned_package(db: Session, job: JobRecord, user_id: int) -> ApplicationPack
 
 
 def get_stored_application_package(db: Session, job_id: str, user_id: int) -> ApplicationPackage:
-    """Return a stored grounded package. Never generates, writes, or calls a provider."""
+    """Return a stored package. Never generates, writes, or calls a provider.
+
+    Includes packages kept through an explicit grounding override: they are
+    real stored materials the owner chose to keep, and reporting them as
+    "not found" would leave every reader — the materials screen, the
+    extension panel — claiming nothing exists while assisted apply is
+    perfectly willing to fill from them. The returned package carries
+    grounding_override and unsupported_claims so callers can show it as
+    unverified rather than treating it as evidence-backed.
+    """
     job = _get_job_record(db, job_id)
     record = _owned_package(db, job, user_id)
-    if record is None or not is_grounded_package_record(record):
+    if record is None or not (
+        is_grounded_package_record(record) or is_override_package_record(record)
+    ):
         raise StoredMaterialsNotFoundError()
     current = _get_current_candidate(db, user_id)
     if (
@@ -113,10 +127,13 @@ def get_or_generate_application_package(
     user_id: int,
     *,
     generator: ApplicationMaterialsGenerateFn | ApplicationMaterialsGenerator | None = None,
+    override_grounding: bool = False,
 ) -> ApplicationPackage:
     job = _get_job_record(db, job_id)
     try:
-        generate_grounded_application_materials(db, job_id, user_id, generator=generator)
+        generate_grounded_application_materials(
+            db, job_id, user_id, generator=generator, override_grounding=override_grounding
+        )
     except MissingJobIntelligenceError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except MissingCandidateError as exc:
