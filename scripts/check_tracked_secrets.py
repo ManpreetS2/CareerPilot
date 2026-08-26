@@ -28,6 +28,22 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
+def _looks_like_database(name: str) -> bool:
+    """Catch a database file whatever has been appended to its name.
+
+    Matching the suffix alone missed the shape these actually appear in:
+    a real ``careerpilot.db.bak-20260824-125107`` sitting in data/ is a
+    byte-for-byte copy of the production database with every user's data
+    in it, and neither this check nor ``data/*.db`` in .gitignore stopped
+    it from being committed. Backup, timestamp, and copy suffixes are
+    exactly what someone adds right before forgetting the file exists.
+    """
+    lowered = name.lower()
+    if lowered.endswith(tuple(FORBIDDEN_DB_SUFFIXES)):
+        return True
+    return any(f"{suffix}." in lowered or f"{suffix}-" in lowered for suffix in FORBIDDEN_DB_SUFFIXES)
+
+
 def scan_text(text: str) -> dict[str, int]:
     """Return category -> match count. Never includes matched values."""
 
@@ -63,7 +79,7 @@ def main() -> int:
         if name == ".env" or relative.endswith("/.env"):
             failures.append(f"tracked env file: {relative}")
             continue
-        if name.endswith(tuple(FORBIDDEN_DB_SUFFIXES)):
+        if _looks_like_database(name):
             failures.append(f"tracked sqlite database: {relative}")
             continue
         if name.lower().endswith(".pdf") and not relative.startswith("tests/"):

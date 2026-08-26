@@ -16,6 +16,12 @@ htmlcov/
 Thumbs.db
 data/*.db
 data/*.db-journal
+# Backups and copies of the production database — a real
+# careerpilot.db.bak-<timestamp> is the same user data under a name the
+# patterns above do not match.
+data/*.db.*
+data/*.sqlite*
+
 logs/*.log
 logs/*.json
 playwright/.cache
