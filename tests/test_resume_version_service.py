@@ -13,6 +13,7 @@ These tests never open an external application or call a submission endpoint.
 from __future__ import annotations
 
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -21,9 +22,18 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from backend.db.database import Base
-from backend.db.models import ApplicationPackageRecord, Candidate, JobRecord, ResumeVersionRecord, User
-from backend.schemas.schemas import ApprovalRequest
-from backend.services.application_service import apply_approval
+from backend.db.models import ApplicationPackageRecord, Candidate, JobRecord, ResumeVersionRecord, TargetPreference, User
+from backend.schemas.schemas import ApprovalRequest, CandidateProfile
+from backend.services.application_materials_agent import (
+    StaleApplicationMaterialsError,
+    generate_grounded_application_materials,
+)
+from backend.services.application_service import apply_approval, discard_stale_reviewed_package
+from backend.services.candidate_profile_agent import persist_candidate_profile
+from backend.services.candidate_provenance import (
+    build_resume_input_snapshot,
+    hash_resume_input_snapshot,
+)
 from backend.services.resume_version_service import (
     ResumeVersionConflictError,
     ResumeVersionNotFoundError,
@@ -33,9 +43,11 @@ from backend.services.resume_version_service import (
 )
 from tests.mvp_helpers import (
     TEST_USER_ID,
+    fake_grounded_generator,
     insert_candidate,
     insert_grounded_package,
     insert_job,
+    insert_score,
     seed_materials_prerequisites,
 )
 
@@ -140,6 +152,15 @@ def test_changed_approved_content_creates_next_version(isolated_session) -> None
         "Built Campus Planner with Python and FastAPI for campus events."
     ]
     isolated_session.commit()
+    with pytest.raises(ResumeVersionConflictError):
+        create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    assert isolated_session.query(ResumeVersionRecord).count() == 1
+
+    package.approval_status = "pending_review"
+    isolated_session.commit()
+    with pytest.raises(ResumeVersionConflictError):
+        create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    _approve(isolated_session, job.public_id)
     second = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
     assert second.version_number == 2
     assert second.id != first.id
@@ -242,7 +263,9 @@ def test_list_is_newest_first(isolated_session) -> None:
     first = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
     package = isolated_session.query(ApplicationPackageRecord).one()
     package.tailored_bullets = list(package.tailored_bullets) + ["Additional grounded Python API work."]
+    package.approval_status = "pending_review"
     isolated_session.commit()
+    _approve(isolated_session, job.public_id)
     second = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
     listed = list_resume_versions(isolated_session, job.public_id, TEST_USER_ID)
     assert [item.id for item in listed] == [second.id, first.id]
@@ -437,3 +460,331 @@ def test_old_schema_database_adds_resume_versions_without_losing_rows(
         assert jobs == 1
     finally:
         engine.dispose()
+
+
+def test_old_schema_gains_provenance_columns_without_losing_rows(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib
+
+    from backend.db.init_db import init_db
+
+    db_path = tmp_path / "old-provenance.sqlite"
+    engine = create_engine(f"sqlite:///{db_path}", future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE users ("
+                "id INTEGER PRIMARY KEY, email VARCHAR(255) NOT NULL, "
+                "hashed_password VARCHAR(255) NOT NULL, created_at DATETIME)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE jobs ("
+                "id INTEGER PRIMARY KEY, public_id VARCHAR(64), title VARCHAR(255) NOT NULL, "
+                "company VARCHAR(255) NOT NULL, location VARCHAR(255), salary VARCHAR(128), "
+                "url TEXT NOT NULL, description TEXT NOT NULL, source VARCHAR(64) NOT NULL, "
+                "date_posted VARCHAR(32), date_scraped DATETIME, ats VARCHAR(64), "
+                "status VARCHAR(64), verification_notes TEXT, verified_at DATETIME)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE application_packages ("
+                "id INTEGER PRIMARY KEY, job_id INTEGER, user_id INTEGER, candidate_id INTEGER, "
+                "tailored_bullets JSON, cover_letter_draft TEXT, recruiter_message TEXT, "
+                "source_traceability_notes JSON, approval_status VARCHAR(32), "
+                "eligibility_confirmed BOOLEAN, eligibility_notes TEXT, decision_notes TEXT, "
+                "grounded BOOLEAN DEFAULT 0, created_at DATETIME)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE resume_versions ("
+                "id INTEGER PRIMARY KEY, public_id VARCHAR(64) NOT NULL, job_id INTEGER NOT NULL, "
+                "user_id INTEGER NOT NULL, candidate_id INTEGER NOT NULL, version_number INTEGER NOT NULL, "
+                "tailored_bullets JSON, source_traceability_notes JSON, content_hash VARCHAR(64) NOT NULL, "
+                "created_at DATETIME)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO users (email, hashed_password, created_at) "
+                "VALUES ('legacy@example.com', 'x', '2026-01-01T00:00:00')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO jobs (public_id, title, company, url, description, source, status) "
+                "VALUES ('legacy-job', 'Intern', 'Acme', 'https://example.com/legacy', 'desc', 'manual', 'verified')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO application_packages "
+                "(job_id, user_id, candidate_id, tailored_bullets, source_traceability_notes, "
+                "approval_status, grounded) VALUES (1, 1, 1, '[]', '[]', 'pending_review', 1)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO resume_versions "
+                "(public_id, job_id, user_id, candidate_id, version_number, tailored_bullets, "
+                "source_traceability_notes, content_hash) "
+                "VALUES ('rv-legacy', 1, 1, 1, 1, '[]', '[]', 'abc')"
+            )
+        )
+    init_db_module = importlib.import_module("backend.db.init_db")
+    monkeypatch.setattr(init_db_module, "engine", engine)
+    try:
+        init_db()
+        inspector = inspect(engine)
+        package_cols = {col["name"] for col in inspector.get_columns("application_packages")}
+        version_cols = {col["name"] for col in inspector.get_columns("resume_versions")}
+        assert "candidate_profile_fingerprint" in package_cols
+        assert "resume_input_snapshot" in version_cols
+        with engine.connect() as conn:
+            packages = conn.execute(text("SELECT count(*) FROM application_packages")).scalar()
+            versions = conn.execute(text("SELECT count(*) FROM resume_versions")).scalar()
+            users = conn.execute(text("SELECT count(*) FROM users")).scalar()
+        assert packages == 1
+        assert versions == 1
+        assert users == 1
+    finally:
+        engine.dispose()
+
+
+def _groundable_profile(*, name: str, email: str, extra_skill: str | None = None) -> CandidateProfile:
+    skills = ["Python", "SQL"]
+    if extra_skill:
+        skills = [*skills, extra_skill]
+    return CandidateProfile(
+        name=name,
+        email=email,
+        phone="555-0142",
+        skills=skills,
+        projects=[
+            {
+                "name": "Campus Planner",
+                "description": "Python API for campus events.",
+                "technologies": ["Python", "FastAPI"],
+                "url": None,
+            }
+        ],
+        experience=[
+            {
+                "title": "Software Engineering Intern",
+                "company": "Northstar Labs",
+                "start_date": "2025-05",
+                "end_date": "2025-08",
+                "highlights": ["Reduced p95 latency on search endpoints by 28%."],
+            }
+        ],
+        education=[
+            {
+                "institution": "State University",
+                "degree": "B.S.",
+                "field": "Computer Science",
+                "graduation_year": "2027",
+            }
+        ],
+        certifications=[],
+        strengths=["Backend APIs"],
+        evidence_links=[],
+    )
+
+
+def _stamp_sensitive_preferences(session, *, legal_name: str, linkedin_url: str) -> None:
+    pref = session.query(TargetPreference).filter_by(user_id=TEST_USER_ID).one()
+    pref.salary_min = 135000
+    pref.work_authorization = "US Citizen"
+    pref.gender = "prefer_not_to_say"
+    pref.race_ethnicity = "Decline to answer"
+    pref.veteran_status = "I am not a veteran"
+    pref.disability_status = "No"
+    pref.legal_name = legal_name
+    pref.linkedin_url = linkedin_url
+    pref.github_url = "https://github.com/example-user"
+    pref.portfolio_url = "https://example.com/portfolio"
+    session.commit()
+
+
+_FORBIDDEN_PUBLIC_KEYS = (
+    "content_hash",
+    "candidate_id",
+    "candidate_profile_fingerprint",
+    "resume_input_snapshot",
+    "approved_materials_hash",
+    "user_id",
+)
+
+
+def _assert_public_payload_is_safe(payload: dict, row: ResumeVersionRecord, caplog: pytest.LogCaptureFixture) -> None:
+    dumped = json.dumps(payload)
+    for key in _FORBIDDEN_PUBLIC_KEYS:
+        assert key not in payload
+        assert key not in dumped
+    assert row.content_hash not in dumped
+    snapshot = row.resume_input_snapshot or {}
+    fingerprint = getattr(row, "content_hash", "")
+    assert fingerprint not in dumped or payload.get("id") == fingerprint
+    assert "salary_min" not in dumped
+    assert "work_authorization" not in dumped
+    assert "prefer_not_to_say" not in dumped
+    assert "Decline to answer" not in dumped
+    assert snapshot.get("email", "missing-email") not in dumped
+    logs = caplog.text
+    assert row.content_hash not in logs
+    if getattr(row, "candidate_id", None) is not None:
+        assert f"candidate_id={row.candidate_id}" not in logs
+    assert "resume_input_snapshot" not in logs
+    assert "candidate_profile_fingerprint" not in logs
+    assert "135000" not in logs
+    assert "prefer_not_to_say" not in logs
+
+
+def _approved_package_with_display_fields(session, *, public_id: str = "manual-abc123"):
+    job, candidate = seed_materials_prerequisites(session, public_id=public_id)
+    _stamp_sensitive_preferences(
+        session,
+        legal_name="Jordan Avery",
+        linkedin_url="https://linkedin.com/in/jordanavery",
+    )
+    insert_grounded_package(session, job, candidate=candidate)
+    _approve(session, public_id)
+    return job, candidate
+
+
+def test_same_row_profile_update_creates_new_version_not_reuse(isolated_session, caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    job, candidate_a = _approved_package_with_display_fields(isolated_session)
+    original_candidate_pk = candidate_a.id
+
+    version_one = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    assert version_one.version_number == 1
+    row_one = isolated_session.query(ResumeVersionRecord).filter_by(version_number=1).one()
+    snapshot_a = dict(row_one.resume_input_snapshot)
+    assert snapshot_a["name"] == "Jordan Avery"
+    assert "salary_min" not in snapshot_a
+    assert "gender" not in snapshot_a
+    assert "work_authorization" not in snapshot_a
+    assert snapshot_a["legal_name"] == "Jordan Avery"
+    original_bullets = list(version_one.tailored_bullets)
+    original_notes = list(version_one.source_traceability_notes)
+
+    persist_candidate_profile(
+        _groundable_profile(name="Riley Chen", email="riley@example.com", extra_skill="Kubernetes"),
+        isolated_session,
+        TEST_USER_ID,
+    )
+    isolated_session.expire_all()
+    current = isolated_session.query(Candidate).filter(Candidate.user_id == TEST_USER_ID).one()
+    assert current.id == original_candidate_pk
+    assert isolated_session.query(Candidate).count() == 1
+    assert current.name == "Riley Chen"
+
+    with pytest.raises(ResumeVersionConflictError):
+        create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    assert isolated_session.query(ResumeVersionRecord).count() == 1
+
+    discard_stale_reviewed_package(isolated_session, job.public_id, TEST_USER_ID)
+    insert_score(isolated_session, job, current)
+    generate_grounded_application_materials(
+        isolated_session, job.public_id, TEST_USER_ID, generator=fake_grounded_generator
+    )
+    _approve(isolated_session, job.public_id)
+    package = isolated_session.query(ApplicationPackageRecord).one()
+    assert list(package.tailored_bullets) == original_bullets
+    assert list(package.source_traceability_notes) == original_notes
+
+    version_two = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    assert version_two.version_number == 2
+    assert version_two.id != version_one.id
+    assert version_two.tailored_bullets == original_bullets
+    assert isolated_session.query(ResumeVersionRecord).count() == 2
+
+    repeat = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    assert repeat.id == version_two.id
+    assert isolated_session.query(ResumeVersionRecord).count() == 2
+
+    persist_candidate_profile(
+        _groundable_profile(name="Casey Ng", email="casey@example.com"),
+        isolated_session,
+        TEST_USER_ID,
+    )
+    isolated_session.expire_all()
+    reloaded_one = isolated_session.query(ResumeVersionRecord).filter_by(version_number=1).one()
+    assert reloaded_one.resume_input_snapshot["name"] == "Jordan Avery"
+    assert reloaded_one.tailored_bullets == original_bullets
+
+    payload = version_two.model_dump(mode="json")
+    row_two = isolated_session.query(ResumeVersionRecord).filter_by(version_number=2).one()
+    _assert_public_payload_is_safe(payload, row_two, caplog)
+
+
+def test_legacy_package_without_fingerprint_cannot_create_version(isolated_session) -> None:
+    job, candidate = seed_materials_prerequisites(isolated_session)
+    record = insert_grounded_package(isolated_session, job, candidate=candidate)
+    record.candidate_profile_fingerprint = None
+    isolated_session.commit()
+    with pytest.raises(Exception):
+        _approve(isolated_session, job.public_id)
+    record.approval_status = "approved"
+    record.eligibility_confirmed = True
+    isolated_session.commit()
+    with pytest.raises(ResumeVersionConflictError):
+        create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    assert isolated_session.query(ResumeVersionRecord).count() == 0
+
+
+def test_sensitive_preference_change_does_not_create_new_version(isolated_session) -> None:
+    job, _ = _approved_package_with_display_fields(isolated_session)
+    first = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    pref = isolated_session.query(TargetPreference).filter_by(user_id=TEST_USER_ID).one()
+    pref.salary_min = 180000
+    pref.gender = "male"
+    isolated_session.commit()
+    second = create_resume_version(isolated_session, job.public_id, TEST_USER_ID)
+    assert first.id == second.id
+    assert isolated_session.query(ResumeVersionRecord).count() == 1
+
+
+def test_resume_input_hash_is_order_independent() -> None:
+    left = {"skills": ["Python"], "projects": [{"name": "A", "url": None}]}
+    right = {"projects": [{"url": None, "name": "A"}], "skills": ["Python"]}
+    assert hash_resume_input_snapshot(left) == hash_resume_input_snapshot(right)
+    assert build_resume_input_snapshot.__name__ == "build_resume_input_snapshot"
+
+
+def test_http_create_omits_provenance_fields(isolated_client, caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    client, SessionLocal = isolated_client
+    _seed_approved_for_client(SessionLocal, user_id=client.test_user_id)
+    created = client.post("/api/jobs/manual-abc123/resume-versions")
+    assert created.status_code == 201
+    listed = client.get("/api/jobs/manual-abc123/resume-versions")
+    fetched = client.get(f"/api/jobs/manual-abc123/resume-versions/{created.json()['id']}")
+    assert listed.status_code == 200
+    assert fetched.status_code == 200
+    with SessionLocal() as db:
+        row = db.query(ResumeVersionRecord).one()
+        _assert_public_payload_is_safe(created.json(), row, caplog)
+        _assert_public_payload_is_safe(fetched.json(), row, caplog)
+        _assert_public_payload_is_safe(listed.json()[0], row, caplog)
+
+
+def test_stale_same_row_generate_requires_discard(isolated_session) -> None:
+    job, _ = _approved_package(isolated_session)
+    persist_candidate_profile(
+        _groundable_profile(name="Riley Chen", email="riley@example.com", extra_skill="Kubernetes"),
+        isolated_session,
+        TEST_USER_ID,
+    )
+    with pytest.raises(StaleApplicationMaterialsError):
+        generate_grounded_application_materials(
+            isolated_session, job.public_id, TEST_USER_ID, generator=fake_grounded_generator
+        )
+    assert isolated_session.query(ApplicationPackageRecord).count() == 1
+    discard_stale_reviewed_package(isolated_session, job.public_id, TEST_USER_ID)
+    assert isolated_session.query(ApplicationPackageRecord).count() == 0

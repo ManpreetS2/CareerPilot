@@ -164,6 +164,8 @@ def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolat
     committed by the time this session's insert runs — it must recover the
     winner's data instead of raising or creating a duplicate row."""
     job, candidate = seed_materials_prerequisites(isolated_session)
+    from backend.services.candidate_provenance import fingerprint_for_candidate
+
     winner = ApplicationPackageRecord(
         job_id=job.id,
         user_id=TEST_USER_ID,
@@ -174,6 +176,9 @@ def test_generate_materials_recovers_from_a_lost_race_instead_of_erroring(isolat
         source_traceability_notes=["winner note"],
         approval_status="pending_review",
         grounded=True,
+        candidate_profile_fingerprint=fingerprint_for_candidate(
+            isolated_session, candidate, TEST_USER_ID
+        ),
     )
     isolated_session.add(winner)
     isolated_session.commit()

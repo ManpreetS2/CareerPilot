@@ -1461,6 +1461,23 @@ def test_candidate_persistence_works(isolated_session: Session) -> None:
     assert "Python" in row.skills
 
 
+def test_persist_candidate_profile_updates_the_same_row(isolated_session: Session) -> None:
+    db = isolated_session
+    profile, _ = validate_and_ground_profile(_grounded_llm_payload(), SAMPLE_RESUME_TEXT)
+    stored = persist_candidate_profile(profile, db, TEST_USER_ID)
+    row_id = db.query(Candidate).one().id
+    updated = profile.model_copy(deep=True)
+    updated.email = "alex.updated@example.com"
+    updated.skills = [*profile.skills, "Kubernetes"]
+    stored_again = persist_candidate_profile(updated, db, TEST_USER_ID)
+    assert db.query(Candidate).count() == 1
+    row = db.query(Candidate).one()
+    assert row.id == row_id
+    assert stored_again.id == stored.id
+    assert row.email == "alex.updated@example.com"
+    assert "Kubernetes" in row.skills
+
+
 def test_failed_extraction_creates_no_candidate_row(isolated_session: Session) -> None:
     db = isolated_session
     before = db.query(Candidate).count()

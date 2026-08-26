@@ -31,6 +31,10 @@ from backend.services.application_materials_agent import (
     is_grounded_package_record,
     is_package_ready_for_apply,
 )
+from backend.services.candidate_provenance import (
+    hash_approved_materials,
+    package_matches_current_resume_profile,
+)
 from backend.services.llm_client import (
     LLMConfigurationError,
     LLMEmptyResponseError,
@@ -93,7 +97,10 @@ def get_stored_application_package(db: Session, job_id: str, user_id: int) -> Ap
     if record is None or not is_grounded_package_record(record):
         raise StoredMaterialsNotFoundError()
     current = _get_current_candidate(db, user_id)
-    if current is not None and record.candidate_id != current.id:
+    if current is not None and (
+        record.candidate_id != current.id
+        or not package_matches_current_resume_profile(db, record, user_id)
+    ):
         reviewed = record.approval_status in {"approved", "edit_requested"}
         raise StaleApplicationMaterialsError(reviewed=reviewed)
     return _record_to_package(record, job_id)
@@ -154,10 +161,16 @@ def discard_stale_reviewed_package(db: Session, job_id: str, user_id: int) -> di
     job = _get_job_record(db, job_id)
     record = _owned_package(db, job, user_id)
     current = _get_current_candidate(db, user_id)
+    matches_current = (
+        record is not None
+        and current is not None
+        and record.candidate_id == current.id
+        and package_matches_current_resume_profile(db, record, user_id)
+    )
     if (
         record is None
         or current is None
-        or record.candidate_id == current.id
+        or matches_current
         or record.approval_status not in {"approved", "edit_requested"}
     ):
         raise HTTPException(
@@ -197,6 +210,11 @@ def apply_approval(db: Session, job_id: str, user_id: int, request: ApprovalRequ
     record.approval_status = request.decision
     if request.decision == "approved":
         record.eligibility_confirmed = True
+        record.approved_materials_hash = hash_approved_materials(
+            record.tailored_bullets, record.source_traceability_notes
+        )
+    else:
+        record.approved_materials_hash = None
     provided = request.model_fields_set
     if "eligibility_notes" in provided:
         record.eligibility_notes = request.eligibility_notes or None

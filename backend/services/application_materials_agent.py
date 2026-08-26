@@ -71,6 +71,10 @@ from backend.services.llm_provider_sequence import (
     uses_injected_generator,
 )
 from backend.services.llm_structured_schemas import application_materials_llm_schema
+from backend.services.candidate_provenance import (
+    current_resume_input_fingerprint,
+    package_matches_current_resume_profile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1421,6 +1425,8 @@ def is_package_ready_for_apply(
     current_candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     if current_candidate is None or package.candidate_id != current_candidate.id:
         return False
+    if not package_matches_current_resume_profile(db, package, user_id):
+        return False
     return True
 
 
@@ -1513,7 +1519,12 @@ def _persist_grounded_draft(
     existing: ApplicationPackageRecord | None = None,
 ) -> ApplicationPackageRecord:
     payload = draft_to_persistence_payload(draft)
-    same_candidate = existing is not None and existing.candidate_id == context.candidate_pk
+    fingerprint = current_resume_input_fingerprint(db, context.user_id)
+    same_candidate = (
+        existing is not None
+        and existing.candidate_id == context.candidate_pk
+        and package_matches_current_resume_profile(db, existing, context.user_id)
+    )
     if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
         if same_candidate:
             raise ApplicationMaterialsConflictError()
@@ -1529,6 +1540,8 @@ def _persist_grounded_draft(
         existing.source_traceability_notes = list(payload["source_traceability_notes"])
         existing.approval_status = "pending_review"
         existing.grounded = True
+        existing.candidate_profile_fingerprint = fingerprint
+        existing.approved_materials_hash = None
         record = existing
     else:
         record = ApplicationPackageRecord(
@@ -1541,6 +1554,8 @@ def _persist_grounded_draft(
             source_traceability_notes=list(payload["source_traceability_notes"]),
             approval_status="pending_review",
             grounded=True,
+            candidate_profile_fingerprint=fingerprint,
+            approved_materials_hash=None,
         )
         db.add(record)
     try:
@@ -1559,6 +1574,7 @@ def _persist_grounded_draft(
             winner is not None
             and is_grounded_package_record(winner)
             and winner.candidate_id == context.candidate_pk
+            and package_matches_current_resume_profile(db, winner, context.user_id)
             and winner.user_id == context.user_id
         ):
             logger.info(
@@ -1597,7 +1613,11 @@ def generate_grounded_application_materials(
         )
         .first()
     )
-    same_candidate = existing is not None and existing.candidate_id == context.candidate_pk
+    same_candidate = (
+        existing is not None
+        and existing.candidate_id == context.candidate_pk
+        and package_matches_current_resume_profile(db, existing, user_id)
+    )
     if existing is not None and existing.approval_status in _PROTECTED_APPROVAL_STATUSES:
         if same_candidate and is_grounded_package_record(existing):
             logger.info("application_materials reused protected_package job_pk=%s", context.job_pk)

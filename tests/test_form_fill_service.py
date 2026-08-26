@@ -31,6 +31,7 @@ from backend.db.models import (
     TargetPreference,
 )
 from backend.services import form_fill_service
+from backend.services.candidate_provenance import fingerprint_for_candidate
 from backend.services.form_fill_service import (
     _build_candidate_fields,
     _categorize_urls,
@@ -396,6 +397,9 @@ def _approved_package(
     grounded-package gate (is_package_ready_for_apply) pass grounded=False
     to build the exact "ungrounded but somehow approved" legacy row the
     gate exists to reject."""
+    fingerprint = None
+    if candidate is not None:
+        fingerprint = fingerprint_for_candidate(session, candidate, TEST_USER_ID)
     record = ApplicationPackageRecord(
         job_id=job.id,
         user_id=TEST_USER_ID,
@@ -407,6 +411,7 @@ def _approved_package(
         approval_status="approved",
         eligibility_confirmed=True,
         grounded=grounded,
+        candidate_profile_fingerprint=fingerprint,
     )
     session.add(record)
     session.commit()

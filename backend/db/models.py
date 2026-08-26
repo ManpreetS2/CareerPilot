@@ -196,6 +196,11 @@ class ApplicationPackageRecord(Base):
     eligibility_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     decision_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     grounded: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Private SHA-256 of the resume-input snapshot at grounded generation.
+    # candidate_id equality is not provenance: re-upload updates the same row.
+    candidate_profile_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Private hash of bullets+notes stamped only by explicit approval.
+    approved_materials_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -209,6 +214,9 @@ class ResumeVersionRecord(Base):
     One mutable ApplicationPackageRecord remains the working draft. Resume
     versions are append-only audit records so a later exporter can render a
     specific approved snapshot without racing package edits.
+
+    Identity is the content hash of the private resume-input snapshot plus
+    tailored bullets and source-traceability notes — not candidate_id.
     """
 
     __tablename__ = "resume_versions"
@@ -241,6 +249,8 @@ class ResumeVersionRecord(Base):
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     tailored_bullets: Mapped[list] = mapped_column(JSON, default=list)
     source_traceability_notes: Mapped[list] = mapped_column(JSON, default=list)
+    # Private immutable resume-input snapshot. Never exposed on ResumeVersion.
+    resume_input_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)

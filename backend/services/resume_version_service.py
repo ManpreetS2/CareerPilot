@@ -14,8 +14,6 @@ Future boundary (not implemented here):
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -26,6 +24,13 @@ from sqlalchemy.orm import Session
 from backend.db.models import ApplicationPackageRecord, Candidate, JobRecord, ResumeVersionRecord
 from backend.schemas.schemas import ResumeVersion
 from backend.services.application_materials_agent import is_package_ready_for_apply
+from backend.services.candidate_provenance import (
+    build_resume_input_snapshot,
+    canonical_string_list,
+    hash_approved_materials,
+    package_matches_current_resume_profile,
+    version_content_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,19 +48,6 @@ class ResumeVersionConflictError(Exception):
 class ResumeVersionPersistenceError(Exception):
     def __init__(self) -> None:
         super().__init__("Unable to save resume version.")
-
-
-def _snapshot_list(values: list | None) -> list[str]:
-    return [str(item) for item in json.loads(json.dumps(list(values or [])))]
-
-
-def _content_hash(bullets: list[str], notes: list[str]) -> str:
-    payload = {
-        "source_traceability_notes": notes,
-        "tailored_bullets": bullets,
-    }
-    canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _load_job(db: Session, job_public_id: str) -> JobRecord:
@@ -140,14 +132,21 @@ def save_resume_version(db: Session, job_public_id: str, user_id: int) -> tuple[
         raise ResumeVersionNotFoundError("Approved application materials were not found.")
     if package.approval_status != "approved" or not is_package_ready_for_apply(db, package, user_id):
         raise ResumeVersionConflictError()
-
-    candidate = _current_candidate(db, user_id)
-    if candidate is None or package.candidate_id != candidate.id:
+    if not package_matches_current_resume_profile(db, package, user_id):
         raise ResumeVersionConflictError()
 
-    bullets = _snapshot_list(package.tailored_bullets)
-    notes = _snapshot_list(package.source_traceability_notes)
-    digest = _content_hash(bullets, notes)
+    candidate = _current_candidate(db, user_id)
+    if candidate is None:
+        raise ResumeVersionConflictError()
+
+    bullets = canonical_string_list(package.tailored_bullets)
+    notes = canonical_string_list(package.source_traceability_notes)
+    approved_hash = getattr(package, "approved_materials_hash", None)
+    if not approved_hash or approved_hash != hash_approved_materials(bullets, notes):
+        raise ResumeVersionConflictError()
+
+    snapshot = build_resume_input_snapshot(db, candidate, user_id)
+    digest = version_content_hash(snapshot, bullets, notes)
 
     existing = (
         _owned_version_query(db, job, user_id)
@@ -175,6 +174,7 @@ def save_resume_version(db: Session, job_public_id: str, user_id: int) -> tuple[
         version_number=next_number,
         tailored_bullets=bullets,
         source_traceability_notes=notes,
+        resume_input_snapshot=snapshot,
         content_hash=digest,
     )
     db.add(record)
@@ -189,7 +189,7 @@ def save_resume_version(db: Session, job_public_id: str, user_id: int) -> tuple[
         )
         if raced is not None:
             return _record_to_schema(raced, job.public_id), False
-        logger.error("resume version persist failed job_pk=%s", job.id)
+        logger.error("resume version persist failed")
         raise ResumeVersionPersistenceError() from None
     db.refresh(record)
     return _record_to_schema(record, job.public_id), True

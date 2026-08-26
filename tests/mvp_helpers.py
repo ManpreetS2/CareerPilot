@@ -13,6 +13,7 @@ from backend.db.models import (
     TargetPreference,
     User,
 )
+from backend.services.candidate_provenance import fingerprint_for_candidate
 
 TEST_USER_ID = 1
 
@@ -220,6 +221,9 @@ def insert_grounded_package(
         candidate = session.query(Candidate).filter(Candidate.user_id == user_id).first()
     owner_id = candidate.user_id if candidate is not None and candidate.user_id is not None else user_id
     payload = json.loads(VALID_MATERIALS_JSON)
+    fingerprint = None
+    if candidate is not None:
+        fingerprint = fingerprint_for_candidate(session, candidate, owner_id)
     record = ApplicationPackageRecord(
         job_id=job.id,
         user_id=owner_id,
@@ -230,6 +234,7 @@ def insert_grounded_package(
         source_traceability_notes=payload["source_traceability_notes"],
         approval_status="pending_review",
         grounded=True,
+        candidate_profile_fingerprint=fingerprint,
     )
     session.add(record)
     session.commit()

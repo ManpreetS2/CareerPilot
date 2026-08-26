@@ -169,6 +169,33 @@ def test_get_rejects_package_from_previous_candidate(isolated_client) -> None:
     assert "acme" not in missing.json()["detail"].lower()
 
 
+def test_get_rejects_package_after_same_row_profile_update(isolated_client) -> None:
+    from backend.schemas.schemas import CandidateProfile
+    from backend.services.candidate_profile_agent import persist_candidate_profile
+
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job, first = seed_materials_prerequisites(db)
+        insert_grounded_package(db, job, candidate=first)
+        original_id = first.id
+        persist_candidate_profile(
+            CandidateProfile(
+                name="Riley Chen",
+                email="riley@example.com",
+                skills=["Python", "SQL", "Kubernetes"],
+                projects=list(first.projects or []),
+                experience=list(first.experience or []),
+                education=list(first.education or []),
+            ),
+            db,
+            first.user_id,
+        )
+        assert db.query(Candidate).filter_by(user_id=first.user_id).one().id == original_id
+    missing = client.get("/api/jobs/manual-abc123/materials")
+    assert missing.status_code == 409
+    assert "previous candidate" in missing.json()["detail"].lower()
+
+
 def test_refresh_reuses_current_candidate_package_without_provider(isolated_session) -> None:
     seed_materials_prerequisites(isolated_session)
     first = get_or_generate_application_package(
