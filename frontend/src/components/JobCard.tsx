@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { ArrowUpRight } from "lucide-react";
 import type { Job, MatchScore } from "../lib/types";
 import { MatchBadge } from "./MatchBadge";
+import { scoutedTimeAgo, SourceBadge } from "./SourceBadge";
 import { StatusBadge } from "./StatusBadge";
 
 function companyInitial(company: string) {
@@ -17,6 +18,7 @@ export function JobCard({
 }) {
   const jobId = job.id ?? "";
   const skillChips = match?.matched_skills?.slice(0, 4) ?? [];
+  const seenAgo = scoutedTimeAgo(job.date_scraped);
 
   return (
     <article className="card p-5 transition hover:-translate-y-0.5 hover:border-accent-400/50">
@@ -56,7 +58,8 @@ export function JobCard({
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={job.status} />
-          <span className="text-xs uppercase tracking-wide text-ink-500">{job.source}</span>
+          <SourceBadge source={job.source} />
+          {seenAgo ? <span className="text-xs text-ink-500">{seenAgo}</span> : null}
         </div>
         {jobId ? (
           <Link to={`/jobs/${jobId}`} className="btn-ghost px-2 py-1.5 text-accent-700 dark:text-accent-300">
