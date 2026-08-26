@@ -1,8 +1,24 @@
-# CareerPilot AI
+# CareerPilot
 
-AI-assisted job search and application copilot.
+Grounded job search. Human-approved applications.
 
-CareerPilot helps a candidate move from a resume to ranked, verified jobs and human-approved application materials. These are logical modules inside **one application**, not separately deployed microservices or autonomous agents.
+CareerPilot helps a candidate move from a resume to ranked, verified jobs and human-approved application materials. These are logical modules inside **one application**, not separately deployed microservices or autonomous agents. CareerPilot never automatically submits an application.
+
+## Product destinations
+
+Primary web navigation is workflow-first:
+
+- Overview (`/dashboard`)
+- Discover (`/jobs`)
+- Analyze (`/jobs/:jobId`, or `/analyze` when no job is selected)
+- Prepare (`/jobs/:jobId/prepare`, or `/prepare` when no job is selected)
+- Track (`/track`; `/applications` is the same tracker)
+
+Supporting destinations: Profile, Resume, Settings.
+
+Analyze and Prepare stay contextual under a selected job. Interview Coach remains on Job Detail. Application Tracker is a first-class Track destination with Kanban and list/timeline views.
+
+Public routes: `/`, `/login`, `/signup`. New signup continues through `/onboarding`.
 
 ## MVP workflow
 
@@ -16,8 +32,8 @@ Resume
 → Ranked Jobs
 → Tailored Application Materials
 → Human Approval
+→ Immutable Resume Version
 → Assisted Application
-→ Application Tracker
 → Interview Preparation
 ```
 
@@ -26,19 +42,21 @@ Resume
 | Layer | Stack |
 | --- | --- |
 | Backend API | FastAPI + Uvicorn |
-| Frontend | React + TypeScript + Vite + Tailwind CSS |
+| Frontend | React + TypeScript + Vite + Tailwind CSS + customized shadcn/Radix primitives |
+| Data fetching | TanStack Query |
 | Database | SQLite via SQLAlchemy (`data/careerpilot.db`, gitignored) |
 | Schemas | Shared Pydantic models |
 | LLM | Thin `LLMClient` for Ollama, Gemini, Anthropic, and OpenAI. Candidate profile, Job Intelligence, application materials, and mock-interview answer feedback try providers in `LLM_PROVIDER_ORDER` (one provider at a time). Fit scoring stays deterministic. `DEFAULT_LLM_PROVIDER` is only the prompt harness default when `--provider` is omitted. |
-| Browser extension | Unpacked Chrome extension for Greenhouse/Lever autofill |
+| Browser extension | Unpacked Chrome extension with a side panel and approved Greenhouse/Lever autofill. It never submits. |
 
 ```
-CareerPilot_Ai/
+CareerPilot/
 ├── backend/              # FastAPI app, DB, schemas, services
 ├── frontend/             # React + Vite UI
 ├── browser-extension/    # Local Chrome extension (never submits)
 ├── tests/                # pytest (isolated in-memory SQLite)
 ├── scripts/              # Privacy-safe matrix runners and audits
+├── docs/                 # Product and developer-handoff notes
 ├── data/                 # SQLite file (gitignored)
 ├── logs/                 # runtime logs (gitignored)
 ├── .env.example
@@ -58,12 +76,18 @@ CareerPilot is an authenticated local product. Signup, login, logout, and `GET /
 - `COOKIE_SECURE` required when `APP_ENV=production`
 - Extension session header accepted only on the exact autofill route from the configured extension origin
 - `GET /api/profile` — read-only current candidate and latest preferences
-- Grounded candidate profile, job scout/verification/intelligence, fit scoring, materials, approval, assisted apply, tracker, and interview prep
+- Grounded candidate profile, job scout/verification/intelligence, fit scoring, materials, approval, assisted apply, tracker APIs, interview prep, and immutable resume versions
 - Application materials are generated from stored evidence, not a placeholder
 - Mock-interview answer feedback is ephemeral (not stored) and follows `LLM_PROVIDER_ORDER`
-- Tracker rows can store a user-set follow-up date; CareerPilot does not send automated notifications or reminders
+- Tracker rows can store a user-set follow-up date; CareerPilot does not send automated notifications or reminders. Track is a primary web destination (`/track`).
 
-Opening Jobs, Job Detail, Applications, or Application Detail never scores a job, extracts requirements, or generates materials by itself. Calculate Fit and Generate Materials stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation. Assisted Apply and the extension never submit forms.
+Opening Dashboard, Jobs, Job Detail, Prepare Application, Profile, Resume, or Settings never scores a job, extracts requirements, generates materials, approves, or creates a resume version by itself. Calculate Fit, Generate Materials, Prepare Interview, Approve, and Save Resume Version stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation. Assisted Apply and the extension never submit forms.
+
+Job discovery currently supports Greenhouse, Lever, Remotive, Adzuna, RemoteOK, and manual posting URLs. The Jobs workspace now uses a compact list plus desktop preview, internships/full-time/both title filter, and previous/next job navigation. Developer B still owns discovery, verification, ATS/form-fill, and the Chrome extension; see `docs/developer-b-ui-handoff.md`.
+
+PDF and DOCX export are **not** implemented. Do not expect download buttons.
+
+The Chrome extension provides a side panel and approved autofill for Greenhouse/Lever. Extension resume-file upload is not implemented. Unpacked real-Chrome visual verification remains Developer B’s lane and is not claimed complete here.
 
 **Legacy local data**
 
@@ -84,6 +108,8 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - Login rate limiting
 - Live-provider verification in CI
 - Automatic job application submission
+- PDF / DOCX resume export
+- Extension resume-file upload
 
 
 ## Privacy and safety
@@ -93,7 +119,7 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - Validation errors never echo submitted `input` values.
 - No candidate skill, employer, metric, or education claim may be invented without stored evidence.
 - Assisted apply and the browser extension **never click submit**. The human reviews and submits.
-- Page load for Jobs, Job Detail, Applications, Application Detail, Fit Score, and Interview Prep is read-only. Scoring and generation run only on an explicit user action.
+- Page load for Jobs, Job Detail, Prepare Application, Fit Score, Resume, and Interview Prep is read-only. Scoring and generation run only on an explicit user action.
 - Private records are user-scoped. Shared job titles may be visible to every signed-in user; scores, recommendations, packages, tracker state, approval, and interview evidence are not.
 
 ## Setup
@@ -180,7 +206,7 @@ The extension is not published. Load it unpacked:
 
 1. Start the backend (`uvicorn backend.main:app --reload`) and approve at least one Greenhouse or Lever application.
 2. Open `chrome://extensions`, enable Developer mode, and **Load unpacked** on `browser-extension/`.
-3. Open the real posting (or Lever `/apply` page) and click **Fill this page**.
+3. Open the extension side panel on a real posting (or Lever `/apply` page) and fill from approved materials.
 4. Review flagged fields yourself. The extension never submits.
 
 See `browser-extension/README.md` for selector and CSP details.
@@ -223,11 +249,12 @@ Frontend:
 
 ```bash
 cd frontend
+npm run test:run
 npm run typecheck
 npm run build
 ```
 
-CI (`.github/workflows/ci.yml`) runs pytest, frontend typecheck and production build, `git diff --check`, and the tracked-secret audit on Python 3.11 and Node.js 20. Playwright Chromium is installed for Form Fill fixture tests.
+CI (`.github/workflows/ci.yml`) runs pytest, the MVP browser workflow, frontend unit tests, frontend typecheck and production build, the browser-extension build, `git diff --check`, and the tracked-secret audit on Python 3.11 and Node.js 20. Playwright Chromium is installed for Form Fill fixture tests.
 
 Optional live LLM smoke test (not part of CI):
 
@@ -284,6 +311,9 @@ Developer B ownership remains: Job Scout, Job Verification, Form Fill, browser-e
 | `GET` | `/api/applications` | Tracker list (read-only) |
 | `GET`/`PATCH` | `/api/applications/{job_id}/tracking` | Explicit tracker updates, including optional follow-up date |
 | `GET` | `/api/dashboard/summary` | Real stored metrics |
+| `GET` | `/api/resume-versions` | Owner-scoped immutable resume version summaries |
+| `GET` | `/api/resume-versions/{version_id}` | Historical resume version detail (no hashes or raw snapshot) |
+| `GET`/`POST` | `/api/jobs/{job_id}/resume-versions` | Per-job list / explicit save |
 | `GET` | `/api/jobs/{job_id}/interview-prep` | Read-only stored prep |
 | `POST` | `/api/jobs/{job_id}/prepare-interview` | Deterministic baseline (explicit) |
 | `POST` | `/api/jobs/{job_id}/interview-prep/feedback` | Ephemeral mock-interview answer feedback (`LLM_PROVIDER_ORDER`) |

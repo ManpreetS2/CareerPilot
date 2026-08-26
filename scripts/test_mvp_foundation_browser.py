@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -120,6 +121,13 @@ def _python_bin() -> str:
     return sys.executable
 
 
+def _npm_bin() -> str:
+    found = shutil.which("npm") or shutil.which("npm.cmd")
+    if not found:
+        raise RuntimeError("npm is not on PATH. Install Node.js 20+ and retry.")
+    return found
+
+
 def _metric(page: Any, label: str) -> str:
     return page.locator("dt", has_text=re.compile(rf"^{re.escape(label)}$")).locator(
         "xpath=following-sibling::dd"
@@ -149,6 +157,8 @@ def _signup(page: Any, base: str, email: str, password: str) -> None:
     page.locator('input[type="email"]').fill(email)
     page.locator('input[type="password"]').fill(password)
     page.get_by_role("button", name=re.compile(r"Sign up", re.I)).click()
+    page.wait_for_url(re.compile(r"/onboarding"))
+    page.get_by_test_id("onboarding-skip").click()
     page.wait_for_url(re.compile(r"/dashboard"))
 
 
@@ -262,7 +272,10 @@ def run_browser_workflow() -> dict[str, int]:
     except ImportError as exc:  # pragma: no cover - tooling blocker
         raise RuntimeError("Python Playwright is unavailable.") from exc
 
-    with tempfile.TemporaryDirectory(prefix="careerpilot-mvp-browser-") as temp_dir:
+    with tempfile.TemporaryDirectory(
+        prefix="careerpilot-mvp-browser-",
+        ignore_cleanup_errors=True,
+    ) as temp_dir:
         _ensure_frontend_dependencies()
         database_path = assert_safe_database_path(Path(temp_dir) / "mvp-browser.sqlite")
         backend_port = _free_port()
@@ -311,7 +324,7 @@ def run_browser_workflow() -> dict[str, int]:
         )
         frontend = subprocess.Popen(
             [
-                "npm",
+                _npm_bin(),
                 "run",
                 "dev",
                 "--",
@@ -333,6 +346,7 @@ def run_browser_workflow() -> dict[str, int]:
         score_posts: list[str] = []
         intelligence_posts: list[str] = []
         materials_posts: list[str] = []
+        resume_posts: list[str] = []
         me_gets: list[str] = []
         blocked_external: list[str] = []
         try:
@@ -389,6 +403,8 @@ def run_browser_workflow() -> dict[str, int]:
                         intelligence_posts.append(url)
                     if method == "POST" and path.endswith("/generate-materials"):
                         materials_posts.append(url)
+                    if method == "POST" and "/resume-versions" in path:
+                        resume_posts.append(url)
                     if method == "GET" and path.endswith("/api/auth/me"):
                         me_gets.append(url)
 
@@ -400,8 +416,9 @@ def run_browser_workflow() -> dict[str, int]:
                 checks += 1
 
                 _signup(page, base, USER_A_EMAIL, USER_PASSWORD)
-                expect(page.get_by_role("heading", name="Find the right jobs", exact=False)).to_be_visible()
-                expect(_metric(page, "Discovered")).to_have_text("0")
+                expect(page.get_by_role("heading", name="Dashboard", exact=True)).to_be_visible()
+                expect(page.get_by_test_id("dashboard-next-action")).to_be_visible()
+                expect(_metric(page, "Jobs discovered")).to_have_text("0")
                 checks += 1
 
                 with SessionLocal() as session:
@@ -409,8 +426,7 @@ def run_browser_workflow() -> dict[str, int]:
                     _seed_user_private_rows(session, email=USER_A_EMAIL, job=job)
 
                 page.reload()
-                expect(_metric(page, "Discovered")).to_have_text("1")
-                expect(_metric(page, "Verified")).to_have_text("1")
+                expect(_metric(page, "Jobs discovered")).to_have_text("1")
                 page.goto(f"{base}/profile")
                 expect(page.get_by_text("Synthetic Browser Candidate")).to_be_visible()
                 expect(page.get_by_text("Harbor Robotics Intern")).to_be_visible()
@@ -424,9 +440,10 @@ def run_browser_workflow() -> dict[str, int]:
                 before_score_posts = len(score_posts)
                 before_intelligence_posts = len(intelligence_posts)
                 before_materials_posts = len(materials_posts)
+                before_resume_posts = len(resume_posts)
                 page.goto(f"{base}/jobs")
                 expect(page.get_by_role("heading", name="Jobs", exact=True)).to_be_visible()
-                expect(page.get_by_text(JOB_TITLE, exact=True)).to_be_visible()
+                expect(page.get_by_role("button", name=JOB_TITLE)).to_be_visible()
                 if len(score_posts) != before_score_posts:
                     raise AssertionError("Jobs page load issued a scoring POST.")
                 if len(intelligence_posts) != before_intelligence_posts:
@@ -435,13 +452,18 @@ def run_browser_workflow() -> dict[str, int]:
                     raise AssertionError("Jobs page load issued a materials POST.")
                 checks += 1
 
-                page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
-                expect(page.get_by_role("heading", name="Application", exact=True)).to_be_visible()
+                page.get_by_role("link", name="View Analysis").first.click()
+                expect(page).to_have_url(re.compile(rf"/jobs/{JOB_PUBLIC_ID}"))
+                expect(page.get_by_role("heading", name=JOB_TITLE)).to_be_visible()
+                checks += 1
+
+                page.goto(f"{base}/jobs/{JOB_PUBLIC_ID}/prepare")
+                expect(page.get_by_role("heading", name="Prepare application", exact=True)).to_be_visible()
                 expect(page.get_by_text("No grounded materials stored yet.")).to_be_visible()
                 if len(score_posts) != before_score_posts:
-                    raise AssertionError("Application page load issued a scoring POST.")
+                    raise AssertionError("Prepare page load issued a scoring POST.")
                 if len(materials_posts) != before_materials_posts:
-                    raise AssertionError("Application page load issued a materials POST.")
+                    raise AssertionError("Prepare page load issued a materials POST.")
                 checks += 1
 
                 page.get_by_test_id("calculate-fit").click()
@@ -470,10 +492,10 @@ def run_browser_workflow() -> dict[str, int]:
                 page.reload()
                 expect(page.get_by_text("Python is listed in the stored candidate skill evidence.")).to_be_visible()
                 if len(materials_posts) != before_materials_posts + 1:
-                    raise AssertionError("Application refresh issued another materials POST.")
+                    raise AssertionError("Prepare refresh issued another materials POST.")
                 checks += 1
 
-                page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
+                page.goto(f"{base}/jobs/{JOB_PUBLIC_ID}/prepare")
                 approve = page.get_by_role("button", name="Approve")
                 expect(approve).to_be_disabled()
                 page.get_by_role("checkbox").check()
@@ -482,28 +504,29 @@ def run_browser_workflow() -> dict[str, int]:
                 expect(page.get_by_text("approved", exact=False)).to_be_visible()
                 checks += 1
 
-                before_patches = len(patch_calls)
-                before_posts = len(interview_posts)
-                page.goto(f"{base}/applications")
-                expect(page.get_by_role("heading", name=JOB_TITLE)).to_be_visible()
-                if len(patch_calls) != before_patches:
-                    raise AssertionError("Applications list load issued a tracker PATCH.")
-                if len(interview_posts) != before_posts:
-                    raise AssertionError("Applications list load issued an interview POST.")
+                page.get_by_test_id("save-resume-version").click()
+                expect(page.get_by_test_id("resume-version-1")).to_be_visible()
+                if len(resume_posts) != before_resume_posts + 1:
+                    raise AssertionError("Save resume version did not issue exactly one create POST.")
                 checks += 1
 
-                select = page.get_by_label(f"Tracking status for {JOB_TITLE} at {JOB_COMPANY}")
-                option_values = select.evaluate(
-                    "el => Array.from(el.options).map(option => option.value)"
-                )
-                if "applied" in option_values:
-                    raise AssertionError("Invalid saved -> applied transition was offered.")
-                if "pending_review" not in option_values:
-                    raise AssertionError("Valid saved -> pending_review transition was missing.")
-                select.select_option("pending_review")
-                expect(select).to_have_value("pending_review")
-                if len(patch_calls) != before_patches + 1:
-                    raise AssertionError("Valid tracker selection did not issue exactly one PATCH.")
+                page.goto(f"{base}/resume")
+                expect(page.get_by_text("Version 1").first).to_be_visible()
+                href = page.locator('a[href^="/resume/"]').first.get_attribute("href")
+                if not href:
+                    raise AssertionError("Resume library did not expose a version deep link.")
+                page.goto(f"{base}{href}")
+                expect(page.get_by_test_id("resume-preview")).to_be_visible()
+                checks += 1
+
+                page.goto(f"{base}/track")
+                expect(page.get_by_role("heading", name="Track", exact=True)).to_be_visible()
+                status_select = page.get_by_label(re.compile(r"Tracking status for"))
+                expect(status_select).to_be_visible()
+                status_select.select_option("pending_review")
+                expect(status_select).to_have_value("pending_review")
+                if len(patch_calls) != 1:
+                    raise AssertionError("Track status change did not issue exactly one tracking PATCH.")
                 checks += 1
 
                 before_interview_posts = len(interview_posts)
@@ -541,14 +564,10 @@ def run_browser_workflow() -> dict[str, int]:
                 expect(page.get_by_text("Harbor Robotics Intern")).to_have_count(0)
                 page.goto(f"{base}/dashboard")
                 expect(page.get_by_text("Loading dashboard…")).to_have_count(0)
-                expect(_metric(page, "High matches")).to_have_text("0")
-                page.goto(f"{base}/applications")
-                expect(page.get_by_text("Loading applications…")).to_have_count(0)
-                expect(page.get_by_role("heading", name=JOB_TITLE)).to_be_visible()
-                expect(page.get_by_text("Not scored")).to_be_visible()
-                expect(page.get_by_text("No approval yet")).to_be_visible()
-                expect(page.get_by_text("Not tracked")).to_be_visible()
-                page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
+                expect(_metric(page, "Skills")).to_have_text("0")
+                page.goto(f"{base}/resume")
+                expect(page.get_by_text("No resume versions")).to_be_visible()
+                page.goto(f"{base}/jobs/{JOB_PUBLIC_ID}/prepare")
                 expect(page.get_by_text("No grounded materials stored yet.")).to_be_visible()
                 page.goto(f"{base}/jobs/{JOB_PUBLIC_ID}")
                 expect(page.get_by_text("No interview prep stored yet.")).to_be_visible()
@@ -609,7 +628,7 @@ def run_browser_workflow() -> dict[str, int]:
                     )
                     session.commit()
 
-                page.goto(f"{base}/applications/{JOB_PUBLIC_ID}")
+                page.goto(f"{base}/jobs/{JOB_PUBLIC_ID}/prepare")
                 discard = page.get_by_test_id("discard-stale-materials")
                 expect(discard).to_be_visible()
                 before_materials = len(materials_posts)

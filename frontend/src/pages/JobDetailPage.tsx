@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ExternalLink, ShieldCheck } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, ShieldCheck } from "lucide-react";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { FitScorePanel } from "../components/FitScorePanel";
 import { InterviewPrepPanel } from "../components/InterviewPrepPanel";
@@ -9,6 +9,7 @@ import { LoadingState } from "../components/LoadingState";
 import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { api, ApiClientError } from "../lib/api";
+import { topMatchPercentileLabel } from "../lib/match-percentile";
 import { saveSelectedJobId } from "../lib/session";
 import type { InterviewPrep, Job, JobIntelligence, MatchScore } from "../lib/types";
 
@@ -34,6 +35,12 @@ export function JobDetailPage() {
   const scoringRequest = useRef(0);
   const extractionInFlight = useRef(false);
   const intelligenceRequest = useRef(0);
+  const [neighbors, setNeighbors] = useState<{ prev: string | null; next: string | null }>({
+    prev: null,
+    next: null,
+  });
+  const [percentile, setPercentile] = useState<string | null>(null);
+  const storedScoreValues = useRef<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +62,8 @@ export function JobDetailPage() {
       setInterviewPrep(null);
       setInterviewError(null);
       setInterviewLoading(true);
+      setPercentile(null);
+      setNeighbors({ prev: null, next: null });
       try {
         const nextJob = await api.getJob(jobId);
         if (cancelled) return;
@@ -73,9 +82,37 @@ export function JobDetailPage() {
         } finally {
           if (!cancelled) setIntelligenceLoading(false);
         }
+        if (nextJob.id) saveSelectedJobId(nextJob.id);
+        try {
+          const [jobs, storedScores] = await Promise.all([api.getJobs(), api.getStoredScores()]);
+          if (cancelled) return;
+          const ranked = [...jobs].sort((a, b) => {
+            const as = a.id ? storedScores.find((score) => score.job_id === a.id)?.overall_score ?? -1 : -1;
+            const bs = b.id ? storedScores.find((score) => score.job_id === b.id)?.overall_score ?? -1 : -1;
+            return bs - as;
+          });
+          const ids = ranked.map((item) => item.id).filter((id): id is string => Boolean(id));
+          const index = ids.indexOf(jobId);
+          storedScoreValues.current = Object.fromEntries(
+            storedScores
+              .filter((score) => score.job_id)
+              .map((score) => [score.job_id as string, score.overall_score]),
+          );
+          setNeighbors({
+            prev: index > 0 ? ids[index - 1] ?? null : null,
+            next: index >= 0 && index < ids.length - 1 ? ids[index + 1] ?? null : null,
+          });
+        } catch {
+          if (!cancelled) setNeighbors({ prev: null, next: null });
+        }
         try {
           const storedScore = await api.getStoredScore(jobId);
-          if (!cancelled) setMatch(storedScore);
+          if (!cancelled) {
+            setMatch(storedScore);
+            setPercentile(
+              topMatchPercentileLabel(storedScore.overall_score, Object.values(storedScoreValues.current)),
+            );
+          }
         } catch (err) {
           if (!cancelled) {
             if (err instanceof ApiClientError && err.status === 404) {
@@ -183,6 +220,13 @@ export function JobDetailPage() {
       const nextMatch = await api.scoreJob(jobId);
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         setMatch(nextMatch);
+        storedScoreValues.current = {
+          ...storedScoreValues.current,
+          [requestJobId]: nextMatch.overall_score,
+        };
+        setPercentile(
+          topMatchPercentileLabel(nextMatch.overall_score, Object.values(storedScoreValues.current)),
+        );
         await refreshIntelligence();
       }
     } catch (err) {
@@ -219,6 +263,24 @@ export function JobDetailPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        {neighbors.prev ? (
+          <Link to={`/jobs/${neighbors.prev}`} className="btn-ghost h-9 px-2">
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+            Previous job
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">Start of your stored list</span>
+        )}
+        {neighbors.next ? (
+          <Link to={`/jobs/${neighbors.next}`} className="btn-ghost h-9 px-2">
+            Next job
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">End of your stored list</span>
+        )}
+      </div>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm text-ink-500">{job.company}</p>
@@ -233,6 +295,7 @@ export function JobDetailPage() {
             {scoutedTimeAgo(job.date_scraped) ? (
               <span className="text-xs text-ink-500">{scoutedTimeAgo(job.date_scraped)}</span>
             ) : null}
+            {percentile ? <span className="text-xs font-medium text-primary">{percentile}</span> : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -241,13 +304,13 @@ export function JobDetailPage() {
             Open posting
           </a>
           <Link
-            to={`/applications/${job.id}`}
+            to={`/jobs/${job.id}/prepare`}
             className="btn-primary"
             onClick={() => {
               if (job.id) saveSelectedJobId(job.id);
             }}
           >
-            Review application
+            Prepare Application
           </Link>
         </div>
       </div>

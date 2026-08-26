@@ -10,7 +10,7 @@ export function CandidateSummary({
   return (
     <div className="space-y-6">
       <section className="card p-6">
-        <h2 className="font-display text-2xl font-semibold">Overview</h2>
+        <h2 className="font-display text-2xl font-semibold">Identity</h2>
         <dl className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
             <dt className="text-sm text-ink-500">Name</dt>
@@ -36,8 +36,8 @@ export function CandidateSummary({
       </section>
 
       <ChipSection title="Skills" items={candidate.skills} />
-      <ChipSection title="Strengths" items={candidate.strengths} />
       <ChipSection title="Certifications" items={candidate.certifications} />
+      <ChipSection title="Evidence / Links" items={candidate.evidence_links} />
 
       <section className="card p-6">
         <h2 className="font-display text-2xl font-semibold">Experience</h2>

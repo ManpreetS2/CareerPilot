@@ -145,6 +145,41 @@ export type ResumeVersion = {
   created_at: string;
 };
 
+export type ResumeVersionSummary = {
+  id: string;
+  job_id: string;
+  job_title: string;
+  company: string;
+  version_number: number;
+  created_at: string;
+  bullet_count: number;
+  provenance_status: "approved_snapshot";
+  matches_current_profile: boolean;
+};
+
+export type ResumeVersionProfile = {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  skills?: unknown[] | null;
+  projects?: unknown[] | null;
+  experience?: unknown[] | null;
+  education?: unknown[] | null;
+  certifications?: unknown[] | null;
+  strengths?: unknown[] | null;
+  evidence_links?: unknown[] | null;
+  legal_name?: string | null;
+  linkedin_url?: string | null;
+  github_url?: string | null;
+  portfolio_url?: string | null;
+};
+
+export type ResumeVersionDetail = ResumeVersionSummary & {
+  tailored_bullets: string[];
+  source_traceability_notes: string[];
+  profile: ResumeVersionProfile;
+};
+
 export type ApprovalDecision = "approved" | "edit_requested" | "rejected";
 
 export type FlaggedField = {
