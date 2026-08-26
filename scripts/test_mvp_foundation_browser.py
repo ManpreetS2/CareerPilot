@@ -152,6 +152,20 @@ def _is_stylesheet_font(url: str) -> bool:
     return any(host in url for host in _FONT_HOSTS)
 
 
+def _assert_no_horizontal_overflow(page: Any, route: str) -> None:
+    metrics = page.evaluate(
+        """() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        })"""
+    )
+    if metrics["scrollWidth"] > metrics["clientWidth"] + 1:
+        raise AssertionError(
+            f"Horizontal overflow on {route}: scrollWidth={metrics['scrollWidth']} "
+            f"clientWidth={metrics['clientWidth']}"
+        )
+
+
 def _signup(page: Any, base: str, email: str, password: str) -> None:
     page.goto(f"{base}/signup")
     page.locator('input[type="email"]').fill(email)
@@ -419,6 +433,7 @@ def run_browser_workflow() -> dict[str, int]:
                 expect(page.get_by_role("heading", name="Dashboard", exact=True)).to_be_visible()
                 expect(page.get_by_test_id("dashboard-next-action")).to_be_visible()
                 expect(_metric(page, "Jobs discovered")).to_have_text("0")
+                _assert_no_horizontal_overflow(page, "/dashboard")
                 checks += 1
 
                 with SessionLocal() as session:
@@ -444,6 +459,7 @@ def run_browser_workflow() -> dict[str, int]:
                 page.goto(f"{base}/jobs")
                 expect(page.get_by_role("heading", name="Jobs", exact=True)).to_be_visible()
                 expect(page.get_by_role("button", name=JOB_TITLE)).to_be_visible()
+                _assert_no_horizontal_overflow(page, "/jobs")
                 if len(score_posts) != before_score_posts:
                     raise AssertionError("Jobs page load issued a scoring POST.")
                 if len(intelligence_posts) != before_intelligence_posts:
@@ -501,7 +517,8 @@ def run_browser_workflow() -> dict[str, int]:
                 page.get_by_role("checkbox").check()
                 expect(approve).to_be_enabled()
                 approve.click()
-                expect(page.get_by_text("approved", exact=False)).to_be_visible()
+                expect(page.get_by_test_id("lock-in")).to_be_visible()
+                expect(page.get_by_test_id("approval-status")).to_have_text("approved")
                 checks += 1
 
                 page.get_by_test_id("save-resume-version").click()
@@ -521,6 +538,7 @@ def run_browser_workflow() -> dict[str, int]:
 
                 page.goto(f"{base}/track")
                 expect(page.get_by_role("heading", name="Track", exact=True)).to_be_visible()
+                _assert_no_horizontal_overflow(page, "/track")
                 status_select = page.get_by_label(re.compile(r"Tracking status for"))
                 expect(status_select).to_be_visible()
                 status_select.select_option("pending_review")

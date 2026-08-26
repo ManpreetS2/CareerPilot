@@ -358,11 +358,13 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
 
       {materials ? (
         <>
-          <section className="card p-6">
+          <section className="sticky-action-rail glass-working p-6">
             <h2 className="font-display text-2xl font-semibold">Approval</h2>
             <p className="mt-2 text-sm text-muted-foreground">
               Current state:{" "}
-              <strong className="capitalize">{materials.approval_status.replaceAll("_", " ")}</strong>
+              <strong className="capitalize" data-testid="approval-status">
+                {materials.approval_status.replaceAll("_", " ")}
+              </strong>
             </p>
             <div className="mt-4 rounded-[var(--radius-md)] border border-border p-4">
               <label className="flex items-start gap-3 text-sm">

@@ -7,6 +7,7 @@ import { PrepareApplicationWorkspace } from "../components/PrepareApplicationWor
 import { api, ApiClientError } from "../lib/api";
 import { ThemeProvider } from "../lib/theme";
 import { createTestQueryClient } from "../test/render";
+import "../index.css";
 
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
@@ -87,5 +88,20 @@ describe("PrepareApplicationWorkspace", () => {
     expect(await screen.findByTestId("discard-stale-materials")).toBeInTheDocument();
     expect(screen.queryByTestId("generate-materials")).not.toBeInTheDocument();
     expect(api.generateMaterials).not.toHaveBeenCalled();
+  });
+
+  it("keeps the approval rail sticky so actions stay reachable", async () => {
+    vi.mocked(api.getStoredMaterials).mockResolvedValue({
+      job_id: "job-1",
+      tailored_bullets: ["Built APIs"],
+      source_traceability_notes: ["Python is listed in the stored candidate skill evidence."],
+      approval_status: "pending_review",
+      eligibility_confirmed: false,
+    });
+    renderPrepare();
+    expect(await screen.findByTestId("approval-status")).toHaveTextContent("pending review");
+    const rail = screen.getByRole("button", { name: "Approve" }).closest("section");
+    expect(rail).toHaveClass("sticky-action-rail");
+    expect(getComputedStyle(rail as HTMLElement).position).toBe("sticky");
   });
 });
