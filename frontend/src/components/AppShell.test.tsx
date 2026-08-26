@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell, PRIMARY_NAV, WORKFLOW_NAV } from "./AppShell";
 import { ThemeProvider } from "../lib/theme";
 import { createTestQueryClient, testUser } from "../test/render";
+import "../index.css";
 
 vi.mock("../lib/auth", () => ({
   useAuth: () => ({
@@ -33,13 +34,25 @@ function renderShell(route = "/dashboard") {
               <Route path="/track" element={<div>Track body</div>} />
               <Route path="/profile" element={<div>Profile body</div>} />
               <Route path="/resume" element={<div>Resume body</div>} />
-              <Route path="/settings" element={<div>Settings body</div>} />
+              <Route
+                path="/settings"
+                element={
+                  <div data-testid="settings-page">
+                    <h1>Settings</h1>
+                    <button type="button">Light</button>
+                  </div>
+                }
+              />
             </Route>
           </Routes>
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
   );
+}
+
+function centeringClass(value: string) {
+  return /\b(items-center|justify-center|place-items-center|min-h-screen)\b/.test(value);
 }
 
 describe("AppShell", () => {
@@ -71,14 +84,63 @@ describe("AppShell", () => {
     expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
   });
 
-  it("opens the command palette with Control+K", async () => {
+  it("keeps the skip link visually hidden until keyboard focus, then focuses #main", async () => {
+    const user = userEvent.setup();
+    renderShell("/settings");
+    const skip = screen.getByTestId("skip-to-content");
+    const main = document.getElementById("main");
+
+    expect(skip).toHaveClass("skip-link");
+    expect(skip).not.toHaveFocus();
+    expect(getComputedStyle(skip).position).toBe("absolute");
+    expect(main).toHaveAttribute("tabIndex", "-1");
+
+    await user.tab();
+    expect(skip).toHaveFocus();
+    expect(getComputedStyle(skip).position).toBe("fixed");
+    expect(Number.parseInt(getComputedStyle(skip).zIndex, 10)).toBeGreaterThanOrEqual(100);
+
+    await user.keyboard("{Enter}");
+    expect(main).toHaveFocus();
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Light" })).toHaveFocus();
+  });
+
+  it("does not vertically center Settings content in the shell", () => {
+    renderShell("/settings");
+    const main = document.getElementById("main");
+    expect(main).not.toBeNull();
+    expect(centeringClass(main?.className ?? "")).toBe(false);
+    expect(main).toHaveClass("pt-8");
+    expect(screen.getByTestId("settings-page")).toBeInTheDocument();
+    const shell = screen.getByTestId("app-shell");
+    expect(shell.className).not.toMatch(/\b(items-center|justify-center|place-items-center)\b/);
+  });
+
+  it("opens the command palette with Control+K as a fixed top overlay and closes on Escape", async () => {
     const user = userEvent.setup();
     renderShell();
     await user.keyboard("{Control>}k{/Control}");
-    expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
+    const palette = await screen.findByTestId("command-palette");
+    expect(palette).toBeInTheDocument();
+    expect(palette).toHaveClass("command-palette");
     expect(screen.getByRole("option", { name: /Overview/i })).toBeInTheDocument();
+    expect(document.body.contains(palette)).toBe(true);
+    expect(screen.getByTestId("app-shell").contains(palette)).toBe(false);
+    const style = getComputedStyle(palette);
+    expect(style.position).toBe("fixed");
+    expect(style.bottom).not.toBe("0px");
+    expect(screen.getByLabelText("Filter commands")).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
+  });
+
+  it("opens the command palette with Command+K", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.keyboard("{Meta>}k{/Meta}");
+    expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
   });
 
   it("opens the mobile navigation drawer, traps focus, and closes on Escape", async () => {

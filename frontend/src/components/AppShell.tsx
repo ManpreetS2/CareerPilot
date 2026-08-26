@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { motion } from "motion/react";
 import {
   BriefcaseBusiness,
   FileSearch,
@@ -90,6 +91,7 @@ function NavGroup({
   onNavigate?: () => void;
 }) {
   const location = useLocation();
+  const { reducedMotion } = useTheme();
   return (
     <div className="flex flex-col gap-0.5">
       {items.map((item) => {
@@ -102,6 +104,13 @@ function NavGroup({
             aria-current={active ? "page" : undefined}
             onClick={onNavigate}
           >
+            {active && !reducedMotion ? (
+              <motion.span
+                layoutId="nav-active"
+                className="absolute inset-0 -z-10 rounded-md bg-primary/[0.1]"
+                transition={{ type: "spring", stiffness: 420, damping: 34 }}
+              />
+            ) : null}
             <item.icon className="h-4 w-4 shrink-0" aria-hidden />
             {item.label}
           </NavLink>
@@ -210,19 +219,30 @@ export function AppShell() {
     location.pathname.startsWith("/track") ||
     location.pathname.startsWith("/applications");
   const showFinish = user ? shouldPromptFinishSetup(user.id) : false;
+  const { reducedMotion } = useTheme();
+
+  useEffect(() => {
+    window.scrollTo?.(0, 0);
+    const main = document.getElementById("main");
+    if (main && typeof main.scrollTo === "function") {
+      main.scrollTo(0, 0);
+    }
+  }, [location.pathname]);
+
+  function focusMain(event: MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    document.getElementById("main")?.focus();
+  }
 
   return (
     <div className="app-canvas min-h-screen bg-background" data-testid="app-shell">
-      <a
-        href="#main"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-[var(--radius-sm)] focus:bg-foreground focus:px-3 focus:py-2 focus:text-background"
-      >
+      <a href="#main" className="skip-link" data-testid="skip-to-content" onClick={focusMain}>
         Skip to content
       </a>
       <CommandPalette />
 
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 p-3 lg:flex">
-        <Glass variant="subtle" refract className="flex h-full w-full flex-col rounded-[var(--radius-lg)] p-3">
+        <Glass variant="atmosphere" refract className="flex h-full w-full flex-col rounded-[1.25rem] p-3">
           <Link to="/dashboard" className="mb-5 flex items-center gap-2 px-1.5">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-primary to-accent text-[11px] font-semibold text-primary-foreground">
               CP
@@ -234,8 +254,8 @@ export function AppShell() {
         </Glass>
       </aside>
 
-      <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-border/80 px-3 py-2 lg:hidden">
-        <Glass variant="subtle" className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-2 py-1.5">
+      <header className="safe-pad sticky top-0 z-40 flex items-center gap-3 px-3 py-2 lg:hidden">
+        <Glass variant="atmosphere" className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-2 py-1">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <button
               type="button"
@@ -261,11 +281,16 @@ export function AppShell() {
 
       <main
         id="main"
-        className={cn("px-4 py-6 sm:px-6 lg:ml-56 lg:py-8", wide ? "max-w-none" : "")}
+        tabIndex={-1}
+        className={cn(
+          "relative z-[1] px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-8 outline-none sm:px-6 lg:ml-56 lg:pt-10",
+          "safe-pad",
+          wide ? "max-w-none" : "",
+        )}
       >
-        <div className={cn(wide ? "mx-auto max-w-7xl" : "mx-auto max-w-5xl")}>
+        <div className={cn("min-w-0", wide ? "mx-auto max-w-7xl" : "mx-auto max-w-5xl")}>
           {showFinish ? (
-            <div className="mb-4 rounded-[var(--radius-md)] border border-border bg-surface px-4 py-3 text-sm">
+            <div className="glass-working mb-4 rounded-[var(--radius-md)] px-4 py-3 text-sm">
               Setup is unfinished.{" "}
               <Link to="/onboarding" className="font-semibold text-primary">
                 Finish setup
@@ -273,7 +298,14 @@ export function AppShell() {
             </div>
           ) : null}
           <ErrorBoundary key={location.pathname} scope="This page">
-            <Outlet />
+            <motion.div
+              key={location.pathname}
+              initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: reducedMotion ? 0 : 0.2 }}
+            >
+              <Outlet />
+            </motion.div>
           </ErrorBoundary>
         </div>
       </main>

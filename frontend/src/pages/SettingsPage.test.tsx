@@ -48,4 +48,11 @@ describe("theme", () => {
     await user.click(screen.getByRole("button", { name: "System" }));
     expect(localStorage.getItem("careerpilot-theme")).toBe("system");
   });
+
+  it("does not wrap Settings in a vertically centered viewport", () => {
+    const { container } = renderSettings();
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).not.toMatch(/\b(min-h-screen|items-center|justify-center|place-items-center)\b/);
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+  });
 });

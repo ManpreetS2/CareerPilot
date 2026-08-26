@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BriefcaseBusiness,
@@ -44,6 +44,7 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const commands = useMemo(() => {
     const extra: Command[] =
@@ -87,12 +88,16 @@ export function CommandPalette() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="command-tunnel fixed inset-0 z-[60]" />
+      <DialogPrimitive.Portal container={typeof document !== "undefined" ? document.body : undefined}>
+        <DialogPrimitive.Overlay className="command-tunnel" />
         <DialogPrimitive.Content
           aria-label="Command palette"
           data-testid="command-palette"
-          className="glass-floating glass-refract fixed left-1/2 top-[18%] z-[60] w-[min(36rem,calc(100%-2rem))] -translate-x-1/2 rounded-[var(--radius-lg)] border border-border p-2 shadow-floating"
+          className="command-palette glass-floating glass-refract fixed rounded-[var(--radius-lg)] border border-border p-2 shadow-floating"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            inputRef.current?.focus();
+          }}
           onKeyDown={(event) => {
             if (event.key === "ArrowDown") {
               event.preventDefault();
@@ -112,6 +117,7 @@ export function CommandPalette() {
           <div className="flex items-center gap-2 border-b border-border px-3 py-2">
             <Search className="h-4 w-4 text-muted-foreground" aria-hidden />
             <input
+              ref={inputRef}
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
