@@ -974,6 +974,12 @@ def run_scout(queries: list[str], location: str | None = None) -> list[Job]:
     With three roles that is 2x3 + 3 = 9 source calls rather than 5x3 = 15.
     """
     _reject_bare_query_string(queries)
+    if not queries:
+        # An empty list would make _title_matches_any_query match everything,
+        # so every feed source would be persisted unfiltered — hundreds of
+        # irrelevant jobs, silently. Callers always have at least the default
+        # query available; arriving here with none is a caller bug.
+        raise ValueError("run_scout requires at least one query")
     raw_jobs: list[Job] = []
 
     # Full-feed sources: fetched once, filtered against every role.

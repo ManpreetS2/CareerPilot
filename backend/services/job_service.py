@@ -73,6 +73,10 @@ DEFAULT_SCOUT_QUERY = "software engineer intern"
 # letting a long preferences list turn one click into dozens of API calls.
 MAX_SCOUT_QUERIES = 3
 
+# Search terms go into an outbound query string. No real role title or place
+# name approaches this, so it only ever truncates junk.
+MAX_SEARCH_TERM_CHARS = 120
+
 
 @dataclass(frozen=True)
 class ScoutCriteria:
@@ -83,16 +87,31 @@ class ScoutCriteria:
     derived_from_preferences: bool
 
 
+def clean_search_term(value: str) -> str:
+    """Collapse internal whitespace and bound the length.
+
+    These values are written straight into an outbound query string, so a
+    5,000-character role produces a 5KB URL that proxies may reject outright
+    and that no job board could match anyway. Collapsing whitespace also
+    means "Cloud  Engineer" and "Cloud Engineer" dedupe against each other,
+    and a role containing a stray newline searches for something sensible.
+    """
+    return " ".join(value.split())[:MAX_SEARCH_TERM_CHARS].strip()
+
+
 def _deduped_roles(target_roles: object) -> list[str]:
-    """Trimmed, case-insensitively deduped, order preserved."""
+    """Cleaned, case-insensitively deduped, order preserved."""
     if not isinstance(target_roles, list):
         return []
     seen: set[str] = set()
     roles: list[str] = []
     for entry in target_roles:
+        # bool is an int, not a str, so it is excluded here along with
+        # dicts, nested lists, and None — anything a hand-edited or
+        # future-written preferences row might contain.
         if not isinstance(entry, str):
             continue
-        role = entry.strip()
+        role = clean_search_term(entry)
         if not role:
             continue
         key = role.lower()
@@ -127,9 +146,12 @@ def _preferred_location(preference) -> str | None:
     if "remote" in _candidate_work_modes(preference):
         return None
 
-    for entry in preference.preferred_locations or []:
+    locations = preference.preferred_locations
+    if not isinstance(locations, list):
+        return None
+    for entry in locations:
         if isinstance(entry, str) and _city_state(entry) is not None:
-            return entry.strip()
+            return clean_search_term(entry)
     return None
 
 

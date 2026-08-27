@@ -22,6 +22,7 @@ from backend.services.job_scout_service import _title_matches_any_query, _title_
 from backend.services.job_service import (
     DEFAULT_SCOUT_QUERY,
     MAX_SCOUT_QUERIES,
+    MAX_SEARCH_TERM_CHARS,
     derive_scout_criteria,
 )
 from tests.mvp_helpers import TEST_USER_ID, ensure_user
@@ -403,3 +404,91 @@ def test_route_requires_authentication(isolated_client) -> None:
     client, _ = isolated_client
     client.cookies.clear()
     assert client.post("/api/scout-jobs").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Search terms end up in an outbound URL
+# ---------------------------------------------------------------------------
+
+
+def test_a_huge_saved_role_is_bounded(isolated_session) -> None:
+    """A 5,000-character role produced a 5KB request URL, past what many
+    proxies accept, for a search no job board could have matched."""
+    ensure_user(isolated_session)
+    _preference(isolated_session, target_roles=["x" * 5000])
+
+    (query,) = derive_scout_criteria(isolated_session, TEST_USER_ID).queries
+    assert len(query) == MAX_SEARCH_TERM_CHARS
+
+
+def test_a_huge_saved_location_is_bounded(isolated_session) -> None:
+    ensure_user(isolated_session)
+    _preference(
+        isolated_session, target_roles=["Cloud Engineer"], preferred_locations=["A" * 3000 + ", TX"]
+    )
+
+    location = derive_scout_criteria(isolated_session, TEST_USER_ID).location
+    assert location is not None and len(location) == MAX_SEARCH_TERM_CHARS
+
+
+@pytest.mark.parametrize(
+    ("saved", "expected"),
+    [
+        ("Cloud\nEngineer", "Cloud Engineer"),
+        ("\tCloud\tEngineer\t", "Cloud Engineer"),
+        ("Cloud   Engineer", "Cloud Engineer"),
+    ],
+)
+def test_whitespace_inside_a_role_is_normalized(isolated_session, saved, expected) -> None:
+    """Newlines and tabs percent-encode safely but search for nonsense."""
+    ensure_user(isolated_session)
+    _preference(isolated_session, target_roles=[saved])
+
+    assert derive_scout_criteria(isolated_session, TEST_USER_ID).queries == [expected]
+
+
+def test_roles_differing_only_by_whitespace_dedupe(isolated_session) -> None:
+    ensure_user(isolated_session)
+    _preference(isolated_session, target_roles=["Cloud  Engineer", "Cloud Engineer"])
+
+    assert derive_scout_criteria(isolated_session, TEST_USER_ID).queries == ["Cloud Engineer"]
+
+
+def test_an_explicit_query_is_bounded_like_a_saved_one(isolated_client, captured_scout) -> None:
+    """The explicit path reaches the same outbound query string, so it needs
+    the same bound — otherwise ?what=<5000 chars> reintroduces the oversized
+    URL the preferences path is protected against."""
+    client, _ = isolated_client
+
+    client.post("/api/scout-jobs", params={"what": "y" * 5000})
+    (query,) = captured_scout["queries"]
+    assert len(query) == MAX_SEARCH_TERM_CHARS
+
+
+def test_an_explicit_query_has_its_whitespace_normalized(isolated_client, captured_scout) -> None:
+    client, _ = isolated_client
+
+    client.post("/api/scout-jobs", params={"what": "  Cloud\n\tEngineer  "})
+    assert captured_scout["queries"] == ["Cloud Engineer"]
+
+
+def test_a_whitespace_only_location_is_treated_as_absent(isolated_client, captured_scout) -> None:
+    client, SessionLocal = isolated_client
+    _save_preferences(
+        SessionLocal,
+        client.test_user_id,
+        target_roles=["Cloud Engineer"],
+        preferred_locations=["Austin, TX"],
+    )
+
+    client.post("/api/scout-jobs", params={"where": "   "})
+    assert captured_scout["location"] == "Austin, TX"
+
+
+def test_run_scout_refuses_an_empty_query_list() -> None:
+    """An empty list makes the title filter match everything, so every feed
+    source would be persisted unfiltered — hundreds of irrelevant jobs,
+    silently. Unreachable through the route today; guarded so it stays that
+    way if a future caller passes one."""
+    with pytest.raises(ValueError):
+        job_scout_service.run_scout([])

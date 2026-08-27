@@ -18,6 +18,7 @@ from backend.schemas.schemas import (
 from backend.services.analysis_service import list_stored_match_scores
 from backend.services.job_scout_service import JobScoutError, ingest_job_url, normalize_job, persist_jobs
 from backend.services.job_service import (
+    clean_search_term,
     derive_scout_criteria,
     get_job,
     list_jobs,
@@ -61,8 +62,13 @@ def trigger_scout(
     fill in a blank, never to override a deliberate search.
     """
     criteria = derive_scout_criteria(db, user.id)
-    queries = [what] if what and what.strip() else criteria.queries
-    location = where if where and where.strip() else criteria.location
+    # An explicit query is cleaned exactly like a saved one: both end up in
+    # the same outbound query string, so both need the same whitespace
+    # collapsing and length bound.
+    explicit_query = clean_search_term(what) if what else ""
+    explicit_location = clean_search_term(where) if where else ""
+    queries = [explicit_query] if explicit_query else criteria.queries
+    location = explicit_location or criteria.location
 
     jobs = scout_jobs(queries=queries, location=location)
     searched = ", ".join(queries)
