@@ -6,13 +6,15 @@ const LABELS: Record<string, string> = {
   greenhouse: "Greenhouse",
   lever: "Lever",
   remotive: "Remotive",
+  jobicy: "Jobicy",
+  himalayas: "Himalayas",
   manual: "Manual",
 };
 
 // Direct-employer ATS postings (Greenhouse/Lever) get their own tone —
 // they're first-party data, not an aggregator's copy of a listing.
 const ATS_SOURCES = new Set(["greenhouse", "lever"]);
-const AGGREGATOR_SOURCES = new Set(["adzuna", "remoteok", "remotive"]);
+const AGGREGATOR_SOURCES = new Set(["adzuna", "remoteok", "remotive", "jobicy", "himalayas"]);
 
 export function SourceBadge({ source }: { source: string }) {
   const normalized = source.toLowerCase();

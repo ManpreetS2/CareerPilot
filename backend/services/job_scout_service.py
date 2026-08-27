@@ -1,6 +1,6 @@
-"""Job Scout — Adzuna, RemoteOK, Greenhouse, Lever, and Remotive discovery,
-manual URL ingestion, normalization, deduplication, and SQLite persistence.
-Owned by Developer B (Day 2).
+"""Job Scout — Adzuna, RemoteOK, Greenhouse, Lever, Remotive, Jobicy, and
+Himalayas discovery, manual URL ingestion, normalization, deduplication,
+and SQLite persistence. Owned by Developer B (Day 2).
 """
 
 from __future__ import annotations
@@ -53,6 +53,13 @@ LEVER_API_BASE = "https://api.lever.co/v0"
 LEVER_API_HOSTS = frozenset({"api.lever.co"})
 REMOTIVE_SEARCH_URL = "https://remotive.com/api/remote-jobs"
 REMOTIVE_API_HOSTS = frozenset({"remotive.com"})
+JOBICY_SEARCH_URL = "https://jobicy.com/api/v2/remote-jobs"
+JOBICY_API_HOSTS = frozenset({"jobicy.com", "www.jobicy.com"})
+HIMALAYAS_SEARCH_URL = "https://himalayas.app/jobs/api/search"
+HIMALAYAS_API_HOSTS = frozenset({"himalayas.app", "www.himalayas.app"})
+_JOBICY_TAG_MIN_CHARS = 3
+_JOBICY_TAG_MAX_CHARS = 50
+_HIMALAYAS_SEARCH_PAGE_SIZE = 20
 _MIN_INGEST_DESCRIPTION_LENGTH = 40
 _GREENHOUSE_JOB_PATH_RE = re.compile(r"^/([^/]+)/jobs/(\d+)/?$")
 _GREENHOUSE_EMBED_PATH_RE = re.compile(r"^/embed/job_app/?$")
@@ -587,6 +594,92 @@ def scout_remotive(query: str | None = None) -> list[dict]:
     return payload.get("jobs") or []
 
 
+def _jobicy_tag(query: str | None) -> str | None:
+    """Jobicy's `tag` keyword must be 3–50 characters. Shorter queries omit
+    it and are filtered locally; longer ones are truncated so the request
+    stays valid."""
+    if not query:
+        return None
+    tag = " ".join(query.split())
+    if len(tag) < _JOBICY_TAG_MIN_CHARS:
+        return None
+    return tag[:_JOBICY_TAG_MAX_CHARS]
+
+
+def _listings_from_payload(payload: object, source_label: str) -> list:
+    if not isinstance(payload, dict):
+        raise JobScoutError(f"{source_label} returned an unreadable response.")
+    jobs = payload.get("jobs") or []
+    if not isinstance(jobs, list):
+        raise JobScoutError(f"{source_label} returned an unreadable response.")
+    return jobs
+
+
+def scout_jobicy(query: str | None = None) -> list[dict]:
+    """Jobicy's public remote-jobs API: keyless. `tag` is a server-side
+    keyword search (3–50 chars), so a normal role is one request. A too-short
+    query omits `tag` and is filtered locally by title."""
+    count = max(1, min(int(settings.scout_results_per_source), 200))
+    params: dict[str, object] = {"count": count}
+    tag = _jobicy_tag(query)
+    if tag:
+        params["tag"] = tag
+    try:
+        response = fetch_url_safely(
+            f"{JOBICY_SEARCH_URL}?{urlencode(params)}",
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=JOBICY_API_HOSTS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except UnsafeURLError:
+        raise JobScoutError("Could not reach Jobicy.") from None
+    except httpx.HTTPStatusError:
+        raise JobScoutError("Could not reach Jobicy.") from None
+    except httpx.TimeoutException:
+        raise JobScoutError("Jobicy request timed out.") from None
+    except httpx.HTTPError:
+        raise JobScoutError("Could not reach Jobicy.") from None
+    except json.JSONDecodeError:
+        raise JobScoutError("Jobicy returned an unreadable response.") from None
+    listings = _listings_from_payload(payload, "Jobicy")
+    if query and not tag:
+        listings = [item for item in listings if _title_matches_query(item.get("jobTitle"), query)]
+    return listings[: settings.scout_results_per_source]
+
+
+def scout_himalayas(query: str | None = None) -> list[dict]:
+    """Himalayas public search API: keyless, free-text `q` is server-side, so
+    one request per role. Attribution is the source badge plus stored URL."""
+    params: dict[str, object] = {}
+    if query:
+        params["q"] = query
+    try:
+        url = HIMALAYAS_SEARCH_URL if not params else f"{HIMALAYAS_SEARCH_URL}?{urlencode(params)}"
+        response = fetch_url_safely(
+            url,
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=HIMALAYAS_API_HOSTS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except UnsafeURLError:
+        raise JobScoutError("Could not reach Himalayas.") from None
+    except httpx.HTTPStatusError:
+        raise JobScoutError("Could not reach Himalayas.") from None
+    except httpx.TimeoutException:
+        raise JobScoutError("Himalayas request timed out.") from None
+    except httpx.HTTPError:
+        raise JobScoutError("Could not reach Himalayas.") from None
+    except json.JSONDecodeError:
+        raise JobScoutError("Himalayas returned an unreadable response.") from None
+    listings = _listings_from_payload(payload, "Himalayas")
+    cap = min(int(settings.scout_results_per_source), _HIMALAYAS_SEARCH_PAGE_SIZE)
+    return listings[:cap]
+
+
 # Free-tier ATS platforms where the subdomain is a fixed platform word
 # ("boards", "jobs") and the real company is the URL's first path segment
 # instead — the opposite of the Workday-style pattern (company.wd5....) that
@@ -698,6 +791,38 @@ def _format_salary(min_value: float | None, max_value: float | None) -> str | No
     return f"${(max_value or min_value):,.0f}"
 
 
+def _coerce_salary_number(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip().replace(",", "")
+        if not stripped:
+            return None
+        try:
+            return float(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def _himalayas_location(raw: dict) -> str:
+    restrictions = raw.get("locationRestrictions") or []
+    names: list[str] = []
+    if isinstance(restrictions, list):
+        for item in restrictions:
+            if isinstance(item, dict):
+                name = _clean_line(item.get("name"))
+            elif isinstance(item, str):
+                name = _clean_line(item)
+            else:
+                name = ""
+            if name:
+                names.append(name)
+    return ", ".join(names) if names else "Remote"
+
+
 def normalize_job(raw: dict, source: str) -> Job:
     """Map a provider payload into the shared Job schema."""
     now = datetime.now(timezone.utc)
@@ -800,6 +925,40 @@ def normalize_job(raw: dict, source: str) -> Job:
             description=_clean_description(raw.get("description")),
             source="remotive",
             date_posted=_parse_iso_date(raw.get("publication_date")),
+            date_scraped=now,
+            status="discovered",
+        )
+
+    if source == "jobicy":
+        return Job(
+            title=_clean_line(raw.get("jobTitle")) or "Untitled role",
+            company=_clean_line(raw.get("companyName")) or "Unknown",
+            location=_clean_line(raw.get("jobGeo")) or "Remote",
+            salary=_format_salary(
+                _coerce_salary_number(raw.get("salaryMin")),
+                _coerce_salary_number(raw.get("salaryMax")),
+            ),
+            url=raw.get("url") or "",
+            description=_clean_description(raw.get("jobDescription") or raw.get("jobExcerpt")),
+            source="jobicy",
+            date_posted=_parse_iso_date(raw.get("pubDate")),
+            date_scraped=now,
+            status="discovered",
+        )
+
+    if source == "himalayas":
+        return Job(
+            title=_clean_line(raw.get("title")) or "Untitled role",
+            company=_clean_line(raw.get("companyName")) or "Unknown",
+            location=_himalayas_location(raw),
+            salary=_format_salary(
+                _coerce_salary_number(raw.get("minSalary")),
+                _coerce_salary_number(raw.get("maxSalary")),
+            ),
+            url=raw.get("applicationLink") or "",
+            description=_clean_description(raw.get("description") or raw.get("excerpt")),
+            source="himalayas",
+            date_posted=_parse_epoch_millis(raw.get("pubDate")),
             date_scraped=now,
             status="discovered",
         )
@@ -963,15 +1122,16 @@ def run_scout(queries: list[str], location: str | None = None) -> list[Job]:
     `queries` is the candidate's target roles, so a scout run covers all of
     them at once. The sources split into two kinds and are spent accordingly:
 
-      - Adzuna and Remotive search server-side, so they are called once per
-        role. There is no way to ask them for several roles in one request.
+      - Adzuna, Remotive, Jobicy, and Himalayas search server-side, so they
+        are called once per role. There is no way to ask them for several
+        roles in one request.
       - RemoteOK, Greenhouse and Lever return a fixed feed and are filtered
         locally, so they are fetched ONCE and matched against every role.
         Calling them per role would refetch the same listings — and, for
         Greenhouse and Lever, re-walk every configured board — to obtain
         results already in hand.
 
-    With three roles that is 2x3 + 3 = 9 source calls rather than 5x3 = 15.
+    With three roles that is 4x3 + 3 = 15 source calls rather than 7x3 = 21.
     """
     _reject_bare_query_string(queries)
     if not queries:
@@ -1009,6 +1169,16 @@ def run_scout(queries: list[str], location: str | None = None) -> list[Job]:
             raw_jobs.extend(_normalize_listings(scout_remotive(query), "remotive"))
         except JobScoutError as exc:
             logger.warning("Remotive scout skipped for %r: %s", query, exc)
+
+        try:
+            raw_jobs.extend(_normalize_listings(scout_jobicy(query), "jobicy"))
+        except JobScoutError as exc:
+            logger.warning("Jobicy scout skipped for %r: %s", query, exc)
+
+        try:
+            raw_jobs.extend(_normalize_listings(scout_himalayas(query), "himalayas"))
+        except JobScoutError as exc:
+            logger.warning("Himalayas scout skipped for %r: %s", query, exc)
 
     # Dedupe spans all roles: the same posting surfaced by two different role
     # queries collapses to one row through the existing key tiers.
