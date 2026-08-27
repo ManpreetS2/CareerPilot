@@ -202,7 +202,10 @@ def test_a_strictly_onsite_or_hybrid_candidate_keeps_the_location(isolated_sessi
 def counted_sources(monkeypatch: pytest.MonkeyPatch):
     """Replaces each source with a counter. What matters here is the call
     pattern, not the payloads."""
-    calls: dict[str, list] = {name: [] for name in ("remoteok", "greenhouse", "lever", "adzuna", "remotive")}
+    calls: dict[str, list] = {
+        name: []
+        for name in ("remoteok", "greenhouse", "lever", "adzuna", "remotive", "jobicy", "himalayas")
+    }
 
     def _record(name, returns=None):
         def _fake(*args, **kwargs):
@@ -211,7 +214,7 @@ def counted_sources(monkeypatch: pytest.MonkeyPatch):
 
         return _fake
 
-    for name in ("remoteok", "greenhouse", "lever", "remotive"):
+    for name in ("remoteok", "greenhouse", "lever", "remotive", "jobicy", "himalayas"):
         monkeypatch.setattr(job_scout_service, f"scout_{name}", _record(name))
     monkeypatch.setattr(job_scout_service, "scout_adzuna", _record("adzuna"))
     monkeypatch.setattr(job_scout_service, "persist_jobs", lambda jobs: list(jobs))
@@ -227,7 +230,8 @@ def test_feed_sources_are_fetched_once_for_many_roles(counted_sources) -> None:
     RemoteOK, Greenhouse and Lever return a fixed feed filtered locally, so
     three roles must not mean three refetches — Greenhouse and Lever would
     re-walk every configured board each time for listings already in hand.
-    Adzuna and Remotive search server-side and genuinely need one call each.
+    Adzuna, Remotive, Jobicy, and Himalayas search server-side and genuinely
+    need one call each.
     """
     job_scout_service.run_scout(["Cloud Engineer", "DevOps Engineer", "SRE"])
 
@@ -236,6 +240,8 @@ def test_feed_sources_are_fetched_once_for_many_roles(counted_sources) -> None:
     assert len(counted_sources["lever"]) == 1
     assert len(counted_sources["adzuna"]) == 3
     assert len(counted_sources["remotive"]) == 3
+    assert len(counted_sources["jobicy"]) == 3
+    assert len(counted_sources["himalayas"]) == 3
 
 
 def test_feed_sources_receive_every_role_to_match_against(counted_sources) -> None:
@@ -253,6 +259,8 @@ def test_search_sources_receive_one_role_each(counted_sources) -> None:
     assert [args[0] for args, _ in counted_sources["adzuna"]] == ["Cloud Engineer", "SRE"]
     assert [args[1] for args, _ in counted_sources["adzuna"]] == ["Austin, TX", "Austin, TX"]
     assert [args[0] for args, _ in counted_sources["remotive"]] == ["Cloud Engineer", "SRE"]
+    assert [args[0] for args, _ in counted_sources["jobicy"]] == ["Cloud Engineer", "SRE"]
+    assert [args[0] for args, _ in counted_sources["himalayas"]] == ["Cloud Engineer", "SRE"]
 
 
 def test_one_failing_source_does_not_stop_the_others(counted_sources, monkeypatch) -> None:
@@ -282,6 +290,30 @@ def test_one_role_failing_a_search_source_does_not_stop_the_rest(counted_sources
     job_scout_service.run_scout(["Cloud Engineer", "SRE"])
 
     assert seen == ["Cloud Engineer", "SRE"]
+
+
+def test_jobicy_failure_does_not_stop_the_other_sources(counted_sources, monkeypatch) -> None:
+    def _boom(*args, **kwargs):
+        raise job_scout_service.JobScoutError("Jobicy is unreachable")
+
+    monkeypatch.setattr(job_scout_service, "scout_jobicy", _boom)
+    job_scout_service.run_scout(["Cloud Engineer"])
+
+    assert len(counted_sources["himalayas"]) == 1
+    assert len(counted_sources["remotive"]) == 1
+    assert len(counted_sources["remoteok"]) == 1
+
+
+def test_himalayas_failure_does_not_stop_the_other_sources(counted_sources, monkeypatch) -> None:
+    def _boom(*args, **kwargs):
+        raise job_scout_service.JobScoutError("Himalayas is unreachable")
+
+    monkeypatch.setattr(job_scout_service, "scout_himalayas", _boom)
+    job_scout_service.run_scout(["Cloud Engineer"])
+
+    assert len(counted_sources["jobicy"]) == 1
+    assert len(counted_sources["remotive"]) == 1
+    assert len(counted_sources["greenhouse"]) == 1
 
 
 # ---------------------------------------------------------------------------

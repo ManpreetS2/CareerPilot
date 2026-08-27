@@ -179,7 +179,7 @@ export function JobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Jobs"
-        description="Discover and triage roles from Greenhouse, Lever, Remotive, Adzuna, RemoteOK, and manually added URLs. Scores already stored appear immediately. Selecting a job never scores or extracts on its own."
+        description="Discover and triage roles from Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, and manually added URLs. Find Jobs stores a fit score when a listing is scoreable. Selecting a job never scores or extracts on its own."
         actions={
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-primary btn-stable" onClick={() => void loadJobs(true)} disabled={scouting}>

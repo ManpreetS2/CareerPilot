@@ -37,7 +37,7 @@ export function resolveNextAction(input: {
     return {
       id: "jobs",
       title: "Find jobs",
-      description: "Scout Greenhouse, Lever, Remotive, Adzuna, and RemoteOK roles — or paste a posting URL.",
+      description: "Scout Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, and Himalayas roles — or paste a posting URL.",
       to: "/jobs",
       cta: "Open jobs",
     };
