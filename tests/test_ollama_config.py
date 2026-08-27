@@ -124,6 +124,15 @@ def test_ollama_model_and_numeric_bounds(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(settings, "ollama_keep_alive", "")
     with pytest.raises(RuntimeError):
         validate_llm_settings(settings)
+    monkeypatch.setattr(settings, "ollama_keep_alive", "30m")
+    monkeypatch.setattr(settings, "resume_llm_provider_order", "gemini,ollama")
+    monkeypatch.setattr(settings, "resume_gemini_model", "gemini-3.5-flash-lite")
+    monkeypatch.setattr(settings, "resume_ollama_model", "qwen3.5:4b")
+    monkeypatch.setattr(settings, "resume_ollama_keep_alive", "2m")
+    validate_llm_settings(settings)
+    monkeypatch.setattr(settings, "resume_ollama_model", "")
+    with pytest.raises(RuntimeError):
+        validate_llm_settings(settings)
 
 
 def test_config_validation_does_not_open_network_sockets(monkeypatch: pytest.MonkeyPatch) -> None:

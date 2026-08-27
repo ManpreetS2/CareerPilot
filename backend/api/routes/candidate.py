@@ -60,7 +60,11 @@ def _http_for_candidate_error(exc: Exception) -> HTTPException:
     if isinstance(exc, OversizedResumeError):
         return HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(exc))
     if isinstance(exc, InvalidResumeError):
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        detail = str(exc)
+        lowered = detail.lower()
+        if "could not be read" in lowered or "no pages" in lowered:
+            detail = "Resume could not be read."
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
     if isinstance(exc, OCRUnavailableError):
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     if isinstance(exc, ProfileGroundingError):
@@ -68,16 +72,26 @@ def _http_for_candidate_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LLMConfigurationError):
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The resume parser is not configured correctly. Check the local LLM configuration.",
+            detail="AI service temporarily unavailable. Please try again.",
         )
     if isinstance(exc, ProfileExtractionError):
+        text = (str(exc) or "").lower()
+        if "timed out" in text:
+            return HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Resume analysis timed out. Please try again.",
+            )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc)
-            or "The AI extraction service could not process this resume. Please try again.",
+            detail="AI service temporarily unavailable. Please try again.",
         )
     if isinstance(exc, ResumeExtractionError):
-        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        text = (str(exc) or "").lower()
+        if "too little" in text or "readable" in text:
+            detail = "Resume contained too little readable text."
+        else:
+            detail = "Resume could not be read."
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
     if isinstance(exc, CandidateProfileError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     logger.error("Unexpected candidate profile failure type=%s", type(exc).__name__)

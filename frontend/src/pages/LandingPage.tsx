@@ -20,7 +20,7 @@ const capabilities = [
   },
   {
     title: "Real job discovery",
-    body: "Scout Greenhouse, Lever, Remotive, Adzuna, and RemoteOK, or paste a posting URL yourself.",
+    body: "Scout Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, and Himalayas, or paste a posting URL yourself.",
   },
   {
     title: "Explainable job fit",

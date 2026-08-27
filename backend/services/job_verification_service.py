@@ -31,7 +31,9 @@ DEFAULT_STALE_AFTER_DAYS = 45
 # a manually-pasted job is never re-discovered by a scout, so absence from a
 # scout run means nothing for it.
 DEFAULT_ABSENCE_STALE_AFTER_DAYS = 14
-_SCOUT_MANAGED_SOURCES = frozenset({"adzuna", "remoteok", "greenhouse", "lever", "remotive"})
+_SCOUT_MANAGED_SOURCES = frozenset(
+    {"adzuna", "remoteok", "greenhouse", "lever", "remotive", "jobicy", "himalayas"}
+)
 
 # Phrases a job board shows on an expired/filled/removed posting. Checked as
 # case-insensitive substrings of the fetched page body.

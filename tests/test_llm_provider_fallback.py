@@ -35,6 +35,10 @@ def _order(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
     monkeypatch.setattr("backend.core.config.settings.llm_provider_order", raw)
 
 
+def _resume_order(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+    monkeypatch.setattr("backend.core.config.settings.resume_llm_provider_order", raw)
+
+
 class ScriptedProviders:
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -66,10 +70,15 @@ class ScriptedProviders:
 def _patch_clients(monkeypatch: pytest.MonkeyPatch, scripted: ScriptedProviders, *module_paths: str) -> None:
     for path in module_paths:
         monkeypatch.setattr(path, scripted.get_client)
+    if any(path.endswith("get_resume_llm_client") for path in module_paths):
+        monkeypatch.setattr(
+            "backend.services.candidate_profile_agent.resume_provider_is_configured",
+            lambda _provider: True,
+        )
 
 
 def _profile_modules() -> tuple[str, ...]:
-    return ("backend.services.candidate_profile_agent.get_llm_client",)
+    return ("backend.services.candidate_profile_agent.get_resume_llm_client",)
 
 
 def _intel_modules() -> tuple[str, ...]:
@@ -94,7 +103,7 @@ def test_injected_generator_keeps_single_provider_call_count(isolated_session, m
 
 
 def test_candidate_ollama_success_never_calls_gemini(isolated_session, monkeypatch: pytest.MonkeyPatch) -> None:
-    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "ollama,gemini")
     scripted = ScriptedProviders()
     scripted.script("ollama", json.dumps(_grounded_llm_payload()))
     scripted.script("gemini", LLMProviderError("Gemini provider request failed."))
@@ -112,7 +121,7 @@ def test_candidate_ollama_success_never_calls_gemini(isolated_session, monkeypat
 
 
 def test_candidate_offline_ollama_falls_back_to_gemini(isolated_session, monkeypatch: pytest.MonkeyPatch) -> None:
-    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "ollama,gemini")
     scripted = ScriptedProviders()
     scripted.script("ollama", LLMProviderError("Ollama provider request failed."))
     scripted.script("gemini", json.dumps(_grounded_llm_payload()))
@@ -132,7 +141,7 @@ def test_candidate_offline_ollama_falls_back_to_gemini(isolated_session, monkeyp
 def test_candidate_invalid_json_uses_structured_retries_then_fallback(
     isolated_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "ollama,gemini")
     scripted = ScriptedProviders()
     scripted.script("ollama", "not-json", "still-not-json")
     scripted.script("gemini", json.dumps(_grounded_llm_payload()))
@@ -152,7 +161,7 @@ def test_candidate_invalid_json_uses_structured_retries_then_fallback(
 def test_candidate_schema_invalid_then_gemini_persists_once(
     isolated_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "ollama,gemini")
     bad = {"name": "Alex Rivera", "skills": "not-a-list"}
     scripted = ScriptedProviders()
     scripted.script("ollama", json.dumps(bad), json.dumps(bad))
@@ -171,7 +180,7 @@ def test_candidate_schema_invalid_then_gemini_persists_once(
 
 
 def test_candidate_fatal_grounding_falls_back(isolated_session, monkeypatch: pytest.MonkeyPatch) -> None:
-    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "ollama,gemini")
     ungrounded = _grounded_llm_payload()
     ungrounded["name"] = "Someone Not On Resume"
     scripted = ScriptedProviders()
@@ -191,7 +200,7 @@ def test_candidate_fatal_grounding_falls_back(isolated_session, monkeypatch: pyt
 
 
 def test_candidate_all_providers_fail_persists_nothing(isolated_session, monkeypatch: pytest.MonkeyPatch) -> None:
-    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "ollama,gemini")
     scripted = ScriptedProviders()
     scripted.script("ollama", LLMProviderError("Ollama provider request failed."))
     scripted.script("gemini", LLMProviderError("Gemini provider request failed."))
@@ -212,7 +221,7 @@ def test_candidate_all_providers_fail_persists_nothing(isolated_session, monkeyp
 def test_candidate_invalid_upload_does_not_call_another_provider(
     isolated_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "ollama,gemini")
     scripted = ScriptedProviders()
     scripted.script("ollama", json.dumps(_grounded_llm_payload()))
     scripted.script("gemini", json.dumps(_grounded_llm_payload()))
@@ -226,6 +235,50 @@ def test_candidate_invalid_upload_does_not_call_another_provider(
             content_type="text/plain",
         )
     assert scripted.calls == []
+
+
+def test_candidate_uses_resume_order_not_global_llm_order(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "gemini,ollama")
+    scripted = ScriptedProviders()
+    scripted.script("gemini", json.dumps(_grounded_llm_payload()))
+    scripted.script("ollama", LLMProviderError("Ollama provider request failed."))
+    _patch_clients(monkeypatch, scripted, *_profile_modules())
+    stored, _, _ = build_candidate_profile_from_upload(
+        "alex.pdf",
+        build_simple_text_pdf(SAMPLE_RESUME_TEXT),
+        db=isolated_session,
+        user_id=TEST_USER_ID,
+        content_type="application/pdf",
+    )
+    assert stored.name == "Alex Rivera"
+    assert scripted.calls == ["gemini"]
+
+
+def test_candidate_skips_unconfigured_gemini_without_calling_it(
+    isolated_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _resume_order(monkeypatch, "gemini,ollama")
+    monkeypatch.setattr("backend.core.config.settings.gemini_api_key", None)
+    monkeypatch.setattr("backend.core.config.settings.gemini_api_key", "")
+    scripted = ScriptedProviders()
+    scripted.script("gemini", LLMProviderError("should not be called"))
+    scripted.script("ollama", json.dumps(_grounded_llm_payload()))
+    monkeypatch.setattr(
+        "backend.services.candidate_profile_agent.get_resume_llm_client",
+        scripted.get_client,
+    )
+    stored, _, _ = build_candidate_profile_from_upload(
+        "alex.pdf",
+        build_simple_text_pdf(SAMPLE_RESUME_TEXT),
+        db=isolated_session,
+        user_id=TEST_USER_ID,
+        content_type="application/pdf",
+    )
+    assert stored.name == "Alex Rivera"
+    assert scripted.calls == ["ollama"]
 
 
 def test_job_intelligence_ollama_success_never_calls_gemini(isolated_session, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -520,7 +573,7 @@ def test_gemini_then_ollama_order_is_honored(isolated_session, monkeypatch: pyte
 
 
 def test_fallback_logs_are_sanitized(isolated_session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "ollama,gemini")
     scripted = ScriptedProviders()
     scripted.script("ollama", LLMProviderError("Ollama provider request failed."))
     scripted.script("gemini", json.dumps(_grounded_llm_payload()))
@@ -543,7 +596,7 @@ def test_fallback_logs_are_sanitized(isolated_session, monkeypatch: pytest.Monke
 def test_candidate_persist_failure_does_not_call_next_provider(
     isolated_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _order(monkeypatch, "ollama,gemini")
+    _resume_order(monkeypatch, "ollama,gemini")
     scripted = ScriptedProviders()
     scripted.script("ollama", json.dumps(_grounded_llm_payload()))
     scripted.script("gemini", json.dumps(_grounded_llm_payload()))

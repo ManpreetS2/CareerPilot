@@ -493,6 +493,8 @@ def test_run_scout_survives_greenhouse_failure(
     monkeypatch.setattr(job_scout_service, "scout_remoteok", lambda *_a, **_k: (_ for _ in ()).throw(JobScoutError("x")))
     monkeypatch.setattr(job_scout_service, "scout_adzuna", lambda *_a, **_k: (_ for _ in ()).throw(JobScoutError("x")))
     monkeypatch.setattr(job_scout_service, "scout_remotive", lambda *_a, **_k: (_ for _ in ()).throw(JobScoutError("x")))
+    monkeypatch.setattr(job_scout_service, "scout_jobicy", lambda *_a, **_k: (_ for _ in ()).throw(JobScoutError("x")))
+    monkeypatch.setattr(job_scout_service, "scout_himalayas", lambda *_a, **_k: (_ for _ in ()).throw(JobScoutError("x")))
     mock_fetch["by_url"]["https://boards-api.greenhouse.io/v1/boards/deadboard/jobs"] = (
         lambda url, **_: _json_response(url, {"error": SECRET_BODY}, status_code=500)
     )
