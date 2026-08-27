@@ -92,6 +92,36 @@ describe("OnboardingPage", () => {
     expect(await screen.findByTestId("onboarding-step-1")).toBeInTheDocument();
   });
 
+  it("goes back two full steps on a real double-click, and does not get stuck", async () => {
+    // Documents a real bug found in a live browser, not one this test
+    // reproduces the original mechanism of: an ordinary double-click on
+    // Back — not a contrived edge case — left both the exiting and
+    // entering step cards permanently stuck at opacity 0, with no error
+    // and no way to recover short of a reload. Confirmed live in Chrome.
+    // It reproduced identically with AnimatePresence's mode="wait" on or
+    // off, so the fault was the animated exit/enter lifecycle itself under
+    // back-to-back key changes, not that one option — the fix removes the
+    // animation from this transition rather than tuning it. jsdom's
+    // animation timing never reproduced the stuck state either way, so
+    // this guards against a future regression obvious enough to break
+    // navigation outright, not the original failure itself.
+    //
+    // Separately, onBack previously computed its target step from the
+    // `step` closed over at render time rather than a functional update,
+    // so two Back clicks fired in the same tick (no `await` between them,
+    // deliberate here) both read the same stale value and only moved back
+    // one step instead of two — silently dropping half a double-click.
+    const user = userEvent.setup();
+    renderOnboarding();
+    await user.click(screen.getByTestId("onboarding-continue"));
+    await user.click(screen.getByTestId("onboarding-continue"));
+    await user.click(screen.getByTestId("onboarding-back"));
+    void user.click(screen.getByTestId("onboarding-back"));
+    expect(await screen.findByTestId("onboarding-step-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-step-2")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-step-3")).not.toBeInTheDocument();
+  });
+
   it("uses the Discover Analyze Prepare Track workflow labels", () => {
     renderOnboarding();
     const path = screen.getByTestId("workflow-path");
