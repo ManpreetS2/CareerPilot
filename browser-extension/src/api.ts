@@ -86,6 +86,8 @@ export type MatchScore = {
   missing_skills: string[];
   recommendation: "apply" | "consider" | "skip";
   rationale: string;
+  score_kind?: "full" | "preliminary" | "verified" | null;
+  eligibility_status?: "likely_eligible" | "eligibility_uncertain" | "likely_ineligible" | null;
 };
 
 export type MaterialsStatus = "missing" | "current" | "stale_pending" | "stale_reviewed" | null;
@@ -103,6 +105,7 @@ export type PanelData = {
   /** The approved package was kept through an explicit grounding override,
    * so its claims were never verified against the resume. */
   materials_unverified: boolean;
+  review_required?: boolean;
 };
 
 export function getPanelData(url: string): Promise<PanelData> {

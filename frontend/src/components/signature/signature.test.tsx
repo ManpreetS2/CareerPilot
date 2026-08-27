@@ -37,6 +37,7 @@ describe("signature motion language", () => {
           qualification_score: 88,
           preference_score: 80,
           scoring_version: 2,
+          score_kind: "verified",
           match_tier: "good_match",
           match_reasons: ["You match 1 of 1 required technical skills."],
           matched_skills: ["Python"],

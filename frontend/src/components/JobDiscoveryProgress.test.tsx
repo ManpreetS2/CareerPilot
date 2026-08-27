@@ -24,7 +24,7 @@ describe("JobDiscoveryProgress", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByTestId("job-discovery-stage-0")).toHaveAttribute("data-state", "active");
-    expect(screen.getByTestId("job-discovery-stage-5")).toHaveAttribute("data-state", "pending");
+    expect(screen.getByTestId("job-discovery-stage-6")).toHaveAttribute("data-state", "pending");
     expect(screen.queryByText("%")).not.toBeInTheDocument();
     expect(screen.queryByText(/LLM|SQL|score_job|database|API call/i)).not.toBeInTheDocument();
   });
@@ -33,12 +33,12 @@ describe("JobDiscoveryProgress", () => {
     vi.useFakeTimers();
     render(<JobDiscoveryProgress active />);
     act(() => {
-      vi.advanceTimersByTime(JOB_DISCOVERY_STAGE_THRESHOLDS_MS[5] + 12000);
+      vi.advanceTimersByTime(JOB_DISCOVERY_STAGE_THRESHOLDS_MS[6] + 12000);
     });
     expect(screen.getByTestId("job-discovery-stage-0")).toHaveAttribute("data-state", "complete");
-    expect(screen.getByTestId("job-discovery-stage-4")).toHaveAttribute("data-state", "complete");
-    expect(screen.getByTestId("job-discovery-stage-5")).toHaveAttribute("data-state", "active");
-    expect(screen.getByTestId("job-discovery-stage-5")).not.toHaveAttribute("data-state", "complete");
+    expect(screen.getByTestId("job-discovery-stage-5")).toHaveAttribute("data-state", "complete");
+    expect(screen.getByTestId("job-discovery-stage-6")).toHaveAttribute("data-state", "active");
+    expect(screen.getByTestId("job-discovery-stage-6")).not.toHaveAttribute("data-state", "complete");
     expect(screen.getByTestId("job-discovery-progress")).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByText(/opportunities found/i)).not.toBeInTheDocument();
   });

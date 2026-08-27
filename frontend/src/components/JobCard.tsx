@@ -44,6 +44,7 @@ export function JobCard({
           recommendation={match?.recommendation}
           matchTier={match?.match_tier}
           confidenceLevel={match?.confidence_level}
+          scoreKind={match?.score_kind}
           compact
         />
       </div>

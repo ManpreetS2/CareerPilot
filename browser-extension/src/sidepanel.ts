@@ -130,7 +130,7 @@ function renderTracked(data: PanelData, url: string) {
 
     <div class="card mt-3 p-4">
       <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Fit score</p>
-      <div class="mt-2">${matchBadge(score?.overall_score, score?.recommendation)}</div>
+      <div class="mt-2">${matchBadge(score?.overall_score, score?.recommendation, score?.score_kind)}</div>
       ${
         score
           ? `${evidenceList("Matched", score.matched_skills)}${evidenceList("Missing", score.missing_skills)}`
