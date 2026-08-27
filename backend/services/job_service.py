@@ -10,8 +10,10 @@ from datetime import date
 from fastapi import HTTPException, status
 
 from backend.db.database import SessionLocal
-from backend.db.models import JobRecord
+from backend.db.models import Candidate, JobRecord
 from backend.schemas.schemas import Job, JobIntelligence
+from backend.services.analysis_service import _candidate_work_modes, _city_state
+from backend.services.application_tracker_service import latest_preference
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +134,6 @@ def _preferred_location(preference) -> str | None:
     modes, not locations, and are skipped here — the remote preference is
     handled separately below.
     """
-    from backend.services.analysis_service import _candidate_work_modes, _city_state
-
     # If remote is acceptable at all, send no location. Adzuna's "where" is
     # the only place a location is used, and narrowing it to a city can only
     # remove remote listings the candidate would have taken — including ones
@@ -162,9 +162,6 @@ def derive_scout_criteria(db, user_id: int) -> ScoutCriteria:
     usable target roles, so discovery keeps working for a brand-new account
     that has not filled anything in yet.
     """
-    from backend.db.models import Candidate
-    from backend.services.application_tracker_service import latest_preference
-
     candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     preference = latest_preference(db, candidate, user_id)
     if preference is None:
