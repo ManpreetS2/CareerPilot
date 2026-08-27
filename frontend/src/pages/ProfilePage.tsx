@@ -1,15 +1,16 @@
-import { useMemo, useState, type DragEvent, type FormEvent } from "react";
+import { useState, type DragEvent, type FormEvent } from "react";
 import { FileUp, Upload } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CandidateSummary } from "../components/CandidateSummary";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { LoadingState } from "../components/LoadingState";
 import { PreferenceForm } from "../components/PreferenceForm";
+import { ResumeParsingProgress } from "../components/ResumeParsingProgress";
 import { PageHeader } from "../components/ui/page-header";
 import { Surface } from "../components/ui/surface";
 import { ReadinessPath } from "../components/signature/ReadinessPath";
 import { api } from "../lib/api";
 import { queryKeys } from "../lib/query-keys";
+import { resumeParseErrorHeading } from "../lib/resume-parse-error";
 import { useCandidateSession } from "../lib/session";
 import type { TargetPreferences } from "../lib/types";
 
@@ -34,7 +35,6 @@ export function ProfilePage() {
   const [prefsError, setPrefsError] = useState<unknown>(null);
   const [prefsSuccess, setPrefsSuccess] = useState<string | null>(null);
 
-  const canBuildProfile = useMemo(() => Boolean(file) && !profileLoading, [file, profileLoading]);
   const readinessFlags = [
     Boolean(liveCandidate?.name),
     Boolean(liveCandidate?.skills.length),
@@ -122,7 +122,7 @@ export function ProfilePage() {
             Parsing refreshes the grounded candidate profile. It does not invent job preferences.
           </p>
         </div>
-        <ErrorBanner error={profileError} />
+        <ErrorBanner error={profileError} heading={resumeParseErrorHeading(profileError)} />
         <form onSubmit={onBuildProfile} className="space-y-5">
           <label
             onDragOver={(event) => {
@@ -148,12 +148,16 @@ export function ProfilePage() {
               onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
             />
           </label>
-          <button type="submit" className="btn-primary" disabled={!canBuildProfile}>
+          <button type="submit" className="btn-primary" disabled={!file || profileLoading}>
             <Upload className="h-4 w-4" aria-hidden />
-            {profileLoading ? "Refreshing profile…" : "Upload / Replace Resume"}
+            {profileLoading
+              ? "Working…"
+              : profileError && file
+                ? "Retry"
+                : "Upload / Replace Resume"}
           </button>
         </form>
-        {profileLoading ? <LoadingState label="Extracting and grounding your resume…" /> : null}
+        {profileLoading ? <ResumeParsingProgress active /> : null}
       </Surface>
 
       {liveCandidate ? (

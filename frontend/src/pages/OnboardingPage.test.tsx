@@ -1,9 +1,10 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingPage } from "./OnboardingPage";
+import { api, ApiClientError } from "../lib/api";
 import { ThemeProvider } from "../lib/theme";
 import { createTestQueryClient, testUser } from "../test/render";
 
@@ -17,16 +18,37 @@ vi.mock("../lib/auth", () => ({
   }),
 }));
 
-vi.mock("../lib/api", () => ({
-  api: {
-    savePreferences: vi.fn().mockResolvedValue({
-      target_roles: [],
-      preferred_locations: [],
-      constraints: [],
-    }),
-    parseResume: vi.fn(),
+vi.mock("../lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api")>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      savePreferences: vi.fn().mockResolvedValue({
+        target_roles: [],
+        preferred_locations: [],
+        constraints: [],
+      }),
+      parseResume: vi.fn(),
+    },
+  };
+});
+
+const parsedResume = {
+  candidate: {
+    id: "cand-001",
+    name: "Alex Rivera",
+    skills: ["Python"],
+    projects: [],
+    experience: [],
+    education: [],
+    certifications: [],
+    strengths: [],
+    evidence_links: [],
   },
-}));
+  preferences: null,
+  note: "Grounded",
+};
 
 function renderOnboarding() {
   return render(
@@ -43,7 +65,21 @@ function renderOnboarding() {
   );
 }
 
+async function goToResumeStep(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("onboarding-continue"));
+  await user.click(screen.getByTestId("onboarding-continue"));
+  expect(await screen.findByTestId("onboarding-step-3")).toBeInTheDocument();
+}
+
 describe("OnboardingPage", () => {
+  beforeEach(() => {
+    vi.mocked(api.parseResume).mockReset();
+    vi.mocked(api.savePreferences).mockResolvedValue({
+      target_roles: [],
+      preferred_locations: [],
+      constraints: [],
+    });
+  });
   it("walks through seven steps", async () => {
     const user = userEvent.setup();
     renderOnboarding();
@@ -101,5 +137,51 @@ describe("OnboardingPage", () => {
     expect(path).toHaveTextContent("Track");
     expect(path).not.toHaveTextContent("Jobs");
     expect(path).not.toHaveTextContent("Match");
+  });
+
+  it("shows resume parsing stages while the API is still unresolved", async () => {
+    const user = userEvent.setup();
+    let resolveParse: (value: typeof parsedResume) => void = () => {};
+    vi.mocked(api.parseResume).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveParse = resolve;
+        }),
+    );
+    renderOnboarding();
+    await goToResumeStep(user);
+    const file = new File(["%PDF-1.4 test"], "resume.pdf", { type: "application/pdf" });
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+    await user.click(screen.getByTestId("onboarding-continue"));
+    expect(await screen.findByTestId("resume-parsing-progress")).toBeInTheDocument();
+    expect(screen.getByText("Reading your resume")).toBeInTheDocument();
+    expect(screen.getByText("Almost ready")).toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-step-3")).toBeInTheDocument();
+    expect(screen.queryByText(/No parsed profile yet/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("resume-parse-stage-4")).not.toHaveAttribute("data-state", "complete");
+    resolveParse(parsedResume);
+    expect(await screen.findByTestId("onboarding-step-4")).toBeInTheDocument();
+    expect(screen.queryByTestId("resume-parsing-progress")).not.toBeInTheDocument();
+    expect(screen.getByText("Alex Rivera")).toBeInTheDocument();
+  });
+
+  it("exits loading and offers Retry when parsing fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.parseResume)
+      .mockRejectedValueOnce(
+        new ApiClientError(502, "AI service temporarily unavailable. Please try again."),
+      )
+      .mockResolvedValueOnce(parsedResume);
+    renderOnboarding();
+    await goToResumeStep(user);
+    const file = new File(["%PDF-1.4 test"], "resume.pdf", { type: "application/pdf" });
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+    await user.click(screen.getByTestId("onboarding-continue"));
+    expect(await screen.findByText("AI service temporarily unavailable")).toBeInTheDocument();
+    expect(screen.queryByTestId("resume-parsing-progress")).not.toBeInTheDocument();
+    expect(screen.getByTestId("onboarding-step-3")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId("onboarding-step-4")).toBeInTheDocument();
+    expect(api.parseResume).toHaveBeenCalledTimes(2);
   });
 });
