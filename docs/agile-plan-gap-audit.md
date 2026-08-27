@@ -7,6 +7,12 @@ This audit is a map of what already exists. It does not reimplement Fit Score V2
 
 **Owner map** (from `docs/developer-b-ui-handoff.md`): Developer B owns discovery adapters, verification, ATS/form-fill, and the Chrome extension. Developer A owns shell, tokens, Prepare workspace, and Interview Coach placement.
 
+## Implementation status on this stacked branch
+
+`feat/full-job-requirements-foundation` adds `JobRequirementProfile`, content status, deterministic mining with AND/OR groups, eligibility, Verified vs Potential Fit, Top-N full-posting verification without sending all listings to Gemini, and Jobs/Job Detail UI that hides unverified percentages. Job Intelligence remains for materials/interview. Alembic is still not introduced.
+
+---
+
 ---
 
 ## Original Days 1–9

@@ -22,6 +22,12 @@ def resume_provider_names() -> list[str]:
     return parse_llm_provider_order(settings.resume_llm_provider_order)
 
 
+def job_requirements_provider_names() -> list[str]:
+    """Job requirement extraction order. Independent of Fit scoring models."""
+
+    return parse_llm_provider_order(settings.job_requirements_llm_provider_order)
+
+
 def resume_provider_is_configured(provider: str) -> bool:
     """Skip known-unconfigured resume providers without waiting on them."""
 

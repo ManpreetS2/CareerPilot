@@ -23,6 +23,7 @@ from backend.core.config import settings
 from backend.db.database import SessionLocal
 from backend.db.models import JobRecord
 from backend.schemas.schemas import Job
+from backend.services.job_content import classify_content_status, source_fingerprint
 from backend.services.job_service import record_to_job
 from backend.services.url_safety import UnsafeURLError, assert_safe_outbound_url, fetch_url_safely
 
@@ -955,6 +956,7 @@ def normalize_job(raw: dict, source: str) -> Job:
             url=url,
             description=_clean_description(raw.get("content")),
             source="greenhouse",
+            source_job_id=str(job_id) if job_id else None,
             date_posted=_parse_iso_date(raw.get("first_published")),
             date_scraped=now,
             status="discovered",
@@ -1064,6 +1066,13 @@ def deduplicate_jobs(jobs: list[Job]) -> list[Job]:
     return list(seen.values())
 
 
+def _stamp_content(record: JobRecord, *, used_excerpt: bool = False) -> None:
+    record.content_status = classify_content_status(
+        record.source, record.description, used_excerpt=used_excerpt
+    )
+    record.content_hash = source_fingerprint(record.title, record.description)
+
+
 def persist_jobs(jobs: list[Job]) -> list[Job]:
     """Upsert normalized jobs into SQLite (matched by normalized URL, else
     title+company+location) and return the stored records."""
@@ -1125,6 +1134,9 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                 # shouldn't silently overwrite.
                 if existing.status == "stale":
                     existing.status = "discovered"
+                if job.source_job_id:
+                    existing.source_job_id = job.source_job_id
+                _stamp_content(existing)
                 record = existing
                 if normalized_url:
                     by_url[normalized_url] = record
@@ -1145,8 +1157,10 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                     date_posted=job.date_posted.isoformat() if job.date_posted else None,
                     date_scraped=job.date_scraped,
                     ats=job.ats,
+                    source_job_id=job.source_job_id,
                     status=job.status,
                 )
+                _stamp_content(record)
                 db.add(record)
                 if normalized_url:
                     by_url[normalized_url] = record

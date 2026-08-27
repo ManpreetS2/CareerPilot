@@ -72,6 +72,9 @@ class TargetPreferences(BaseModel):
     currently_enrolled_in_program: str | None = None
     expected_graduation: str | None = None
     degree_pursuing: str | None = None
+    academic_year: str | None = None
+    work_mode_preferences: list[str] = Field(default_factory=list)
+    relocation_willingness: str | None = None
     gender: str | None = None
     race_ethnicity: str | None = None
     veteran_status: str | None = None
@@ -101,6 +104,9 @@ class Job(BaseModel):
     date_posted: date | None = None
     date_scraped: datetime | None = None
     ats: str | None = None
+    source_job_id: str | None = None
+    content_status: Literal["full", "partial", "unknown"] | None = None
+    content_hash: str | None = None
     status: Literal["discovered", "verified", "flagged", "stale"] = "discovered"
     verification_notes: str | None = None
     verified_at: datetime | None = None
@@ -139,7 +145,7 @@ class MatchScore(BaseModel):
     apply_recommendation: Literal["strong_apply", "apply", "consider", "probably_skip"] | None = None
     ranking_score: float | None = Field(default=None, ge=0, le=100)
     scoring_version: int = 1
-    score_kind: Literal["full", "preliminary"] | None = None
+    score_kind: Literal["full", "preliminary", "verified"] | None = None
     match_reasons: list[str] = Field(default_factory=list)
     gap_reasons: list[str] = Field(default_factory=list)
     watchouts: list[str] = Field(default_factory=list)
@@ -376,6 +382,7 @@ class ExtensionPanelData(BaseModel):
     # grounding override. The panel must say so before filling a real
     # application form with claims that were never verified.
     materials_unverified: bool = False
+    review_required: bool = False
 
 
 TrackerStatus = Literal[

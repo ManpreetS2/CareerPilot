@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     resume_ollama_num_ctx: int = 8192
     resume_ollama_num_predict: int = 2048
 
+    job_requirements_llm_provider_order: str = "gemini,ollama"
+    job_requirements_gemini_model: str = "gemini-3.5-flash-lite"
+    job_requirements_ollama_model: str = "qwen3.5:4b"
+    job_requirements_verify_top_n: int = 10
+
     database_url: str = "sqlite:///./data/careerpilot.db"
     backend_url: str = "http://localhost:8000"
     log_level: str = "INFO"
@@ -214,6 +219,10 @@ def validate_llm_settings(cfg: Settings | None = None) -> None:
     cfg = cfg or settings
     parse_llm_provider_order(cfg.llm_provider_order)
     parse_llm_provider_order(cfg.resume_llm_provider_order)
+    parse_llm_provider_order(cfg.job_requirements_llm_provider_order)
+    req_ollama = (cfg.job_requirements_ollama_model or "").strip()
+    if req_ollama.lower().startswith("qwen3:14b"):
+        raise RuntimeError("Job requirement extraction must not use qwen3:14b.")
     validate_ollama_base_url(cfg.ollama_base_url)
     model = (cfg.ollama_model or "").strip()
     if not model or _has_control_characters(cfg.ollama_model or ""):
