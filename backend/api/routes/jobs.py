@@ -17,13 +17,17 @@ from backend.schemas.schemas import (
 )
 from backend.services.analysis_service import list_stored_match_scores
 from backend.services.job_scout_service import JobScoutError, ingest_job_url, normalize_job, persist_jobs
-from backend.services.job_service import get_job, list_jobs, scout_jobs
+from backend.services.job_service import (
+    clean_search_term,
+    derive_scout_criteria,
+    get_job,
+    list_jobs,
+    scout_jobs,
+)
 from backend.services.job_verification_service import verify_all, verify_and_store
 from backend.services.url_safety import UnsafeURLError
 
 router = APIRouter(prefix="/api", tags=["jobs"])
-
-DEFAULT_SCOUT_QUERY = "software engineer intern"
 
 
 @router.get("/jobs", response_model=list[Job])
@@ -41,15 +45,37 @@ def list_job_scores(
 
 @router.post("/scout-jobs", response_model=ScoutJobsResponse, status_code=status.HTTP_202_ACCEPTED)
 def trigger_scout(
-    what: str = DEFAULT_SCOUT_QUERY,
+    what: str | None = None,
     where: str | None = None,
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ScoutJobsResponse:
-    """Run Adzuna + RemoteOK scouts, normalize/dedupe/persist, and return the stored jobs."""
-    jobs = scout_jobs(query=what, location=where)
+    """Search every configured source, normalize/dedupe/persist, return stored jobs.
+
+    With no `what`, the search comes from the user's saved target roles and
+    preferred location. `what` previously defaulted to a fixed string, which
+    made "the user typed this exact query" indistinguishable from "the user
+    typed nothing" — so preferences could never take over, and every run
+    searched the same hardcoded role regardless of what the user wanted.
+
+    An explicit `what`/`where` still wins outright: this reads preferences to
+    fill in a blank, never to override a deliberate search.
+    """
+    criteria = derive_scout_criteria(db, user.id)
+    # An explicit query is cleaned exactly like a saved one: both end up in
+    # the same outbound query string, so both need the same whitespace
+    # collapsing and length bound.
+    explicit_query = clean_search_term(what) if what else ""
+    explicit_location = clean_search_term(where) if where else ""
+    queries = [explicit_query] if explicit_query else criteria.queries
+    location = explicit_location or criteria.location
+
+    jobs = scout_jobs(queries=queries, location=location)
+    searched = ", ".join(queries)
+    where_note = f" in {location}" if location else ""
     return ScoutJobsResponse(
         jobs=jobs,
-        note=f"Scouted and stored {len(jobs)} job(s) from live sources.",
+        note=f"Scouted and stored {len(jobs)} job(s) from live sources for {searched}{where_note}.",
     )
 
 

@@ -132,7 +132,13 @@ def _latest_match_for_job(
     )
 
 
-def _latest_preference(db: Session, candidate: Candidate | None, user_id: int) -> TargetPreference | None:
+def latest_preference(db: Session, candidate: Candidate | None, user_id: int) -> TargetPreference | None:
+    """The user's most recently saved preferences.
+
+    Public because job discovery needs it too. Handles `candidate=None`
+    because preferences can be saved before any resume upload — see the
+    comment on TargetPreference.user_id in db/models.py.
+    """
     linked = (
         db.query(TargetPreference)
         .filter(TargetPreference.user_id == user_id)
@@ -321,7 +327,7 @@ def get_dashboard_summary(db: Session, user_id: int) -> DashboardSummary:
 
     jobs = db.query(JobRecord).all()
     candidate = _latest_candidate(db, user_id)
-    preferences = _latest_preference(db, candidate, user_id)
+    preferences = latest_preference(db, candidate, user_id)
     trackers = db.query(ApplicationTrackerRecord).filter(ApplicationTrackerRecord.user_id == user_id).all()
     packages = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.user_id == user_id).all()
 
