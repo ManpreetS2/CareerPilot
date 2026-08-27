@@ -27,6 +27,7 @@ from backend.db.models import (
 from backend.schemas.schemas import InterviewAnswerFeedback, InterviewPrep, JobIntelligence, MatchScore
 from backend.services.application_materials_agent import candidate_record_to_profile
 from backend.services.job_intelligence_service import get_stored_job_intelligence
+from backend.services.job_requirement_extractor import load_requirement_profile
 from backend.services.job_service import record_to_job
 from backend.services.llm_client import (
     LLMConfigurationError,
@@ -172,9 +173,28 @@ def load_interview_prep_context(db: Session, job_id: str, user_id: int) -> Inter
         .filter(JobIntelligenceRecord.job_id == job.id)
         .first()
     )
-    if intelligence_row is None:
+    profile = load_requirement_profile(db, job)
+    if intelligence_row is None and profile is None:
         raise InterviewIntelligenceMissingError()
-    intelligence = get_stored_job_intelligence(db, job_id)
+    if intelligence_row is None:
+        intelligence = JobIntelligence(
+            job_id=job.public_id,
+            required_skills=list(profile.required_skills),
+            preferred_skills=list(profile.preferred_skills),
+            responsibilities=list(profile.primary_responsibilities),
+            likely_interview_focus=[],
+        )
+    else:
+        intelligence = get_stored_job_intelligence(db, job_id)
+        if profile is not None:
+            intelligence.required_skills = list(
+                dict.fromkeys([*profile.required_skills, *intelligence.required_skills])
+            )
+            intelligence.preferred_skills = list(
+                dict.fromkeys([*profile.preferred_skills, *intelligence.preferred_skills])
+            )
+            if profile.primary_responsibilities:
+                intelligence.responsibilities = list(profile.primary_responsibilities)
     candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     skills: list[str] = []
     if candidate is not None:
