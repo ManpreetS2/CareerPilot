@@ -212,7 +212,7 @@ def test_scout_greenhouse_fetches_configured_board_and_filters_by_title(
             ),
         )
     )
-    listings = scout_greenhouse("software engineer intern")
+    listings = scout_greenhouse(["software engineer intern"])
     assert [item["id"] for item in listings] == [1]
     assert listings[0]["_board_token"] == "stripe"
     assert mock_fetch["calls"] == ["https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true"]
@@ -260,7 +260,7 @@ def test_scout_lever_fetches_configured_company_and_filters_by_title(
             {"id": "def", "text": "Recruiter", "categories": {}},
         ),
     )
-    listings = scout_lever("backend engineer")
+    listings = scout_lever(["backend engineer"])
     assert [item["id"] for item in listings] == ["abc"]
     assert listings[0]["_company_slug"] == "ro"
 
@@ -497,5 +497,5 @@ def test_run_scout_survives_greenhouse_failure(
         lambda url, **_: _json_response(url, {"error": SECRET_BODY}, status_code=500)
     )
 
-    result = job_scout_service.run_scout("software engineer intern")
+    result = job_scout_service.run_scout(["software engineer intern"])
     assert result == []  # every source failed/empty, but run_scout itself must not raise

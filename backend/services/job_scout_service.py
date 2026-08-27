@@ -416,8 +416,13 @@ def scout_adzuna(query: str, location: str | None = None) -> list[dict]:
     return response.json().get("results", [])
 
 
-def scout_remoteok(query: str | None = None) -> list[dict]:
-    """Pull RemoteOK's public listings feed and return raw listing dicts."""
+def scout_remoteok(queries: list[str] | None = None) -> list[dict]:
+    """Pull RemoteOK's public listings feed and return raw listing dicts.
+
+    Takes every target role at once: the feed is identical whatever is being
+    searched for, so it is fetched once and filtered against all of them.
+    """
+    _reject_bare_query_string(queries)
     try:
         with _client() as client:
             response = client.get(REMOTEOK_URL)
@@ -430,8 +435,8 @@ def scout_remoteok(query: str | None = None) -> list[dict]:
     # listing carries an "id", so filter on that rather than slicing [1:].
     listings = [item for item in payload if isinstance(item, dict) and item.get("id")]
 
-    if query:
-        listings = [item for item in listings if _title_matches_query(item.get("position"), query)]
+    if queries:
+        listings = [item for item in listings if _title_matches_any_query(item.get("position"), queries)]
     return listings[: settings.scout_results_per_source]
 
 
@@ -472,7 +477,7 @@ def _fetch_greenhouse_board_jobs(board_token: str) -> list[dict]:
     return payload.get("jobs") or []
 
 
-def scout_greenhouse(query: str | None = None) -> list[dict]:
+def scout_greenhouse(queries: list[str] | None = None) -> list[dict]:
     """Discover current openings across every configured Greenhouse board.
 
     Greenhouse has no cross-company search — each board must be listed
@@ -480,6 +485,7 @@ def scout_greenhouse(query: str | None = None) -> list[dict]:
     every other configured board (per-token isolation, not just
     per-provider, since one "source" now fans out over N boards).
     """
+    _reject_bare_query_string(queries)
     listings: list[dict] = []
     for token in _default_greenhouse_boards():
         try:
@@ -488,7 +494,7 @@ def scout_greenhouse(query: str | None = None) -> list[dict]:
             logger.warning("Greenhouse board '%s' skipped: %s", token, exc)
             continue
         for item in raw_jobs:
-            if query and not _title_matches_query(item.get("title"), query):
+            if queries and not _title_matches_any_query(item.get("title"), queries):
                 continue
             enriched = dict(item)
             enriched["_board_token"] = token
@@ -522,13 +528,14 @@ def _fetch_lever_company_postings(company_slug: str) -> list[dict]:
     return payload
 
 
-def scout_lever(query: str | None = None) -> list[dict]:
+def scout_lever(queries: list[str] | None = None) -> list[dict]:
     """Discover current openings across every configured Lever company.
 
     Same board-scoped constraint as Greenhouse — Lever's public API lists
     one company's postings at a time, no cross-company search — so each
     company slug gets its own try/except (per-company isolation).
     """
+    _reject_bare_query_string(queries)
     listings: list[dict] = []
     for slug in _default_lever_companies():
         try:
@@ -537,7 +544,7 @@ def scout_lever(query: str | None = None) -> list[dict]:
             logger.warning("Lever company '%s' skipped: %s", slug, exc)
             continue
         for item in raw_jobs:
-            if query and not _title_matches_query(item.get("text"), query):
+            if queries and not _title_matches_any_query(item.get("text"), queries):
                 continue
             enriched = dict(item)
             enriched["_company_slug"] = slug
@@ -653,6 +660,32 @@ def _title_matches_query(title: str | None, query: str) -> bool:
     if not words:
         return True
     return any(w in (title or "").lower() for w in words)
+
+
+def _reject_bare_query_string(queries: list[str] | None) -> None:
+    """The full-feed sources take a list of roles, not one string. A bare
+    string is iterable, so passing one would silently match against single
+    characters — every listing would match on "e" — and look like a working
+    search returning noise. Fail loudly instead."""
+    if isinstance(queries, str):
+        raise TypeError("queries must be a list of role strings, not a single string")
+
+
+def _title_matches_any_query(title: str | None, queries: list[str]) -> bool:
+    """Multi-query form of the above, for a user searching several target
+    roles at once.
+
+    The full-feed sources fetch the same listings regardless of the query and
+    filter locally, so they are called once and their results matched against
+    every role — refetching Greenhouse's and Lever's configured boards once
+    per role would be the same network work repeated for nothing.
+
+    An empty list matches everything, matching the single-query behavior for
+    an empty query.
+    """
+    if not queries:
+        return True
+    return any(_title_matches_query(title, query) for query in queries)
 
 
 def _format_salary(min_value: float | None, max_value: float | None) -> str | None:
@@ -922,37 +955,57 @@ def _normalize_listings(raw_listings: list[dict], source: str) -> list[Job]:
     return jobs
 
 
-def run_scout(query: str, location: str | None = None) -> list[Job]:
+def run_scout(queries: list[str], location: str | None = None) -> list[Job]:
     """Query every configured source, normalize, dedupe, and persist. Missing
     or failing sources are skipped (logged), not fatal — a scout run should
-    still return whatever sources are actually reachable/configured."""
+    still return whatever sources are actually reachable/configured.
+
+    `queries` is the candidate's target roles, so a scout run covers all of
+    them at once. The sources split into two kinds and are spent accordingly:
+
+      - Adzuna and Remotive search server-side, so they are called once per
+        role. There is no way to ask them for several roles in one request.
+      - RemoteOK, Greenhouse and Lever return a fixed feed and are filtered
+        locally, so they are fetched ONCE and matched against every role.
+        Calling them per role would refetch the same listings — and, for
+        Greenhouse and Lever, re-walk every configured board — to obtain
+        results already in hand.
+
+    With three roles that is 2x3 + 3 = 9 source calls rather than 5x3 = 15.
+    """
+    _reject_bare_query_string(queries)
     raw_jobs: list[Job] = []
 
+    # Full-feed sources: fetched once, filtered against every role.
     try:
-        raw_jobs.extend(_normalize_listings(scout_remoteok(query), "remoteok"))
+        raw_jobs.extend(_normalize_listings(scout_remoteok(queries), "remoteok"))
     except JobScoutError as exc:
         logger.warning("RemoteOK scout skipped: %s", exc)
 
     try:
-        raw_jobs.extend(_normalize_listings(scout_adzuna(query, location), "adzuna"))
-    except JobScoutError as exc:
-        logger.warning("Adzuna scout skipped: %s", exc)
-
-    try:
-        raw_jobs.extend(_normalize_listings(scout_greenhouse(query), "greenhouse"))
+        raw_jobs.extend(_normalize_listings(scout_greenhouse(queries), "greenhouse"))
     except JobScoutError as exc:
         logger.warning("Greenhouse scout skipped: %s", exc)
 
     try:
-        raw_jobs.extend(_normalize_listings(scout_lever(query), "lever"))
+        raw_jobs.extend(_normalize_listings(scout_lever(queries), "lever"))
     except JobScoutError as exc:
         logger.warning("Lever scout skipped: %s", exc)
 
-    try:
-        raw_jobs.extend(_normalize_listings(scout_remotive(query), "remotive"))
-    except JobScoutError as exc:
-        logger.warning("Remotive scout skipped: %s", exc)
+    # Server-side search sources: one call per role.
+    for query in queries:
+        try:
+            raw_jobs.extend(_normalize_listings(scout_adzuna(query, location), "adzuna"))
+        except JobScoutError as exc:
+            logger.warning("Adzuna scout skipped for %r: %s", query, exc)
 
+        try:
+            raw_jobs.extend(_normalize_listings(scout_remotive(query), "remotive"))
+        except JobScoutError as exc:
+            logger.warning("Remotive scout skipped for %r: %s", query, exc)
+
+    # Dedupe spans all roles: the same posting surfaced by two different role
+    # queries collapses to one row through the existing key tiers.
     stored = persist_jobs(deduplicate_jobs(raw_jobs))
 
     # Deferred import: job_verification_service imports

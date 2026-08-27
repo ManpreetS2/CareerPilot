@@ -4,6 +4,7 @@ logic lives in job_scout_service.py; this module reads what's been stored."""
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date
 
 from fastapi import HTTPException, status
@@ -64,12 +65,107 @@ def get_job(job_id: str) -> Job:
         return record_to_job(record)
 
 
-def scout_jobs(query: str = "software engineer intern", location: str | None = None) -> list[Job]:
+DEFAULT_SCOUT_QUERY = "software engineer intern"
+
+# Bounds the cost of a scout run. Adzuna and Remotive are called once per
+# role, so this is a direct multiplier on outbound requests. Three covers the
+# realistic case (a candidate targeting a couple of adjacent titles) without
+# letting a long preferences list turn one click into dozens of API calls.
+MAX_SCOUT_QUERIES = 3
+
+
+@dataclass(frozen=True)
+class ScoutCriteria:
+    """What a scout run should actually search for."""
+
+    queries: list[str]
+    location: str | None
+    derived_from_preferences: bool
+
+
+def _deduped_roles(target_roles: object) -> list[str]:
+    """Trimmed, case-insensitively deduped, order preserved."""
+    if not isinstance(target_roles, list):
+        return []
+    seen: set[str] = set()
+    roles: list[str] = []
+    for entry in target_roles:
+        if not isinstance(entry, str):
+            continue
+        role = entry.strip()
+        if not role:
+            continue
+        key = role.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        roles.append(role)
+    return roles
+
+
+def _preferred_location(preference) -> str | None:
+    """The first saved location that is actually a place.
+
+    Reuses analysis_service's parser rather than adding a second one: scoring
+    uses it to decide whether a job's location matches the candidate's, so
+    discovery searching by something scoring would not recognize as a place
+    would surface jobs it then penalizes. Entries like "Remote" are work
+    modes, not locations, and are skipped here — the remote preference is
+    handled separately below.
+    """
+    from backend.services.analysis_service import _candidate_work_modes, _city_state
+
+    # If remote is acceptable at all, send no location. Adzuna's "where" is
+    # the only place a location is used, and narrowing it to a city can only
+    # remove remote listings the candidate would have taken — including ones
+    # they are strictly more interested in than a far-away onsite role.
+    # Searching broadly and letting _location_score rank the results loses
+    # nothing; narrowing loses matches outright. Note this reads remote-ness
+    # from _candidate_work_modes, which counts a "Remote" entry in
+    # preferred_locations as well as an explicit remote_preference, so
+    # ["Remote", "Austin, TX"] is treated as remote-capable.
+    if "remote" in _candidate_work_modes(preference):
+        return None
+
+    for entry in preference.preferred_locations or []:
+        if isinstance(entry, str) and _city_state(entry) is not None:
+            return entry.strip()
+    return None
+
+
+def derive_scout_criteria(db, user_id: int) -> ScoutCriteria:
+    """Turn the user's saved preferences into what discovery should search.
+
+    Falls back to the historic hardcoded query when the user has saved no
+    usable target roles, so discovery keeps working for a brand-new account
+    that has not filled anything in yet.
+    """
+    from backend.db.models import Candidate
+    from backend.services.application_tracker_service import latest_preference
+
+    candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
+    preference = latest_preference(db, candidate, user_id)
+    if preference is None:
+        return ScoutCriteria([DEFAULT_SCOUT_QUERY], None, derived_from_preferences=False)
+
+    roles = _deduped_roles(preference.target_roles)
+    if not roles:
+        # Preferences exist but name no role — still honor a saved location.
+        return ScoutCriteria(
+            [DEFAULT_SCOUT_QUERY], _preferred_location(preference), derived_from_preferences=False
+        )
+
+    return ScoutCriteria(
+        roles[:MAX_SCOUT_QUERIES], _preferred_location(preference), derived_from_preferences=True
+    )
+
+
+def scout_jobs(queries: list[str] | None = None, location: str | None = None) -> list[Job]:
     # Deferred import: job_scout_service imports record_to_job from this module,
     # so the reverse import must happen at call time to avoid a circular import.
     from backend.services.job_scout_service import run_scout
 
-    return run_scout(query=query, location=location)
+    return run_scout(queries=queries or [DEFAULT_SCOUT_QUERY], location=location)
 
 
 def mock_job_intelligence(job_id: str) -> JobIntelligence:
