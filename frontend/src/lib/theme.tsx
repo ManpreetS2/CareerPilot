@@ -2,41 +2,81 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
 
-type Theme = "light" | "dark";
+export type ThemePreference = "light" | "dark" | "system";
+export type ResolvedTheme = "light" | "dark";
 
-const STORAGE_KEY = "careerpilot-theme";
+const THEME_KEY = "careerpilot-theme";
+const MOTION_KEY = "careerpilot-reduced-motion";
 
 const ThemeContext = createContext<{
-  theme: Theme;
-  toggle: () => void;
+  preference: ThemePreference;
+  resolved: ResolvedTheme;
+  setPreference: (next: ThemePreference) => void;
+  reducedMotion: boolean;
+  appReducedMotion: boolean;
+  setReducedMotion: (next: boolean) => void;
 } | null>(null);
 
+function readPreference(): ThemePreference {
+  const stored = localStorage.getItem(THEME_KEY);
+  if (stored === "light" || stored === "dark" || stored === "system") return stored;
+  if (stored === "dark" || stored === "light") return stored;
+  return "system";
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "dark" || stored === "light") return stored;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  });
+  const [preference, setPreferenceState] = useState<ThemePreference>(readPreference);
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  const [osReduced, setOsReduced] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  const [appReduced, setAppReduced] = useState(() => localStorage.getItem(MOTION_KEY) === "1");
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem(STORAGE_KEY, theme);
-  }, [theme]);
+    const color = window.matchMedia("(prefers-color-scheme: dark)");
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onColor = () => setSystemDark(color.matches);
+    const onMotion = () => setOsReduced(motion.matches);
+    color.addEventListener("change", onColor);
+    motion.addEventListener("change", onMotion);
+    return () => {
+      color.removeEventListener("change", onColor);
+      motion.removeEventListener("change", onMotion);
+    };
+  }, []);
 
-  return (
-    <ThemeContext.Provider
-      value={{
-        theme,
-        toggle: () => setTheme((current) => (current === "dark" ? "light" : "dark")),
-      }}
-    >
-      {children}
-    </ThemeContext.Provider>
+  const resolved: ResolvedTheme =
+    preference === "system" ? (systemDark ? "dark" : "light") : preference;
+  const reducedMotion = appReduced || osReduced;
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", resolved === "dark");
+    document.documentElement.dataset.theme = resolved;
+    document.documentElement.classList.toggle("reduce-motion", reducedMotion);
+    localStorage.setItem(THEME_KEY, preference);
+    localStorage.setItem(MOTION_KEY, appReduced ? "1" : "0");
+  }, [preference, resolved, reducedMotion, appReduced]);
+
+  const value = useMemo(
+    () => ({
+      preference,
+      resolved,
+      setPreference: setPreferenceState,
+      reducedMotion,
+      appReducedMotion: appReduced,
+      setReducedMotion: setAppReduced,
+    }),
+    [preference, resolved, reducedMotion, appReduced],
   );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme() {

@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, LayoutGrid, List } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
 import { MatchBadge } from "../components/MatchBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { PageHeader } from "../components/ui/page-header";
 import { api, ApiClientError } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { cn } from "../lib/cn";
+import { readTrackerView, saveTrackerView, type TrackerView } from "../lib/tracker-view";
 import type { ApplicationListItem, TrackerStatus } from "../lib/types";
 
 const TRACKER_STATUSES: TrackerStatus[] = [
@@ -19,6 +23,14 @@ const TRACKER_STATUSES: TrackerStatus[] = [
   "rejected",
   "offer",
   "withdrawn",
+];
+
+const KANBAN_COLUMNS: { id: TrackerStatus | "untracked"; label: string }[] = [
+  { id: "untracked", label: "Not tracked" },
+  ...TRACKER_STATUSES.map((status) => ({
+    id: status,
+    label: status.replaceAll("_", " "),
+  })),
 ];
 
 function statusOptions(item: ApplicationListItem): TrackerStatus[] {
@@ -35,11 +47,98 @@ function formatUpdated(value?: string | null) {
   return parsed.toLocaleString();
 }
 
+function columnItems(items: ApplicationListItem[], column: TrackerStatus | "untracked") {
+  if (column === "untracked") return items.filter((item) => !item.tracker_status);
+  return items.filter((item) => item.tracker_status === column);
+}
+
+function TrackerCard({
+  item,
+  updating,
+  onStatusChange,
+  onReminderChange,
+}: {
+  item: ApplicationListItem;
+  updating: boolean;
+  onStatusChange: (jobId: string, status: TrackerStatus) => void;
+  onReminderChange: (jobId: string, date: string | null) => void;
+}) {
+  return (
+    <article className="rounded-[var(--radius-md)] border border-border/80 bg-background/70 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="wrap-anywhere font-display text-base font-semibold leading-snug">{item.title}</h2>
+          <p className="wrap-anywhere text-sm text-muted-foreground">{item.company}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Updated {formatUpdated(item.updated_at)}</p>
+        </div>
+        <MatchBadge score={item.match_score} recommendation={item.recommendation} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {item.approval_status ? (
+          <StatusBadge status={item.approval_status} />
+        ) : (
+          <span className="text-xs text-muted-foreground">No approval yet</span>
+        )}
+        {item.tracker_status ? <StatusBadge status={item.tracker_status} /> : null}
+      </div>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex min-w-0 flex-col gap-1 text-sm sm:min-w-[10rem]">
+            <span className="text-muted-foreground">Tracking status</span>
+            <select
+              className="input"
+              aria-label={`Tracking status for ${item.title} at ${item.company}`}
+              value={item.tracker_status ?? ""}
+              disabled={updating}
+              onChange={(event) => {
+                const value = event.target.value as TrackerStatus;
+                if (!value || value === item.tracker_status) return;
+                onStatusChange(item.job_id, value);
+              }}
+            >
+              <option value="" disabled>
+                Set status…
+              </option>
+              {statusOptions(item).map((status) => (
+                <option key={status} value={status}>
+                  {status.replaceAll("_", " ")}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-w-0 flex-col gap-1 text-sm sm:min-w-[9rem]">
+            <span className="text-muted-foreground">Follow-up</span>
+            <input
+              type="date"
+              className="input"
+              aria-label={`Follow-up reminder date for ${item.title} at ${item.company}`}
+              value={item.reminder_date ?? ""}
+              disabled={updating || !item.tracker_status}
+              title={item.tracker_status ? undefined : "Set a tracking status first"}
+              onChange={(event) => onReminderChange(item.job_id, event.target.value || null)}
+            />
+          </label>
+        </div>
+        <Link to={`/jobs/${item.job_id}/prepare`} className="btn-ghost px-2 py-1.5 text-primary">
+          Open application
+          <ArrowUpRight className="h-4 w-4" aria-hidden />
+        </Link>
+      </div>
+    </article>
+  );
+}
+
 export function ApplicationsPage() {
+  const { user } = useAuth();
   const [items, setItems] = useState<ApplicationListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [view, setView] = useState<TrackerView>(() => (user ? readTrackerView(user.id) : "list"));
+
+  useEffect(() => {
+    if (user) setView(readTrackerView(user.id));
+  }, [user]);
 
   async function loadList() {
     setLoading(true);
@@ -59,11 +158,12 @@ export function ApplicationsPage() {
     void loadList();
   }, []);
 
+  function setPersistedView(next: TrackerView) {
+    setView(next);
+    if (user) saveTrackerView(user.id, next);
+  }
+
   async function handleStatusChange(jobId: string, nextStatus: TrackerStatus) {
-    // Pass the already-known reminder date through — updateTracking always
-    // sends reminder_date in the request body (same shape the note field
-    // already uses), so a status-only change would otherwise silently wipe
-    // out a reminder the user set earlier.
     const current = items.find((item) => item.job_id === jobId);
     setUpdatingId(jobId);
     setError(null);
@@ -91,7 +191,7 @@ export function ApplicationsPage() {
 
   async function handleReminderDateChange(jobId: string, nextDate: string | null) {
     const current = items.find((item) => item.job_id === jobId);
-    if (!current?.tracker_status) return; // no tracker row yet — set a status first
+    if (!current?.tracker_status) return;
     setUpdatingId(jobId);
     setError(null);
     try {
@@ -114,15 +214,42 @@ export function ApplicationsPage() {
     }
   }
 
+  const timeline = useMemo(() => {
+    return [...items].sort((a, b) => {
+      const at = a.updated_at ? Date.parse(a.updated_at) : 0;
+      const bt = b.updated_at ? Date.parse(b.updated_at) : 0;
+      return bt - at;
+    });
+  }, [items]);
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-4xl font-semibold">Applications</h1>
-        <p className="mt-2 max-w-2xl text-ink-600 dark:text-ink-300">
-          Track saved roles without changing approval decisions or assisted-apply results. Status
-          updates run only when you choose a new value.
-        </p>
-      </div>
+      <PageHeader
+        title="Track"
+        description="Kanban on desktop, list/timeline when you want chronology. Status changes use the same tracker API and never rely on drag-and-drop."
+        actions={
+          <div className="flex rounded-[var(--radius-sm)] border border-border p-1" role="group" aria-label="Tracker view">
+            <button
+              type="button"
+              className={cn("btn-ghost h-9 px-3", view === "kanban" && "bg-primary/10 text-foreground")}
+              aria-pressed={view === "kanban"}
+              onClick={() => setPersistedView("kanban")}
+            >
+              <LayoutGrid className="h-4 w-4" aria-hidden />
+              Kanban
+            </button>
+            <button
+              type="button"
+              className={cn("btn-ghost h-9 px-3", view === "list" && "bg-primary/10 text-foreground")}
+              aria-pressed={view === "list"}
+              onClick={() => setPersistedView("list")}
+            >
+              <List className="h-4 w-4" aria-hidden />
+              List
+            </button>
+          </div>
+        }
+      />
 
       <ErrorBanner error={error} />
 
@@ -138,90 +265,52 @@ export function ApplicationsPage() {
             </Link>
           }
         />
-      ) : (
-        <div className="grid gap-4">
-          {items.map((item) => (
-            <article key={item.job_id} className="card p-5">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="font-display text-xl font-semibold">{item.title}</h2>
-                  <p className="text-sm text-ink-600 dark:text-ink-300">{item.company}</p>
-                  <p className="mt-1 text-xs text-ink-500">
-                    Last updated {formatUpdated(item.updated_at)}
-                  </p>
+      ) : view === "kanban" ? (
+        <div className="kanban-board" data-testid="tracker-kanban">
+          {KANBAN_COLUMNS.map((column) => {
+            const columnJobs = columnItems(items, column.id);
+            return (
+              <section
+                key={column.id}
+                className="kanban-column glass-atmosphere rounded-[var(--radius-md)]"
+                aria-label={`${column.label} column`}
+              >
+                <div className="mb-3">
+                  <h2 className="text-sm font-semibold capitalize">{column.label}</h2>
+                  <p className="text-xs text-muted-foreground">{columnJobs.length}</p>
                 </div>
-                <MatchBadge
-                  score={item.match_score}
-                  recommendation={item.recommendation}
-                />
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                {item.approval_status ? (
-                  <StatusBadge status={item.approval_status} />
-                ) : (
-                  <span className="text-xs text-ink-500">No approval yet</span>
-                )}
-                {item.tracker_status ? (
-                  <StatusBadge status={item.tracker_status} />
-                ) : (
-                  <span className="text-xs text-ink-500">Not tracked</span>
-                )}
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-end gap-3">
-                  <label className="flex min-w-[12rem] flex-col gap-1 text-sm">
-                    <span className="text-ink-500">Tracking status</span>
-                    <select
-                      className="input"
-                      aria-label={`Tracking status for ${item.title} at ${item.company}`}
-                      value={item.tracker_status ?? ""}
-                      disabled={updatingId === item.job_id}
-                      onChange={(event) => {
-                        const value = event.target.value as TrackerStatus;
-                        if (!value || value === item.tracker_status) return;
-                        void handleStatusChange(item.job_id, value);
-                      }}
-                    >
-                      <option value="" disabled>
-                        Set status…
-                      </option>
-                      {statusOptions(item).map((status) => (
-                        <option key={status} value={status}>
-                          {status.replaceAll("_", " ")}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex min-w-[10rem] flex-col gap-1 text-sm">
-                    <span className="text-ink-500">Follow-up reminder</span>
-                    <input
-                      type="date"
-                      className="input"
-                      aria-label={`Follow-up reminder date for ${item.title} at ${item.company}`}
-                      value={item.reminder_date ?? ""}
-                      disabled={updatingId === item.job_id || !item.tracker_status}
-                      title={
-                        item.tracker_status ? undefined : "Set a tracking status first"
-                      }
-                      onChange={(event) => {
-                        void handleReminderDateChange(item.job_id, event.target.value || null);
-                      }}
-                    />
-                  </label>
+                <div className="space-y-3">
+                  {columnJobs.length === 0 ? (
+                    <p className="px-1 text-xs text-muted-foreground">Empty</p>
+                  ) : (
+                    columnJobs.map((item) => (
+                      <TrackerCard
+                        key={item.job_id}
+                        item={item}
+                        updating={updatingId === item.job_id}
+                        onStatusChange={(jobId, status) => void handleStatusChange(jobId, status)}
+                        onReminderChange={(jobId, date) => void handleReminderDateChange(jobId, date)}
+                      />
+                    ))
+                  )}
                 </div>
-                <Link
-                  to={`/applications/${item.job_id}`}
-                  className="btn-ghost px-2 py-1.5 text-accent-700 dark:text-accent-300"
-                >
-                  Open application
-                  <ArrowUpRight className="h-4 w-4" aria-hidden />
-                </Link>
-              </div>
-            </article>
-          ))}
+              </section>
+            );
+          })}
         </div>
+      ) : (
+        <ol className="space-y-4" data-testid="tracker-list">
+          {timeline.map((item) => (
+            <li key={item.job_id}>
+              <TrackerCard
+                item={item}
+                updating={updatingId === item.job_id}
+                onStatusChange={(jobId, status) => void handleStatusChange(jobId, status)}
+                onReminderChange={(jobId, date) => void handleReminderDateChange(jobId, date)}
+              />
+            </li>
+          ))}
+        </ol>
       )}
     </div>
   );

@@ -1,11 +1,33 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link2, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ArrowUpRight, Link2, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { JobCard } from "../components/JobCard";
+import { MatchBadge } from "../components/MatchBadge";
 import { LoadingState } from "../components/LoadingState";
+import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
+import { StatusBadge } from "../components/StatusBadge";
+import { ScoreOrb } from "../components/signature/ScoreOrb";
+import { Glass } from "../components/ui/glass";
+import { PageHeader } from "../components/ui/page-header";
 import { api } from "../lib/api";
+import { cn } from "../lib/cn";
+import {
+  matchesRoleTypeFilter,
+  type RoleTypeFilter,
+} from "../lib/job-role-type";
+import { topMatchPercentileLabel } from "../lib/match-percentile";
+import { getSelectedJobId, saveSelectedJobId } from "../lib/session";
 import type { Job, MatchScore } from "../lib/types";
+
+function sortJobs(list: Job[], scores: Record<string, MatchScore>, sort: "match" | "title") {
+  return [...list].sort((a, b) => {
+    if (sort === "title") return a.title.localeCompare(b.title);
+    const as = a.id ? (scores[a.id]?.overall_score ?? -1) : -1;
+    const bs = b.id ? (scores[b.id]?.overall_score ?? -1) : -1;
+    return bs - as;
+  });
+}
 
 export function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -23,7 +45,9 @@ export function JobsPage() {
   const [recommendation, setRecommendation] = useState<
     "all" | "apply" | "consider" | "skip" | "unscored"
   >("all");
+  const [roleType, setRoleType] = useState<RoleTypeFilter>("both");
   const [manualUrl, setManualUrl] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(() => getSelectedJobId());
 
   async function loadJobs(fromScout = false) {
     setError(null);
@@ -62,6 +86,10 @@ export function JobsPage() {
       const job = await api.ingestJobUrl(url);
       setJobs((prev) => [job, ...prev.filter((existing) => existing.id !== job.id)]);
       setManualUrl("");
+      if (job.id) {
+        setSelectedId(job.id);
+        saveSelectedJobId(job.id);
+      }
     } catch (err) {
       setError(err);
     } finally {
@@ -110,6 +138,7 @@ export function JobsPage() {
     if (status !== "all") {
       list = list.filter((job) => job.status === status);
     }
+    list = list.filter((job) => matchesRoleTypeFilter(job.title, roleType));
     list = list.filter((job) => {
       const score = job.id ? scores[job.id] : undefined;
       if (recommendation === "unscored") return score == null;
@@ -122,46 +151,59 @@ export function JobsPage() {
       const score = job.id ? scores[job.id]?.overall_score : undefined;
       return score == null ? min === 0 : score >= min;
     });
-    list.sort((a, b) => {
-      if (sort === "title") return a.title.localeCompare(b.title);
-      const as = a.id ? (scores[a.id]?.overall_score ?? -1) : -1;
-      const bs = b.id ? (scores[b.id]?.overall_score ?? -1) : -1;
-      return bs - as;
-    });
-    return list;
-  }, [jobs, scores, query, minMatch, location, status, sort, recommendation]);
+    return sortJobs(list, scores, sort);
+  }, [jobs, scores, query, minMatch, location, status, sort, recommendation, roleType]);
+
+  useEffect(() => {
+    if (filtered.length === 0) return;
+    const stillVisible = selectedId && filtered.some((job) => job.id === selectedId);
+    if (!stillVisible) {
+      const firstId = filtered[0]?.id ?? null;
+      setSelectedId(firstId);
+      if (firstId) saveSelectedJobId(firstId);
+    }
+  }, [filtered, selectedId]);
+
+  const selected = filtered.find((job) => job.id === selectedId) ?? null;
+  const selectedMatch = selected?.id ? scores[selected.id] : null;
+  const storedScoreValues = Object.values(scores).map((score) => score.overall_score);
+  const percentile =
+    selectedMatch != null ? topMatchPercentileLabel(selectedMatch.overall_score, storedScoreValues) : null;
+
+  function selectJob(jobId: string) {
+    setSelectedId(jobId);
+    saveSelectedJobId(jobId);
+  }
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-4xl font-semibold">Jobs</h1>
-          <p className="mt-2 max-w-2xl text-ink-600 dark:text-ink-300">
-            Discover and triage roles from RemoteOK, Adzuna, and manually added URLs.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-primary" onClick={() => void loadJobs(true)} disabled={scouting}>
-            <RefreshCw className={`h-4 w-4 ${scouting ? "animate-spin" : ""}`} aria-hidden />
-            Find Jobs
-          </button>
-          <button type="button" className="btn-secondary" onClick={() => void handleIngestUrl()} disabled={ingesting}>
-            <Link2 className={`h-4 w-4 ${ingesting ? "animate-pulse" : ""}`} aria-hidden />
-            {ingesting ? "Adding…" : "Add Job URL"}
-          </button>
-          <button type="button" className="btn-secondary" onClick={() => void handleVerify()} disabled={verifying}>
-            <ShieldCheck className={`h-4 w-4 ${verifying ? "animate-pulse" : ""}`} aria-hidden />
-            {verifying ? "Verifying…" : "Verify Jobs"}
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Jobs"
+        description="Discover and triage roles from Greenhouse, Lever, Remotive, Adzuna, RemoteOK, and manually added URLs. Scores already stored appear immediately. Selecting a job never scores or extracts on its own."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-primary btn-stable" onClick={() => void loadJobs(true)} disabled={scouting}>
+              <RefreshCw className={`h-4 w-4 ${scouting ? "animate-spin" : ""}`} aria-hidden />
+              {scouting ? "Finding…" : "Find Jobs"}
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => void handleIngestUrl()} disabled={ingesting}>
+              <Link2 className={`h-4 w-4 ${ingesting ? "animate-pulse" : ""}`} aria-hidden />
+              {ingesting ? "Adding…" : "Add Job URL"}
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => void handleVerify()} disabled={verifying}>
+              <ShieldCheck className={`h-4 w-4 ${verifying ? "animate-pulse" : ""}`} aria-hidden />
+              {verifying ? "Verifying…" : "Verify Jobs"}
+            </button>
+          </div>
+        }
+      />
 
       <ErrorBanner error={error} />
 
-      <div className="card grid gap-3 p-4 lg:grid-cols-[1.4fr_1fr_auto_auto_auto]">
-        <label className="relative block">
+      <Glass variant="atmosphere" className="grid min-w-0 grid-cols-1 gap-3 rounded-[var(--radius-lg)] p-4 sm:grid-cols-2 xl:grid-cols-4">
+        <label className="relative block min-w-0">
           <span className="sr-only">Search jobs</span>
-          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-ink-400" />
+          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <input
             className="input pl-10"
             placeholder="Search title, company, or location"
@@ -169,7 +211,7 @@ export function JobsPage() {
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Manual job URL</span>
           <input
             className="input"
@@ -178,7 +220,7 @@ export function JobsPage() {
             onChange={(event) => setManualUrl(event.target.value)}
           />
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Minimum match</span>
           <select className="input" value={minMatch} onChange={(event) => setMinMatch(event.target.value)}>
             <option value="0">Min match: any</option>
@@ -187,7 +229,7 @@ export function JobsPage() {
             <option value="85">Min match: 85%</option>
           </select>
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Location</span>
           <select className="input" value={location} onChange={(event) => setLocation(event.target.value)}>
             <option value="all">All locations</option>
@@ -198,7 +240,7 @@ export function JobsPage() {
             ))}
           </select>
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Status</span>
           <select className="input" value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="all">All statuses</option>
@@ -208,7 +250,7 @@ export function JobsPage() {
             <option value="stale">Stale</option>
           </select>
         </label>
-        <label>
+        <label className="min-w-0">
           <span className="sr-only">Recommendation</span>
           <select
             className="input"
@@ -225,14 +267,27 @@ export function JobsPage() {
             <option value="unscored">Unscored</option>
           </select>
         </label>
-        <label className="lg:col-span-6">
+        <label className="min-w-0">
+          <span className="sr-only">Role type</span>
+          <select
+            className="input"
+            data-testid="role-type-filter"
+            value={roleType}
+            onChange={(event) => setRoleType(event.target.value as RoleTypeFilter)}
+          >
+            <option value="both">Internships and full-time</option>
+            <option value="internships">Internships</option>
+            <option value="full_time">Full-time</option>
+          </select>
+        </label>
+        <label className="min-w-0">
           <span className="sr-only">Sort</span>
-          <select className="input max-w-xs" value={sort} onChange={(event) => setSort(event.target.value as "match" | "title")}>
+          <select className="input" value={sort} onChange={(event) => setSort(event.target.value as "match" | "title")}>
             <option value="match">Sort by match</option>
             <option value="title">Sort by title</option>
           </select>
         </label>
-      </div>
+      </Glass>
 
       {loading ? (
         <LoadingState label="Loading jobs…" />
@@ -247,14 +302,97 @@ export function JobsPage() {
           }
         />
       ) : (
-        <div className="grid gap-4">
-          {filtered.map((job) => (
-            <JobCard
-              key={job.id || `${job.company}-${job.title}`}
-              job={job}
-              match={job.id ? scores[job.id] : null}
-            />
-          ))}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+          <ul className="space-y-2" aria-label="Job results">
+            {filtered.map((job) => {
+              const match = job.id ? scores[job.id] : null;
+              const active = job.id === selectedId;
+              return (
+                <li key={job.id || `${job.company}-${job.title}`}>
+                  <article
+                    className={cn(
+                      "card w-full p-3 text-left transition",
+                      active ? "border-primary/50 bg-primary/[0.06]" : "hover:border-accent-400/50",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      className="w-full text-left"
+                      onClick={() => {
+                        if (job.id) selectJob(job.id);
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="wrap-anywhere font-semibold">{job.title}</p>
+                          <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
+                        </div>
+                        <MatchBadge score={match?.overall_score} recommendation={match?.recommendation} />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <StatusBadge status={job.status} />
+                        <SourceBadge source={job.source} />
+                      </div>
+                    </button>
+                    {job.id ? (
+                      <Link
+                        to={`/jobs/${job.id}`}
+                        className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary"
+                        onClick={() => selectJob(job.id!)}
+                      >
+                        View Analysis
+                        <ArrowUpRight className="h-4 w-4" aria-hidden />
+                      </Link>
+                    ) : null}
+                  </article>
+                </li>
+              );
+            })}
+          </ul>
+          <aside className="hidden lg:block">
+            {selected ? (
+              <Glass variant="working" refract className="sticky top-6 min-w-0 space-y-4 rounded-[var(--radius-lg)] p-6">
+                <div className="flex min-w-0 items-start gap-4">
+                  <ScoreOrb score={selectedMatch?.overall_score} />
+                  <div className="min-w-0">
+                    <p className="wrap-anywhere text-sm text-muted-foreground">{selected.company}</p>
+                    <h2 className="wrap-anywhere font-display text-2xl font-semibold">{selected.title}</h2>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {selected.location || "Location n/a"}
+                      {selected.salary ? ` · ${selected.salary}` : ""}
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <StatusBadge status={selected.status} />
+                      <SourceBadge source={selected.source} />
+                      {scoutedTimeAgo(selected.date_scraped) ? (
+                        <span className="text-xs text-muted-foreground">{scoutedTimeAgo(selected.date_scraped)}</span>
+                      ) : null}
+                      <MatchBadge
+                        score={selectedMatch?.overall_score}
+                        recommendation={selectedMatch?.recommendation}
+                      />
+                    </div>
+                    {percentile ? <p className="mt-2 text-xs font-medium text-primary">{percentile}</p> : null}
+                  </div>
+                </div>
+                <p className="line-clamp-8 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                  {selected.description}
+                </p>
+                {selected.id ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Link to={`/jobs/${selected.id}`} className="btn-secondary">
+                      Open analysis
+                    </Link>
+                    <Link to={`/jobs/${selected.id}/prepare`} className="btn-primary">
+                      Prepare Application
+                    </Link>
+                  </div>
+                ) : null}
+              </Glass>
+            ) : (
+              <p className="text-sm text-muted-foreground">Select a job to preview it here.</p>
+            )}
+          </aside>
         </div>
       )}
     </div>

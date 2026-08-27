@@ -1,0 +1,17 @@
+export const queryKeys = {
+  me: ["me"] as const,
+  health: ["health"] as const,
+  profile: ["profile"] as const,
+  jobs: ["jobs"] as const,
+  job: (jobId: string) => ["job", jobId] as const,
+  jobIntelligence: (jobId: string) => ["job-intelligence", jobId] as const,
+  scores: ["scores"] as const,
+  score: (jobId: string) => ["score", jobId] as const,
+  materials: (jobId: string) => ["materials", jobId] as const,
+  interviewPrep: (jobId: string) => ["interview-prep", jobId] as const,
+  resumeVersions: ["resume-versions"] as const,
+  resumeVersion: (versionId: string) => ["resume-version", versionId] as const,
+  jobResumeVersions: (jobId: string) => ["job-resume-versions", jobId] as const,
+  applications: ["applications"] as const,
+  dashboardSummary: ["dashboard-summary"] as const,
+};
