@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { BookmarkPlus } from "lucide-react";
 import { ErrorBanner } from "./ErrorBanner";
 import { LoadingState } from "./LoadingState";
+import { LockIn } from "./signature/LockIn";
 import { api, ApiClientError } from "../lib/api";
+import { queryKeys } from "../lib/query-keys";
 import type { ApplicationPackage, ResumeVersion } from "../lib/types";
 
 function formatCreatedAt(value: string) {
@@ -18,9 +21,11 @@ export function ResumeVersionPanel({
   jobId: string;
   materials: ApplicationPackage;
 }) {
+  const queryClient = useQueryClient();
   const [versions, setVersions] = useState<ResumeVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [conflict, setConflict] = useState<string | null>(null);
 
@@ -47,9 +52,13 @@ export function ResumeVersionPanel({
     setSaving(true);
     setError(null);
     setConflict(null);
+    setSaved(false);
     try {
       await api.createResumeVersion(jobId);
+      setSaved(true);
       await loadVersions();
+      await queryClient.invalidateQueries({ queryKey: queryKeys.resumeVersions });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.jobResumeVersions(jobId) });
     } catch (err) {
       if (err instanceof ApiClientError && err.status === 409) {
         setConflict(err.message);
@@ -77,8 +86,7 @@ export function ResumeVersionPanel({
           </h2>
           <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
             Versions are immutable snapshots of tailored resume bullets. Saving a
-            version does not generate new materials. A later export step can turn a
-            selected version into PDF or DOCX; nothing is uploaded automatically.
+            version does not generate new materials and does not submit an application.
           </p>
         </div>
         {materials.approval_status === "approved" ? (
@@ -99,6 +107,7 @@ export function ResumeVersionPanel({
       </div>
 
       <ErrorBanner error={error} />
+      <LockIn active={saved} message="Resume version saved and locked in." />
       {conflict ? (
         <div role="alert" className="card border-accent-300/60 bg-accent-50/70 p-4 text-sm text-accent-900 dark:border-accent-800 dark:bg-accent-950/30 dark:text-accent-100">
           {conflict}

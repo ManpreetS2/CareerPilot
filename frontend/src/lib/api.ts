@@ -17,6 +17,8 @@ import type {
   ParseResumeResponse,
   CurrentProfile,
   ResumeVersion,
+  ResumeVersionDetail,
+  ResumeVersionSummary,
   ScoutJobsResponse,
   TargetPreferences,
   TrackerStatus,
@@ -37,10 +39,11 @@ export class ApiClientError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    // Every request carries the session cookie — without this, the
-    // now-mandatory auth on every route would silently fail cross-origin
-    // (the Vite dev server and the API run on different ports).
-    response = await fetch(`${API_BASE_URL}${path}`, { ...init, credentials: "include" });
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      credentials: "include",
+      signal: init?.signal,
+    });
   } catch {
     throw new ApiClientError(
       0,
@@ -61,7 +64,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<HealthResponse>("/health"),
+  health: (init?: RequestInit) => request<HealthResponse>("/health", init),
 
   signup: (email: string, password: string) =>
     request<User>("/api/auth/signup", {
@@ -79,9 +82,9 @@ export const api = {
 
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 
-  me: () => request<User>("/api/auth/me"),
+  me: (init?: RequestInit) => request<User>("/api/auth/me", init),
 
-  getProfile: () => request<CurrentProfile>("/api/profile"),
+  getProfile: (init?: RequestInit) => request<CurrentProfile>("/api/profile", init),
 
   parseResume: (file: File) => {
     const body = new FormData();
@@ -99,7 +102,7 @@ export const api = {
       body: JSON.stringify(preferences),
     }),
 
-  getJobs: () => request<Job[]>("/api/jobs"),
+  getJobs: (init?: RequestInit) => request<Job[]>("/api/jobs", init),
 
   scoutJobs: () =>
     request<ScoutJobsResponse>("/api/scout-jobs", {
@@ -113,7 +116,7 @@ export const api = {
       body: JSON.stringify({ url }),
     }),
 
-  getJob: (jobId: string) => request<Job>(`/api/jobs/${jobId}`),
+  getJob: (jobId: string, init?: RequestInit) => request<Job>(`/api/jobs/${jobId}`, init),
 
   verifyJobs: (statusFilter: string | null = "discovered") =>
     request<JobVerificationResponse>(
@@ -124,25 +127,26 @@ export const api = {
   verifyJob: (jobId: string) =>
     request<Job>(`/api/jobs/${jobId}/verify`, { method: "POST" }),
 
-  getJobIntelligence: (jobId: string) =>
-    request<JobIntelligence>(`/api/jobs/${jobId}/intelligence`),
+  getJobIntelligence: (jobId: string, init?: RequestInit) =>
+    request<JobIntelligence>(`/api/jobs/${jobId}/intelligence`, init),
 
   extractJobIntelligence: (jobId: string) =>
     request<JobIntelligence>(`/api/jobs/${jobId}/intelligence`, {
       method: "POST",
     }),
 
-  getStoredScore: (jobId: string) => request<MatchScore>(`/api/jobs/${jobId}/score`),
+  getStoredScore: (jobId: string, init?: RequestInit) =>
+    request<MatchScore>(`/api/jobs/${jobId}/score`, init),
 
-  getStoredScores: () => request<MatchScore[]>("/api/jobs/scores"),
+  getStoredScores: (init?: RequestInit) => request<MatchScore[]>("/api/jobs/scores", init),
 
   scoreJob: (jobId: string) =>
     request<MatchScore>(`/api/jobs/${jobId}/score`, {
       method: "POST",
     }),
 
-  getStoredMaterials: (jobId: string) =>
-    request<ApplicationPackage>(`/api/jobs/${jobId}/materials`),
+  getStoredMaterials: (jobId: string, init?: RequestInit) =>
+    request<ApplicationPackage>(`/api/jobs/${jobId}/materials`, init),
 
   // overrideGrounding is the owner's explicit, per-job decision to keep a
   // draft whose claims could not all be verified against their resume. It is
@@ -159,11 +163,17 @@ export const api = {
       method: "POST",
     }),
 
-  listResumeVersions: (jobId: string) =>
-    request<ResumeVersion[]>(`/api/jobs/${jobId}/resume-versions`),
+  listResumeVersions: (jobId: string, init?: RequestInit) =>
+    request<ResumeVersion[]>(`/api/jobs/${jobId}/resume-versions`, init),
 
-  getResumeVersion: (jobId: string, versionId: string) =>
-    request<ResumeVersion>(`/api/jobs/${jobId}/resume-versions/${versionId}`),
+  getResumeVersion: (jobId: string, versionId: string, init?: RequestInit) =>
+    request<ResumeVersion>(`/api/jobs/${jobId}/resume-versions/${versionId}`, init),
+
+  listAllResumeVersions: (init?: RequestInit) =>
+    request<ResumeVersionSummary[]>("/api/resume-versions", init),
+
+  getResumeVersionDetail: (versionId: string, init?: RequestInit) =>
+    request<ResumeVersionDetail>(`/api/resume-versions/${versionId}`, init),
 
   createResumeVersion: (jobId: string) =>
     request<ResumeVersion>(`/api/jobs/${jobId}/resume-versions`, {
@@ -191,8 +201,8 @@ export const api = {
       method: "POST",
     }),
 
-  getInterviewPrep: (jobId: string) =>
-    request<InterviewPrep>(`/api/jobs/${jobId}/interview-prep`),
+  getInterviewPrep: (jobId: string, init?: RequestInit) =>
+    request<InterviewPrep>(`/api/jobs/${jobId}/interview-prep`, init),
 
   getInterviewAnswerFeedback: (jobId: string, question: string, answer: string) =>
     request<InterviewAnswerFeedback>(`/api/jobs/${jobId}/interview-prep/feedback`, {
@@ -218,7 +228,8 @@ export const api = {
       body: JSON.stringify({ status, note: note ?? null, reminder_date: reminderDate ?? null }),
     }),
 
-  getDashboardSummary: () => request<DashboardSummary>("/api/dashboard/summary"),
+  getDashboardSummary: (init?: RequestInit) =>
+    request<DashboardSummary>("/api/dashboard/summary", init),
 
   fillApplication: (jobId: string) =>
     request<FormFillResult>(`/api/jobs/${jobId}/fill-application`, {

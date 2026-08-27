@@ -42,7 +42,15 @@ from tests.test_job_intelligence import SequenceGenerator, _job, _payload
 
 @pytest.fixture(autouse=True)
 def _block_unexpected_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden_connect(*_args, **_kwargs):
+    original_connect = socket.socket.connect
+    loopback = {"127.0.0.1", "localhost", "::1"}
+
+    def forbidden_connect(self, address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) and address else address
+        port = address[1] if isinstance(address, tuple) and len(address) > 1 else None
+        # Windows TestClient/asyncio may use loopback sockets. Still forbid Ollama.
+        if host in loopback and port != 11434:
+            return original_connect(self, address, *args, **kwargs)
         raise AssertionError("network/provider calls are forbidden in pipeline tests")
 
     monkeypatch.setattr(socket.socket, "connect", forbidden_connect)
