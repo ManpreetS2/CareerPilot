@@ -1,7 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 import { ApiClientError } from "../lib/api";
 
-export function ErrorBanner({ error }: { error: unknown }) {
+export function ErrorBanner({ error, heading }: { error: unknown; heading?: string }) {
   if (!error) return null;
   const status = error instanceof ApiClientError ? error.status : null;
   const message =
@@ -11,7 +11,8 @@ export function ErrorBanner({ error }: { error: unknown }) {
         ? error.message
         : "Something went wrong";
   const title =
-    status === 409
+    heading ??
+    (status === 409
       ? "Needs a decision"
       : status === 422
         ? "Could not use that input"
@@ -23,7 +24,7 @@ export function ErrorBanner({ error }: { error: unknown }) {
               ? "Backend unreachable"
               : status && status >= 500
                 ? "Server error"
-                : null;
+                : null);
 
   return (
     <div

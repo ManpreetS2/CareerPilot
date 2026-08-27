@@ -31,7 +31,7 @@ export function LoginPage() {
 
   return (
     <AuthFrame title="Log in">
-      <ErrorBanner error={error} />
+      <ErrorBanner error={error} heading="Couldn't sign in" />
       <form onSubmit={onSubmit} className="space-y-4">
         <label>
           <span className="label">Email</span>

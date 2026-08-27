@@ -198,7 +198,12 @@ cp .env.example .env.local
 npm install
 ```
 
-`VITE_API_BASE_URL` defaults to `http://localhost:8000`.
+`VITE_API_BASE_URL` defaults to `http://<this-page-hostname>:8000` for local
+aliases (`localhost` and `127.0.0.1`). Opening the UI at either hostname talks
+to the matching API host so the `SameSite=Lax` session cookie stays first-party.
+A copied local alias is rewritten the same way. An explicit non-local URL is
+left unchanged. Do not set `VITE_API_BASE_URL=http://localhost:8000` in
+`.env.local` if you also open the app at `http://127.0.0.1:5173`.
 
 ### Browser extension
 
@@ -231,7 +236,8 @@ cd frontend
 npm run dev
 ```
 
-- UI: http://localhost:5173
+- UI: http://localhost:5173 or http://127.0.0.1:5173
+  (the frontend rewrites a local API origin to whichever hostname you used)
 
 ## Tests
 
