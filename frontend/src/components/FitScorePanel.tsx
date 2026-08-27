@@ -48,8 +48,9 @@ export function FitScorePanel({
             Fit score
           </h2>
           <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
-            Scoring runs only when you ask. It uses the stored candidate profile and grounded job
-            requirements.
+            Scoring uses the stored candidate profile and grounded job requirements.
+            Find Jobs produces a deterministic score; Calculate Fit can refine it
+            when Job Intelligence is available.
           </p>
         </div>
         <button

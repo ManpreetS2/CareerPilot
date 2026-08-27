@@ -197,7 +197,7 @@ def test_descriptionless_job_preserves_existing_unavailable_behavior(isolated_se
     assert isolated_session.query(MatchScoreRecord).count() == 0
 
 
-def test_non_scoreable_extraction_never_falls_back_to_provisional(
+def test_responsibility_only_intelligence_scores_as_deep_fit_not_provisional(
     isolated_session,
 ) -> None:
     _candidate(isolated_session, skills=["Python"])
@@ -220,20 +220,22 @@ def test_non_scoreable_extraction_never_falls_back_to_provisional(
         )
     )
 
-    with pytest.raises(RequirementsUnavailableError):
-        score_job_with_intelligence(
-            isolated_session,
-            job.public_id,
-            TEST_USER_ID,
-            generate_fn=generator,
-        )
+    result = score_job_with_intelligence(
+        isolated_session,
+        job.public_id,
+        TEST_USER_ID,
+        generate_fn=generator,
+    )
 
     assert generator.call_count == 1
     assert isolated_session.query(JobIntelligenceRecord).count() == 1
-    assert isolated_session.query(MatchScoreRecord).count() == 0
+    assert isolated_session.query(MatchScoreRecord).count() == 1
+    assert result.score_kind == "full"
+    assert "full Job Intelligence" in result.rationale
+    assert "provisional" not in result.rationale.lower()
 
 
-def test_stored_non_scoreable_intelligence_does_not_fallback_through_score_job(
+def test_stored_empty_intelligence_falls_back_to_description_for_discovery(
     isolated_session,
 ) -> None:
     _candidate(isolated_session, skills=["Python"])
@@ -252,8 +254,8 @@ def test_stored_non_scoreable_intelligence_does_not_fallback_through_score_job(
             education_requirements=[],
             tech_stack=[],
             seniority=None,
-            responsibilities=["Build APIs"],
-            likely_interview_focus=["System design"],
+            responsibilities=[],
+            likely_interview_focus=[],
         )
     )
     isolated_session.commit()
@@ -263,12 +265,13 @@ def test_stored_non_scoreable_intelligence_does_not_fallback_through_score_job(
         "backend.services.job_intelligence_service.get_llm_client",
         provider,
     ):
-        with pytest.raises(RequirementsUnavailableError):
-            score_job(isolated_session, job.public_id, TEST_USER_ID)
+        result = score_job(isolated_session, job.public_id, TEST_USER_ID)
 
     provider.assert_not_called()
-    assert isolated_session.query(MatchScoreRecord).count() == 0
+    assert isolated_session.query(MatchScoreRecord).count() == 1
     assert isolated_session.query(JobIntelligenceRecord).count() == 1
+    assert result.score_kind == "preliminary"
+    assert "provisional" in result.rationale.lower()
 
 
 def test_persist_recovers_from_duplicate_job_insert(isolated_session) -> None:

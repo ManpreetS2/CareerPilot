@@ -556,6 +556,33 @@ body {
   animation: resume-parse-pulse 1.6s ease-in-out infinite;
 }
 
+@keyframes job-discovery-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+.job-discovery-pulse {
+  animation: job-discovery-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes job-discovery-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.job-discovery-spin {
+  animation: job-discovery-spin 8s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .intelligence-field,
   .pointer-halo,

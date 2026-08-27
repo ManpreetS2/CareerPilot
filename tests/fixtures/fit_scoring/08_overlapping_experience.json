@@ -13,11 +13,25 @@
   },
   "candidate": {
     "name": "Synthetic Candidate 008",
-    "skills": ["Python"],
+    "skills": [
+      "Python"
+    ],
     "projects": [],
     "experience": [
-      {"title": "Engineer I", "company": "Fictional Alpha", "start_date": "2023-01-01", "end_date": "2024-01-01", "highlights": []},
-      {"title": "Engineer II", "company": "Fictional Beta", "start_date": "2023-06-01", "end_date": "2024-06-01", "highlights": []}
+      {
+        "title": "Engineer I",
+        "company": "Fictional Alpha",
+        "start_date": "2023-01-01",
+        "end_date": "2024-01-01",
+        "highlights": []
+      },
+      {
+        "title": "Engineer II",
+        "company": "Fictional Beta",
+        "start_date": "2023-06-01",
+        "end_date": "2024-06-01",
+        "highlights": []
+      }
     ],
     "education": [],
     "certifications": [],
@@ -26,7 +40,9 @@
   },
   "preferences": null,
   "intelligence": {
-    "required_skills": ["Python"],
+    "required_skills": [
+      "Python"
+    ],
     "preferred_skills": [],
     "years_experience": 2,
     "education_requirements": [],
@@ -36,12 +52,27 @@
     "likely_interview_focus": []
   },
   "expected": {
-    "available_components": ["skill", "experience"],
-    "null_components": ["education", "location", "preference"],
-    "component_scores": {"skill": 100.0, "experience": 70.8, "education": null, "location": null, "preference": null},
-    "overall_score": 92.2,
-    "recommendation": "apply",
-    "matched": ["Python"],
+    "available_components": [
+      "skill",
+      "experience"
+    ],
+    "null_components": [
+      "education",
+      "location",
+      "preference"
+    ],
+    "component_scores": {
+      "skill": 100.0,
+      "experience": 70.8,
+      "education": null,
+      "location": null,
+      "preference": null
+    },
+    "overall_score": 70.8,
+    "recommendation": "consider",
+    "matched": [
+      "Python"
+    ],
     "partial": [],
     "missing": [],
     "http_status": 200,

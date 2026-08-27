@@ -121,6 +121,21 @@ export type MatchScore = {
   missing_skills: string[];
   recommendation: "apply" | "consider" | "skip";
   rationale: string;
+  qualification_score?: number | null;
+  confidence_score?: number | null;
+  confidence_level?: "high" | "medium" | "low" | null;
+  eligibility_status?: "likely_eligible" | "eligibility_uncertain" | "likely_ineligible" | null;
+  match_tier?: "strong_match" | "good_match" | "possible_match" | "weak_match" | null;
+  apply_recommendation?: "strong_apply" | "apply" | "consider" | "probably_skip" | null;
+  ranking_score?: number | null;
+  scoring_version?: number;
+  score_kind?: "full" | "preliminary" | null;
+  match_reasons?: string[];
+  gap_reasons?: string[];
+  watchouts?: string[];
+  covered_responsibilities?: string[];
+  partial_responsibilities?: string[];
+  uncovered_responsibilities?: string[];
 };
 
 export type ApplicationPackage = {
@@ -221,6 +236,10 @@ export type ParseResumeResponse = {
 export type ScoutJobsResponse = {
   jobs: Job[];
   note?: string;
+  jobs_found?: number;
+  matched_count?: number;
+  sources_searched?: number;
+  sources_unavailable?: number;
 };
 
 export type InterviewPrep = {

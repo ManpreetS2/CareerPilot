@@ -13,32 +13,60 @@
   },
   "candidate": {
     "name": "Synthetic Candidate 011",
-    "skills": ["Python"],
+    "skills": [
+      "Python"
+    ],
     "projects": [],
     "experience": [],
-    "education": [{"institution": "Fictional West College", "degree": "Bachelor's", "field": "History", "graduation_year": "2023"}],
+    "education": [
+      {
+        "institution": "Fictional West College",
+        "degree": "Bachelor's",
+        "field": "History",
+        "graduation_year": "2023"
+      }
+    ],
     "certifications": [],
     "strengths": [],
     "evidence_links": []
   },
   "preferences": null,
   "intelligence": {
-    "required_skills": ["Python"],
+    "required_skills": [
+      "Python"
+    ],
     "preferred_skills": [],
     "years_experience": null,
-    "education_requirements": ["Bachelor's in Computer Science"],
+    "education_requirements": [
+      "Bachelor's in Computer Science"
+    ],
     "tech_stack": [],
     "seniority": null,
     "responsibilities": [],
     "likely_interview_focus": []
   },
   "expected": {
-    "available_components": ["skill", "education"],
-    "null_components": ["experience", "location", "preference"],
-    "component_scores": {"skill": 100.0, "experience": null, "education": 0.0, "location": null, "preference": null},
-    "overall_score": 84.6,
-    "recommendation": "apply",
-    "matched": ["Python"],
+    "available_components": [
+      "skill",
+      "education"
+    ],
+    "null_components": [
+      "experience",
+      "location",
+      "preference"
+    ],
+    "component_scores": {
+      "skill": 100.0,
+      "experience": null,
+      "education": 0.0,
+      "location": null,
+      "preference": null
+    },
+    "overall_score": 52.9,
+    "recommendation": "skip",
+    "matched": [
+      "Python"
+    ],
     "partial": [],
     "missing": [],
     "http_status": 200,

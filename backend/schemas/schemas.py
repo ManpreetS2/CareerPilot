@@ -131,6 +131,21 @@ class MatchScore(BaseModel):
     missing_skills: list[str] = Field(default_factory=list)
     recommendation: Literal["apply", "consider", "skip"]
     rationale: str
+    qualification_score: float | None = Field(default=None, ge=0, le=100)
+    confidence_score: float | None = Field(default=None, ge=0, le=100)
+    confidence_level: Literal["high", "medium", "low"] | None = None
+    eligibility_status: Literal["likely_eligible", "eligibility_uncertain", "likely_ineligible"] | None = None
+    match_tier: Literal["strong_match", "good_match", "possible_match", "weak_match"] | None = None
+    apply_recommendation: Literal["strong_apply", "apply", "consider", "probably_skip"] | None = None
+    ranking_score: float | None = Field(default=None, ge=0, le=100)
+    scoring_version: int = 1
+    score_kind: Literal["full", "preliminary"] | None = None
+    match_reasons: list[str] = Field(default_factory=list)
+    gap_reasons: list[str] = Field(default_factory=list)
+    watchouts: list[str] = Field(default_factory=list)
+    covered_responsibilities: list[str] = Field(default_factory=list)
+    partial_responsibilities: list[str] = Field(default_factory=list)
+    uncovered_responsibilities: list[str] = Field(default_factory=list)
 
 
 class ApplicationPackage(BaseModel):
@@ -246,6 +261,10 @@ class ParseResumeResponse(BaseModel):
 class ScoutJobsResponse(BaseModel):
     jobs: list[Job]
     note: str = "Day 1 mock response. Job discovery is not implemented yet."
+    jobs_found: int = 0
+    matched_count: int = 0
+    sources_searched: int = 0
+    sources_unavailable: int = 0
 
 
 class IngestJobUrlRequest(BaseModel):

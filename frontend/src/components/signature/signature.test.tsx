@@ -34,6 +34,11 @@ describe("signature motion language", () => {
           job_id: "job-1",
           overall_score: 86,
           skill_score: 90,
+          qualification_score: 88,
+          preference_score: 80,
+          scoring_version: 2,
+          match_tier: "good_match",
+          match_reasons: ["You match 1 of 1 required technical skills."],
           matched_skills: ["Python"],
           partial_matches: [],
           missing_skills: [],
@@ -43,6 +48,8 @@ describe("signature motion language", () => {
       />,
     );
     expect(screen.getByTestId("score-assembly")).toHaveTextContent("86");
+    expect(screen.getByTestId("score-assembly")).toHaveTextContent("Qualification Fit");
+    expect(screen.getByTestId("score-assembly")).toHaveTextContent("Why you match");
     expect(screen.getByRole("button", { name: "Python" })).toBeInTheDocument();
   });
 

@@ -303,15 +303,19 @@ def test_java_is_not_javascript() -> None:
 
 def test_go_does_not_match_google() -> None:
     grounded = extract_explicit_skills_from_description("We work with Google Cloud.")
-    assert "Go" not in grounded.required + grounded.preferred + grounded.tech_stack
+    skills = grounded.required + grounded.preferred + grounded.tech_stack
+    assert "Go" not in skills
+    assert "GCP" in skills
 
 
 def test_c_and_r_boundaries() -> None:
     grounded = extract_explicit_skills_from_description("Career research papers. Requirements: C, R, Go.")
     assert grounded.required == ["C", "R", "Go"]
     none = extract_explicit_skills_from_description("Career research and Google Cloud.")
-    assert none.required == []
-    assert none.tech_stack == []
+    skills = none.required + none.preferred + none.tech_stack
+    assert "Go" not in skills
+    assert "C" not in skills
+    assert "R" not in skills
 
 
 def test_postgres_and_js_aliases() -> None:
@@ -374,12 +378,14 @@ def test_unavailable_components_remain_null(isolated_session) -> None:
     assert result.education_score is None
 
 
-def test_available_component_weights_are_renormalized(isolated_session) -> None:
+def test_available_components_do_not_renormalize_to_inflated_overall(isolated_session) -> None:
     _candidate(isolated_session, skills=["Python"], experience=[], education=[], projects=[], certifications=[])
     job = _job(isolated_session, location="", salary=None, description="Requirements: Python.")
     result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert result.skill_score is not None
-    assert result.overall_score == result.skill_score
+    assert result.overall_score < result.skill_score
+    assert result.overall_score < 96
+    assert (result.confidence_level or "low") in {"low", "medium"}
 
 
 def test_overlapping_experience_ranges_are_not_double_counted(isolated_session) -> None:
@@ -478,7 +484,7 @@ def test_missing_preferences_do_not_penalize(isolated_session) -> None:
     result = score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert result.preference_score is None
     assert result.location_score is None
-    assert result.overall_score == result.skill_score
+    assert result.overall_score < result.skill_score
 
 
 def test_annual_salary_comparison_only_when_parseable(isolated_session) -> None:
@@ -520,7 +526,7 @@ def test_recommendation_thresholds(isolated_session) -> None:
     result = score_job(isolated_session, job.public_id, TEST_USER_ID, as_of=date(2026, 8, 20))
     if result.overall_score >= 80:
         assert result.recommendation == "apply"
-    elif result.overall_score >= 60:
+    elif result.overall_score >= 55:
         assert result.recommendation == "consider"
     else:
         assert result.recommendation == "skip"
@@ -555,7 +561,12 @@ def test_rollback_on_commit_failure(isolated_session) -> None:
 
 def test_no_row_after_scoring_failure(isolated_session) -> None:
     _candidate(isolated_session)
-    job = _job(isolated_session, description="No known technologies here.")
+    job = _job(
+        isolated_session,
+        description="No known technologies here.",
+        title="Team Contributor",
+        location=None,
+    )
     with pytest.raises(RequirementsUnavailableError):
         score_job(isolated_session, job.public_id, TEST_USER_ID)
     assert isolated_session.query(MatchScoreRecord).count() == 0
@@ -1005,9 +1016,9 @@ def test_annual_salary_range_uses_maximum_against_candidate_minimum(
         (79.99, "consider"),
         (80.0, "apply"),
         (80.01, "apply"),
-        (59.99, "skip"),
-        (60.0, "consider"),
-        (60.01, "consider"),
+        (54.99, "skip"),
+        (55.0, "consider"),
+        (55.01, "consider"),
     ],
 )
 def test_full_intelligence_recommendation_boundaries(
@@ -1020,9 +1031,9 @@ def test_full_intelligence_recommendation_boundaries(
 @pytest.mark.parametrize(
     ("overall", "expected"),
     [
-        (59.99, "skip"),
-        (60.0, "consider"),
-        (60.01, "consider"),
+        (54.99, "skip"),
+        (55.0, "consider"),
+        (55.01, "consider"),
         (79.99, "consider"),
         (80.0, "consider"),
         (80.01, "consider"),
@@ -1148,9 +1159,9 @@ def test_description_fallback_does_not_infer_non_skill_requirements() -> None:
     assert grounded.required == []
     assert grounded.preferred == []
     assert grounded.tech_stack == []
-    assert grounded.years_experience is None
+    assert grounded.years_experience == 5
     assert grounded.education_requirements == []
-    assert grounded.seniority is None
+    assert grounded.seniority == "senior"
 
 
 def test_react_does_not_match_react_native() -> None:

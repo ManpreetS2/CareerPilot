@@ -39,7 +39,13 @@ export function JobCard({
             </p>
           </div>
         </div>
-        <MatchBadge score={match?.overall_score} recommendation={match?.recommendation} />
+        <MatchBadge
+          score={match?.overall_score}
+          recommendation={match?.recommendation}
+          matchTier={match?.match_tier}
+          confidenceLevel={match?.confidence_level}
+          compact
+        />
       </div>
 
       {skillChips.length > 0 ? (

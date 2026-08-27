@@ -13,7 +13,11 @@
   },
   "candidate": {
     "name": "Synthetic Candidate 002",
-    "skills": ["Python", "Docker", "React"],
+    "skills": [
+      "Python",
+      "Docker",
+      "React"
+    ],
     "projects": [],
     "experience": [],
     "education": [],
@@ -23,24 +27,50 @@
   },
   "preferences": null,
   "intelligence": {
-    "required_skills": ["Python", "Docker"],
-    "preferred_skills": ["React"],
+    "required_skills": [
+      "Python",
+      "Docker"
+    ],
+    "preferred_skills": [
+      "React"
+    ],
     "years_experience": null,
     "education_requirements": [],
-    "tech_stack": ["Git"],
+    "tech_stack": [
+      "Git"
+    ],
     "seniority": null,
     "responsibilities": [],
     "likely_interview_focus": []
   },
   "expected": {
-    "available_components": ["skill"],
-    "null_components": ["experience", "education", "location", "preference"],
-    "component_scores": {"skill": 87.5, "experience": null, "education": null, "location": null, "preference": null},
-    "overall_score": 87.5,
-    "recommendation": "apply",
-    "matched": ["Python", "Docker", "React"],
+    "available_components": [
+      "skill"
+    ],
+    "null_components": [
+      "experience",
+      "education",
+      "location",
+      "preference"
+    ],
+    "component_scores": {
+      "skill": 87.5,
+      "experience": null,
+      "education": null,
+      "location": null,
+      "preference": null
+    },
+    "overall_score": 63.2,
+    "recommendation": "consider",
+    "matched": [
+      "Python",
+      "Docker",
+      "React"
+    ],
     "partial": [],
-    "missing": ["Git"],
+    "missing": [
+      "Git"
+    ],
     "http_status": 200,
     "row_count": 1,
     "persistence": "insert"
