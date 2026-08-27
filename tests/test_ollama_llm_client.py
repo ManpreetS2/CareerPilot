@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -15,7 +15,9 @@ from backend.services.llm_client import (
     LLMConfigurationError,
     LLMEmptyResponseError,
     LLMProviderError,
+    LLMTimeoutError,
     get_llm_client,
+    get_resume_llm_client,
 )
 from backend.services.llm_structured_schemas import (
     application_materials_llm_schema,
@@ -160,7 +162,7 @@ def test_ollama_returns_only_message_content(monkeypatch: pytest.MonkeyPatch) ->
     [
         (httpx.ConnectError("refused"), LLMProviderError),
         (httpx.ConnectTimeout("connect"), LLMProviderError),
-        (httpx.ReadTimeout("read"), LLMProviderError),
+        (httpx.ReadTimeout("read"), LLMTimeoutError),
         (_FakeResponse(404, {"error": SECRET_BODY}), LLMProviderError),
         (_FakeResponse(500, {"error": SECRET_BODY}), LLMProviderError),
         (_FakeResponse(200, {"done": True, "message": {"content": ""}}), LLMEmptyResponseError),
@@ -356,3 +358,73 @@ def test_setup_logging_pins_http_loggers_when_root_handlers_exist() -> None:
         root.setLevel(previous[0])
         httpx_logger.setLevel(previous[1])
         httpcore_logger.setLevel(previous[2])
+
+
+def test_generic_ollama_client_keeps_global_model_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    _ollama_settings(monkeypatch)
+    client = get_llm_client("ollama")
+    assert client.model == "qwen3:14b"
+    captured: dict = {}
+    _patch_httpx(
+        monkeypatch,
+        _FakeResponse(200, {"done": True, "message": {"content": '{"ok": true}'}}),
+        captured,
+    )
+    client._generate_ollama("ping", None, None)
+    timeout = captured["client_kwargs"]["timeout"]
+    assert timeout.read == 180.0
+    assert captured["json"]["model"] == "qwen3:14b"
+    assert captured["json"]["options"]["num_predict"] == 4096
+
+
+def test_resume_ollama_client_uses_task_specific_model_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ollama_settings(monkeypatch)
+    monkeypatch.setattr("backend.core.config.settings.resume_ollama_model", "qwen3.5:4b")
+    monkeypatch.setattr("backend.core.config.settings.resume_ollama_read_timeout_seconds", 60.0)
+    monkeypatch.setattr("backend.core.config.settings.resume_ollama_keep_alive", "2m")
+    monkeypatch.setattr("backend.core.config.settings.resume_ollama_num_ctx", 8192)
+    monkeypatch.setattr("backend.core.config.settings.resume_ollama_num_predict", 2048)
+    client = get_resume_llm_client("ollama")
+    assert client.model == "qwen3.5:4b"
+    captured: dict = {}
+    schema = candidate_profile_llm_schema()
+    _patch_httpx(
+        monkeypatch,
+        _FakeResponse(200, {"done": True, "message": {"content": '{"ok": true}'}}),
+        captured,
+    )
+    client._generate_ollama("extract", None, schema)
+    payload = captured["json"]
+    timeout = captured["client_kwargs"]["timeout"]
+    assert payload["model"] == "qwen3.5:4b"
+    assert payload["think"] is False
+    assert payload["keep_alive"] == "2m"
+    assert payload["format"] == schema
+    assert payload["options"]["temperature"] == 0
+    assert payload["options"]["num_ctx"] == 8192
+    assert payload["options"]["num_predict"] == 2048
+    assert timeout.read == 60.0
+
+
+def test_resume_gemini_client_uses_resume_model_and_timeout_ms(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("backend.core.config.settings.gemini_api_key", "test-key")
+    monkeypatch.setattr("backend.core.config.settings.resume_gemini_model", "gemini-3.5-flash-lite")
+    monkeypatch.setattr("backend.core.config.settings.resume_gemini_timeout_seconds", 30.0)
+    captured: dict = {}
+    fake = MagicMock()
+    fake.models.generate_content.return_value = SimpleNamespace(text='{"ok": true}')
+
+    def _client(**kwargs):
+        captured["client_kwargs"] = kwargs
+        return fake
+
+    client = get_resume_llm_client("gemini")
+    assert client.model == "gemini-3.5-flash-lite"
+    with patch("google.genai.Client", side_effect=_client):
+        client._generate_gemini("hello", None, {"type": "object"})
+    http_options = captured["client_kwargs"]["http_options"]
+    assert http_options.timeout == 30_000
+    config = fake.models.generate_content.call_args.kwargs["config"]
+    assert config.response_mime_type == "application/json"

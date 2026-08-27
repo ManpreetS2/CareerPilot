@@ -26,6 +26,10 @@ class LLMProviderError(RuntimeError):
     """Provider request failed after any allowed internal retry was exhausted."""
 
 
+class LLMTimeoutError(LLMProviderError):
+    """Provider exceeded the request timeout."""
+
+
 class LLMEmptyResponseError(RuntimeError):
     """Provider returned an empty payload (eligible for structured-output retry)."""
 
@@ -33,16 +37,34 @@ class LLMEmptyResponseError(RuntimeError):
 class LLMClient:
     """Normalize generate() across Ollama, Gemini, Anthropic, and OpenAI."""
 
-    def __init__(self, provider: ProviderName | str = "gemini") -> None:
+    def __init__(
+        self,
+        provider: ProviderName | str = "gemini",
+        *,
+        model: str | None = None,
+        ollama_read_timeout_seconds: float | None = None,
+        ollama_num_ctx: int | None = None,
+        ollama_num_predict: int | None = None,
+        ollama_keep_alive: str | None = None,
+        request_timeout_seconds: float | None = None,
+    ) -> None:
         self.provider = provider.lower().strip()
         if self.provider not in SUPPORTED_LLM_PROVIDERS:
             raise LLMConfigurationError(
                 "Unsupported LLM provider. Use ollama, gemini, anthropic, or openai."
             )
+        self._model_override = (model or "").strip() or None
+        self._ollama_read_timeout_seconds = ollama_read_timeout_seconds
+        self._ollama_num_ctx = ollama_num_ctx
+        self._ollama_num_predict = ollama_num_predict
+        self._ollama_keep_alive = ollama_keep_alive
+        self._request_timeout_seconds = request_timeout_seconds
         self.model = self._resolve_model()
         self._ensure_configured()
 
     def _resolve_model(self) -> str:
+        if self._model_override:
+            return self._model_override
         if self.provider == "ollama":
             return settings.ollama_model
         if self.provider == "gemini":
@@ -95,7 +117,7 @@ class LLMClient:
         if self.provider == "ollama":
             return self._generate_ollama(prompt, system_prompt, json_schema)
         if self.provider == "gemini":
-            return self._generate_gemini(prompt, system_prompt)
+            return self._generate_gemini(prompt, system_prompt, json_schema)
         if self.provider == "anthropic":
             return self._generate_anthropic(prompt, system_prompt)
         return self._generate_openai(prompt, system_prompt)
@@ -110,10 +132,15 @@ class LLMClient:
             base = validate_ollama_base_url(settings.ollama_base_url).rstrip("/")
         except RuntimeError as exc:
             raise LLMConfigurationError("Ollama is not configured.") from exc
+        read_timeout = float(
+            settings.ollama_read_timeout_seconds
+            if self._ollama_read_timeout_seconds is None
+            else self._ollama_read_timeout_seconds
+        )
         timeout = httpx.Timeout(
             connect=float(settings.ollama_connect_timeout_seconds),
-            read=float(settings.ollama_read_timeout_seconds),
-            write=float(settings.ollama_read_timeout_seconds),
+            read=read_timeout,
+            write=read_timeout,
             pool=float(settings.ollama_connect_timeout_seconds),
         )
         messages: list[dict[str, str]] = []
@@ -125,11 +152,17 @@ class LLMClient:
             "messages": messages,
             "stream": False,
             "think": False,
-            "keep_alive": settings.ollama_keep_alive,
+            "keep_alive": self._ollama_keep_alive or settings.ollama_keep_alive,
             "options": {
                 "temperature": 0,
-                "num_ctx": int(settings.ollama_num_ctx),
-                "num_predict": int(settings.ollama_num_predict),
+                "num_ctx": int(
+                    settings.ollama_num_ctx if self._ollama_num_ctx is None else self._ollama_num_ctx
+                ),
+                "num_predict": int(
+                    settings.ollama_num_predict
+                    if self._ollama_num_predict is None
+                    else self._ollama_num_predict
+                ),
             },
         }
         if json_schema is not None:
@@ -144,7 +177,7 @@ class LLMClient:
                 response = client.post(f"{base}/api/chat", json=body)
         except httpx.TimeoutException:
             logger.warning("Ollama request failed category=timeout")
-            raise LLMProviderError("Ollama provider request failed.") from None
+            raise LLMTimeoutError("Ollama provider request failed.") from None
         except httpx.HTTPError:
             logger.warning("Ollama request failed category=connection")
             raise LLMProviderError("Ollama provider request failed.") from None
@@ -175,15 +208,32 @@ class LLMClient:
             raise LLMEmptyResponseError("Ollama returned an empty response.")
         return content.strip()
 
-    def _generate_gemini(self, prompt: str, system_prompt: str | None) -> str:
+    def _generate_gemini(
+        self,
+        prompt: str,
+        system_prompt: str | None,
+        json_schema: dict[str, Any] | None = None,
+    ) -> str:
         from google import genai
         from google.genai import types
         from google.genai import errors as genai_errors
 
-        client = genai.Client(api_key=self._api_key())
-        config = None
+        client_kwargs: dict[str, Any] = {"api_key": self._api_key()}
+        if self._request_timeout_seconds is not None:
+            client_kwargs["http_options"] = types.HttpOptions(
+                timeout=int(self._request_timeout_seconds * 1000)
+            )
+        client = genai.Client(**client_kwargs)
+        config_kwargs: dict[str, Any] = {}
         if system_prompt:
-            config = types.GenerateContentConfig(system_instruction=system_prompt)
+            config_kwargs["system_instruction"] = system_prompt
+        if json_schema is not None:
+            config_kwargs["response_mime_type"] = "application/json"
+            config_kwargs["response_json_schema"] = json_schema
+            config_kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(
+                disable=True
+            )
+        config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
         last_error: Exception | None = None
         for attempt in range(2):
@@ -212,7 +262,12 @@ class LLMClient:
                 if status in {429, 500, 503} and attempt == 0:
                     continue
                 raise LLMProviderError("Gemini provider request failed.") from exc
+            except (TimeoutError, httpx.TimeoutException) as exc:
+                logger.warning("Gemini request failed category=timeout")
+                raise LLMTimeoutError("Gemini provider request failed.") from None
             except Exception as exc:  # noqa: BLE001 — normalize provider failures
+                if isinstance(exc, LLMTimeoutError):
+                    raise
                 raise LLMProviderError("Gemini provider request failed.") from exc
         raise LLMProviderError("Gemini provider request failed.") from last_error
 
@@ -263,6 +318,48 @@ class LLMClient:
 def get_llm_client(provider: str | None = None) -> LLMClient:
     """Build a client from an explicit provider or DEFAULT_LLM_PROVIDER."""
     return LLMClient(provider=provider or settings.default_llm_provider)
+
+
+def provider_is_configured(provider: str) -> bool:
+    """True when the provider can be constructed without a configuration error."""
+    name = (provider or "").strip().lower()
+    if name not in SUPPORTED_LLM_PROVIDERS:
+        return False
+    if name == "ollama":
+        model = (settings.ollama_model or "").strip()
+        if not model:
+            return False
+        try:
+            validate_ollama_base_url(settings.ollama_base_url)
+        except RuntimeError:
+            return False
+        return True
+    if name == "gemini":
+        return bool((settings.gemini_api_key or "").strip())
+    if name == "anthropic":
+        return bool((settings.anthropic_api_key or "").strip())
+    return bool((settings.openai_api_key or "").strip())
+
+
+def get_resume_llm_client(provider: str | None = None) -> LLMClient:
+    """Resume-specific client: Gemini Flash-Lite first, fast local Ollama fallback."""
+    name = (provider or "gemini").strip().lower()
+    if name == "gemini":
+        return LLMClient(
+            provider="gemini",
+            model=settings.resume_gemini_model,
+            request_timeout_seconds=float(settings.resume_gemini_timeout_seconds),
+        )
+    if name == "ollama":
+        return LLMClient(
+            provider="ollama",
+            model=settings.resume_ollama_model,
+            ollama_read_timeout_seconds=float(settings.resume_ollama_read_timeout_seconds),
+            ollama_num_ctx=int(settings.resume_ollama_num_ctx),
+            ollama_num_predict=int(settings.resume_ollama_num_predict),
+            ollama_keep_alive=settings.resume_ollama_keep_alive,
+        )
+    return get_llm_client(name)
 
 
 if __name__ == "__main__":

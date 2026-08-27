@@ -542,6 +542,20 @@ body {
   }
 }
 
+@keyframes resume-parse-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+.resume-parse-pulse {
+  animation: resume-parse-pulse 1.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .intelligence-field,
   .pointer-halo,

@@ -35,6 +35,7 @@ from backend.services.llm_client import (
     LLMConfigurationError,
     LLMEmptyResponseError,
     LLMProviderError,
+    LLMTimeoutError,
 )
 from tests.pdf_fixtures import (
     SAMPLE_RESUME_TEXT,
@@ -154,10 +155,10 @@ def test_no_usable_text_raises_clear_error(tmp_path: Path) -> None:
         ),
         patch(
             "backend.services.candidate_profile_agent.extract_with_ocr",
-            side_effect=ResumeExtractionError("No readable resume text was found in this PDF."),
+            side_effect=ResumeExtractionError("Resume contained too little readable text."),
         ),
     ):
-        with pytest.raises(ResumeExtractionError, match="No readable resume text"):
+        with pytest.raises(ResumeExtractionError, match="too little readable text"):
             extract_resume_text(pdf_path)
 
 
@@ -1636,6 +1637,31 @@ def test_build_from_upload_end_to_end(isolated_session: Session) -> None:
     assert report.rejected == []
 
 
+def test_resume_parse_logs_are_privacy_safe(isolated_session: Session, caplog) -> None:
+    content = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
+    with caplog.at_level(logging.INFO, logger="backend.services.candidate_profile_agent"):
+        build_candidate_profile_from_upload(
+            "alex.pdf",
+            content,
+            db=isolated_session,
+            user_id=TEST_USER_ID,
+            content_type="application/pdf",
+            generate_fn=lambda _p, _s: json.dumps(_grounded_llm_payload()),
+        )
+    blob = caplog.text
+    assert "resume_parse stage=pdf" in blob
+    assert "resume_parse stage=llm" in blob
+    assert "resume_parse stage=grounding" in blob
+    assert "resume_parse stage=persist" in blob
+    assert "resume_parse stage=total" in blob
+    assert "Alex Rivera" not in blob
+    assert "alex.rivera@example.com" not in blob
+    assert "+1-555-0142" not in blob
+    assert "Northstar Labs" not in blob
+    assert "GEMINI_API_KEY" not in blob
+    assert SAMPLE_RESUME_TEXT[:40] not in blob
+
+
 def test_upload_path_never_creates_named_temp_file(isolated_session: Session) -> None:
     content = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
 
@@ -1677,7 +1703,23 @@ def test_provider_server_error_maps_to_actionable_502(isolated_client) -> None:
             files={"file": ("resume.pdf", pdf_bytes, "application/pdf")},
         )
     assert response.status_code == 502
-    assert "AI extraction service" in response.json()["detail"]
+    assert "temporarily unavailable" in response.json()["detail"].lower()
+
+
+def test_parse_resume_timeout_maps_to_504(isolated_client) -> None:
+    client, _ = isolated_client
+    pdf_bytes = build_simple_text_pdf(SAMPLE_RESUME_TEXT)
+
+    with patch(
+        "backend.services.candidate_profile_agent.extract_candidate_profile_with_llm",
+        side_effect=ProfileExtractionError("Resume analysis timed out. Please try again."),
+    ):
+        response = client.post(
+            "/api/parse-resume",
+            files={"file": ("resume.pdf", pdf_bytes, "application/pdf")},
+        )
+    assert response.status_code == 504
+    assert "timed out" in response.json()["detail"].lower()
 
 
 def test_oversized_upload_returns_413(isolated_client) -> None:
@@ -1977,6 +2019,7 @@ def test_every_profile_provider_error_the_loop_catches_is_ranked() -> None:
         ProfileExtractionError,
         ProfileGroundingError,
         LLMProviderError,
+        LLMTimeoutError,
         LLMEmptyResponseError,
         LLMConfigurationError,
     ):
@@ -2007,5 +2050,5 @@ def test_an_unreachable_provider_is_not_reported_as_a_bad_resume() -> None:
         )
 
     message = str(exc_info.value).lower()
-    assert "could not reach" in message
+    assert "temporarily unavailable" in message
     assert "resume" not in message

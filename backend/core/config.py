@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     # Blank preserves historical Gemini-only production behavior.
     llm_provider_order: str = ""
 
+    # Resume extraction is interactive and uses its own provider/model/timeout
+    # surface. Other CareerPilot features keep llm_provider_order / ollama_model.
+    resume_llm_provider_order: str = "gemini,ollama"
+    resume_gemini_model: str = "gemini-3.5-flash-lite"
+    resume_gemini_timeout_seconds: float = 30.0
+    resume_ollama_model: str = "qwen3.5:4b"
+    resume_ollama_read_timeout_seconds: float = 60.0
+    resume_ollama_keep_alive: str = "2m"
+    resume_ollama_num_ctx: int = 8192
+    resume_ollama_num_predict: int = 2048
+
     database_url: str = "sqlite:///./data/careerpilot.db"
     backend_url: str = "http://localhost:8000"
     log_level: str = "INFO"
@@ -202,10 +213,17 @@ def validate_llm_settings(cfg: Settings | None = None) -> None:
 
     cfg = cfg or settings
     parse_llm_provider_order(cfg.llm_provider_order)
+    parse_llm_provider_order(cfg.resume_llm_provider_order)
     validate_ollama_base_url(cfg.ollama_base_url)
     model = (cfg.ollama_model or "").strip()
     if not model or _has_control_characters(cfg.ollama_model or ""):
         raise RuntimeError("Ollama model is invalid.")
+    resume_model = (cfg.resume_ollama_model or "").strip()
+    if not resume_model or _has_control_characters(cfg.resume_ollama_model or ""):
+        raise RuntimeError("Resume Ollama model is invalid.")
+    resume_gemini = (cfg.resume_gemini_model or "").strip()
+    if not resume_gemini or _has_control_characters(cfg.resume_gemini_model or ""):
+        raise RuntimeError("Resume Gemini model is invalid.")
     connect = float(cfg.ollama_connect_timeout_seconds)
     read = float(cfg.ollama_read_timeout_seconds)
     if not 0.1 <= connect <= 60:
@@ -216,6 +234,20 @@ def validate_llm_settings(cfg: Settings | None = None) -> None:
         raise RuntimeError("Ollama context size is invalid.")
     if int(cfg.ollama_num_predict) < 1 or int(cfg.ollama_num_predict) > 32768:
         raise RuntimeError("Ollama output limit is invalid.")
+    resume_read = float(cfg.resume_ollama_read_timeout_seconds)
+    if not 1 <= resume_read <= 180:
+        raise RuntimeError("Resume Ollama read timeout is invalid.")
+    gemini_timeout = float(cfg.resume_gemini_timeout_seconds)
+    if not 1 <= gemini_timeout <= 120:
+        raise RuntimeError("Resume Gemini timeout is invalid.")
+    if int(cfg.resume_ollama_num_ctx) < 256 or int(cfg.resume_ollama_num_ctx) > 131072:
+        raise RuntimeError("Resume Ollama context size is invalid.")
+    if int(cfg.resume_ollama_num_predict) < 1 or int(cfg.resume_ollama_num_predict) > 32768:
+        raise RuntimeError("Resume Ollama output limit is invalid.")
+    resume_keep = (cfg.resume_ollama_keep_alive or "").strip()
+    resume_keep_match = _KEEP_ALIVE_RE.fullmatch(resume_keep)
+    if resume_keep_match is None:
+        raise RuntimeError("Resume Ollama keep-alive is invalid.")
     keep_alive = (cfg.ollama_keep_alive or "").strip()
     match = _KEEP_ALIVE_RE.fullmatch(keep_alive)
     if match is None:

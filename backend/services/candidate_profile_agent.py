@@ -15,6 +15,7 @@ import io
 import json
 import logging
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -34,16 +35,19 @@ from backend.schemas.schemas import (
     Experience,
     Project,
 )
+from backend.core.config import settings
 from backend.services.llm_client import (
     LLMClient,
     LLMConfigurationError,
     LLMEmptyResponseError,
     LLMProviderError,
-    get_llm_client,
+    LLMTimeoutError,
+    get_resume_llm_client,
 )
 from backend.services.llm_provider_sequence import (
-    configured_provider_names,
     invoke_provider_generate,
+    resume_provider_is_configured,
+    resume_provider_names,
     uses_injected_generator,
 )
 from backend.services.llm_structured_schemas import candidate_profile_llm_schema
@@ -137,6 +141,7 @@ _PROFILE_PROVIDER_ERROR_PRIORITY: dict[type[BaseException], int] = {
     ProfileGroundingError: 50,
     ProfileExtractionError: 50,
     LLMProviderError: 40,
+    LLMTimeoutError: 40,
     LLMEmptyResponseError: 40,
     # Lowest: with a provider order like "ollama,gemini" and no Gemini key,
     # this fires on every run and would otherwise bury the real failure,
@@ -153,6 +158,35 @@ def _should_replace_profile_error(current: Exception | None, new: Exception) -> 
     current_rank = _PROFILE_PROVIDER_ERROR_PRIORITY.get(type(current), 0)
     new_rank = _PROFILE_PROVIDER_ERROR_PRIORITY.get(type(new), 0)
     return new_rank > current_rank
+
+
+_RESUME_LOG_KEYS = frozenset(
+    {"provider", "model", "duration_ms", "fallback", "method", "reason", "rejected"}
+)
+
+
+def _log_resume_parse(stage: str, **fields: object) -> None:
+    """Privacy-safe parse timings. Never log resume contents or identities."""
+
+    parts = [f"resume_parse stage={stage}"]
+    for key, value in fields.items():
+        if key not in _RESUME_LOG_KEYS or value is None:
+            continue
+        if isinstance(value, bool):
+            parts.append(f"{key}={'yes' if value else 'no'}")
+        elif isinstance(value, float):
+            parts.append(f"{key}={int(value)}")
+        else:
+            parts.append(f"{key}={value}")
+    logger.info(" ".join(parts))
+
+
+def _resume_model_name(provider: str) -> str:
+    if provider == "gemini":
+        return settings.resume_gemini_model
+    if provider == "ollama":
+        return settings.resume_ollama_model
+    return provider
 
 
 @dataclass
@@ -1120,13 +1154,13 @@ def extract_with_ocr(pdf_source: Path | BinaryIO) -> str:
         ) from exc
     except Exception as exc:
         raise ResumeExtractionError(
-            "No readable resume text was found in this PDF."
+            "Resume could not be read."
         ) from exc
 
     text = normalize_whitespace("\n\n".join(chunks))
     if len(text) < NEAR_EMPTY_CHAR_THRESHOLD:
         raise ResumeExtractionError(
-            "No readable resume text was found in this PDF."
+            "Resume contained too little readable text."
         )
     return text
 
@@ -1268,7 +1302,7 @@ def extract_candidate_profile_with_llm(
     def _generate(prompt: str, system: str | None) -> str:
         if generate_fn is not None:
             return generate_fn(prompt, system)
-        client = llm or get_llm_client(provider or "gemini")
+        client = llm or get_resume_llm_client(provider or "gemini")
         return invoke_provider_generate(client, prompt, system, schema)
 
     last_error: Exception | None = None
@@ -1286,6 +1320,10 @@ def extract_candidate_profile_with_llm(
             return _validate_extracted_profile_payload(payload)
         except (InvalidResumeError, LLMConfigurationError):
             raise
+        except LLMTimeoutError as exc:
+            raise ProfileExtractionError(
+                "Resume analysis timed out. Please try again."
+            ) from exc
         except LLMProviderError as exc:
             # Provider retries (if any) already happened inside LLMClient.
             # Distinct wording from the cases below: this is the provider
@@ -1294,8 +1332,7 @@ def extract_candidate_profile_with_llm(
             # the resume here sends the user to re-export a PDF that was
             # never the problem.
             raise ProfileExtractionError(
-                "Could not reach the AI extraction service. Check that your model "
-                "provider is running, then try again."
+                "AI service temporarily unavailable. Please try again."
             ) from exc
         except LLMEmptyResponseError as exc:
             last_error = ProfileExtractionError(
@@ -1589,13 +1626,21 @@ def build_candidate_profile_from_pdf(
     generate_fn: Callable[[str, str | None], str] | None = None,
 ) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
     """Full Day 2 pipeline for a PDF on disk."""
+    total_start = time.perf_counter()
+    pdf_start = time.perf_counter()
     extraction = extract_resume_text(pdf_path)
+    _log_resume_parse(
+        "pdf",
+        method=extraction.method,
+        duration_ms=int((time.perf_counter() - pdf_start) * 1000),
+    )
     return _complete_profile_from_text(
         extraction,
         db=db,
         user_id=user_id,
         llm=llm,
         generate_fn=generate_fn,
+        total_start=total_start,
     )
 
 
@@ -1610,14 +1655,22 @@ def build_candidate_profile_from_upload(
     generate_fn: Callable[[str, str | None], str] | None = None,
 ) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
     """Validate upload bytes and process entirely in memory (no temp PDF files)."""
+    total_start = time.perf_counter()
     validate_pdf_upload(filename, content, content_type=content_type)
+    pdf_start = time.perf_counter()
     extraction = extract_resume_text(content)
+    _log_resume_parse(
+        "pdf",
+        method=extraction.method,
+        duration_ms=int((time.perf_counter() - pdf_start) * 1000),
+    )
     return _complete_profile_from_text(
         extraction,
         db=db,
         user_id=user_id,
         llm=llm,
         generate_fn=generate_fn,
+        total_start=total_start,
     )
 
 
@@ -1628,8 +1681,11 @@ def _complete_profile_from_text(
     user_id: int,
     llm: LLMClient | None,
     generate_fn: Callable[[str, str | None], str] | None,
+    total_start: float | None = None,
 ) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
-    """Extract, ground, and persist using one provider at a time."""
+    """Extract, ground, and persist using one resume provider at a time."""
+
+    started = time.perf_counter() if total_start is None else total_start
 
     def _run(provider: str | None = None) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
         kwargs: dict[str, Any] = {"llm": llm, "generate_fn": generate_fn}
@@ -1639,27 +1695,87 @@ def _complete_profile_from_text(
             parameters = {}
         if "provider" in parameters:
             kwargs["provider"] = provider
+        extract_start = time.perf_counter()
         raw = extract_candidate_profile_with_llm(extraction.text, **kwargs)
+        extract_ms = int((time.perf_counter() - extract_start) * 1000)
+        model_name = _resume_model_name(provider or (llm.provider if llm is not None else "injected"))
+        provider_name = provider or (llm.provider if llm is not None else "injected")
+        _log_resume_parse(
+            "llm",
+            provider=provider_name,
+            model=model_name,
+            duration_ms=extract_ms,
+        )
+        _log_resume_parse(
+            "structured_extraction",
+            provider=provider_name,
+            model=model_name,
+            duration_ms=extract_ms,
+        )
+        ground_start = time.perf_counter()
         profile, report = validate_and_ground_profile(raw, extraction.text)
+        _log_resume_parse(
+            "grounding",
+            duration_ms=int((time.perf_counter() - ground_start) * 1000),
+            rejected=report.total_rejected,
+        )
+        persist_start = time.perf_counter()
         stored = persist_candidate_profile(profile, db, user_id)
+        _log_resume_parse(
+            "persist",
+            duration_ms=int((time.perf_counter() - persist_start) * 1000),
+        )
         return stored, extraction, report
 
     if uses_injected_generator(generate_fn, llm):
-        return _run()
+        result = _run()
+        _log_resume_parse(
+            "total",
+            provider=llm.provider if llm is not None else "injected",
+            model=_resume_model_name(llm.provider) if llm is not None else "injected",
+            fallback=False,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return result
 
     last_error: Exception | None = None
-    for provider in configured_provider_names():
+    attempted = 0
+    setup_start = time.perf_counter()
+    providers = resume_provider_names()
+    _log_resume_parse(
+        "provider_setup",
+        duration_ms=int((time.perf_counter() - setup_start) * 1000),
+    )
+    for provider in providers:
+        if not resume_provider_is_configured(provider):
+            _log_resume_parse(
+                "provider_skip",
+                provider=provider,
+                reason="unconfigured",
+                duration_ms=0,
+            )
+            continue
         try:
-            return _run(provider)
+            stored, extraction_result, report = _run(provider)
+            _log_resume_parse(
+                "total",
+                provider=provider,
+                model=_resume_model_name(provider),
+                fallback=attempted > 0,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+            return stored, extraction_result, report
         except InvalidResumeError:
             raise
         except (
             ProfileExtractionError,
             ProfileGroundingError,
             LLMProviderError,
+            LLMTimeoutError,
             LLMEmptyResponseError,
             LLMConfigurationError,
         ) as exc:
+            attempted += 1
             if _should_replace_profile_error(last_error, exc):
                 last_error = exc
             logger.warning(
@@ -1668,7 +1784,12 @@ def _complete_profile_from_text(
             )
             continue
     if last_error is not None:
+        _log_resume_parse(
+            "total",
+            fallback=attempted > 1,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
         raise last_error
     raise ProfileExtractionError(
-        "The AI extraction service could not process this resume. Please try again."
+        "AI service temporarily unavailable. Please try again."
     )

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { CandidateSummary } from "../components/CandidateSummary";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { ResumeParsingProgress } from "../components/ResumeParsingProgress";
 import { ConstellationProgress } from "../components/signature/ConstellationProgress";
 import { IntelligenceField } from "../components/signature/IntelligenceField";
 import { WorkflowPath } from "../components/signature/WorkflowPath";
@@ -12,6 +13,7 @@ import { useAuth } from "../lib/auth";
 import { APP_NAME } from "../lib/config";
 import { CURATED_ROLES, readRoleType, writeRoleType, type RoleTypeFilter } from "../lib/job-role-type";
 import { readOnboardingProgress, saveOnboardingProgress } from "../lib/onboarding";
+import { resumeParseErrorHeading } from "../lib/resume-parse-error";
 import { useCandidateSession } from "../lib/session";
 
 const STEPS = [
@@ -157,7 +159,7 @@ export function OnboardingPage() {
           />
         </div>
 
-        <ErrorBanner error={error} />
+        <ErrorBanner error={error} heading={resumeParseErrorHeading(error)} />
 
         <AnimatePresence mode="wait">
           <motion.section
@@ -208,31 +210,37 @@ export function OnboardingPage() {
             ) : null}
             {step === 3 ? (
               <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Resume upload is recommended, not required. You can continue without a file.
-                </p>
-                <label
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    setDragActive(true);
-                  }}
-                  onDragLeave={() => setDragActive(false)}
-                  onDrop={onDrop}
-                  className={`flex cursor-pointer flex-col items-center rounded-[var(--radius-md)] border border-dashed px-6 py-10 text-center ${
-                    dragActive ? "border-primary bg-primary/5" : "border-border"
-                  }`}
-                >
-                  <span className="font-semibold">Drag & drop a resume PDF</span>
-                  <span className="mt-1 text-sm text-muted-foreground">
-                    {file ? file.name : "PDF only · max 10 MiB"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    className="sr-only"
-                    onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
-                  />
-                </label>
+                {busy && file ? (
+                  <ResumeParsingProgress active />
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      Resume upload is recommended, not required. You can continue without a file.
+                    </p>
+                    <label
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setDragActive(true);
+                      }}
+                      onDragLeave={() => setDragActive(false)}
+                      onDrop={onDrop}
+                      className={`flex cursor-pointer flex-col items-center rounded-[var(--radius-md)] border border-dashed px-6 py-10 text-center ${
+                        dragActive ? "border-primary bg-primary/5" : "border-border"
+                      }`}
+                    >
+                      <span className="font-semibold">Drag & drop a resume PDF</span>
+                      <span className="mt-1 text-sm text-muted-foreground">
+                        {file ? file.name : "PDF only · max 10 MiB"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        className="sr-only"
+                        onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
+                      />
+                    </label>
+                  </>
+                )}
               </div>
             ) : null}
             {step === 4 ? (
@@ -341,7 +349,15 @@ export function OnboardingPage() {
               disabled={busy}
               onClick={() => void onContinue()}
             >
-              {busy ? "Saving…" : step === STEPS.length ? "Finish" : "Continue"}
+              {busy && step === 3 && file
+                ? "Working…"
+                : busy
+                  ? "Saving…"
+                  : error && step === 3 && file
+                    ? "Retry"
+                    : step === STEPS.length
+                      ? "Finish"
+                      : "Continue"}
             </button>
           </div>
         </div>
