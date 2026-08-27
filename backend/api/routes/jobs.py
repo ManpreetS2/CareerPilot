@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -15,7 +17,13 @@ from backend.schemas.schemas import (
     MatchScore,
     ScoutJobsResponse,
 )
-from backend.services.analysis_service import list_stored_match_scores
+from backend.services.analysis_service import (
+    CandidateRequiredError,
+    RequirementsUnavailableError,
+    ScoringError,
+    list_stored_match_scores,
+    score_job,
+)
 from backend.services.job_scout_service import JobScoutError, ingest_job_url, normalize_job, persist_jobs
 from backend.services.job_service import (
     clean_search_term,
@@ -27,7 +35,31 @@ from backend.services.job_service import (
 from backend.services.job_verification_service import verify_all, verify_and_store
 from backend.services.url_safety import UnsafeURLError
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api", tags=["jobs"])
+
+
+def _auto_score_scouted_jobs(db: Session, jobs: list[Job], user_id: int) -> int:
+    """Persist a deterministic fit score for each scouted job.
+
+    Uses `score_job` only — never `score_job_with_intelligence` — so Find Jobs
+    does not call Gemini/Ollama/Claude/OpenAI. One unscoreable listing is
+    skipped; it must not fail the scout response.
+    """
+    scored = 0
+    for job in jobs:
+        if not job.id:
+            logger.info("Scout auto-score skipped job without id")
+            continue
+        try:
+            score_job(db, job.id, user_id)
+            scored += 1
+        except (CandidateRequiredError, RequirementsUnavailableError, ScoringError) as exc:
+            logger.info("Scout auto-score skipped job_id=%s reason=%s", job.id, type(exc).__name__)
+        except Exception as exc:  # noqa: BLE001 — one bad listing must not fail Find Jobs
+            logger.warning("Scout auto-score failed job_id=%s error=%s", job.id, type(exc).__name__)
+    return scored
 
 
 @router.get("/jobs", response_model=list[Job])
@@ -71,11 +103,15 @@ def trigger_scout(
     location = explicit_location or criteria.location
 
     jobs = scout_jobs(queries=queries, location=location)
+    auto_scored = _auto_score_scouted_jobs(db, jobs, user.id)
     searched = ", ".join(queries)
     where_note = f" in {location}" if location else ""
     return ScoutJobsResponse(
         jobs=jobs,
-        note=f"Scouted and stored {len(jobs)} job(s) from live sources for {searched}{where_note}.",
+        note=(
+            f"Scouted and stored {len(jobs)} job(s) from live sources for "
+            f"{searched}{where_note}. Auto-scored {auto_scored}."
+        ),
     )
 
 

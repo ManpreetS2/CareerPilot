@@ -8,7 +8,7 @@ Jobs now share the CareerPilot shell, tokens, compact-list + desktop preview lay
 
 Developer B owns:
 
-- job-source adapters and discovery (Greenhouse, Lever, Remotive, Adzuna, RemoteOK, manual URL)
+- job-source adapters and discovery (Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, manual URL)
 - job verification implementation
 - source badges and freshness
 - ATS detection and form-fill backend behavior
@@ -59,6 +59,8 @@ Evidence for stored match factors should open in CareerPilot’s glass evidence 
 - Remotive
 - Adzuna
 - RemoteOK
+- Jobicy
+- Himalayas
 - manual URL ingest
 - source badges
 - freshness (`date_scraped` / scouted time)

@@ -81,9 +81,9 @@ CareerPilot is an authenticated local product. Signup, login, logout, and `GET /
 - Mock-interview answer feedback is ephemeral (not stored) and follows `LLM_PROVIDER_ORDER`
 - Tracker rows can store a user-set follow-up date; CareerPilot does not send automated notifications or reminders. Track is a primary web destination (`/track`).
 
-Opening Dashboard, Jobs, Job Detail, Prepare Application, Profile, Resume, or Settings never scores a job, extracts requirements, generates materials, approves, or creates a resume version by itself. Calculate Fit, Generate Materials, Prepare Interview, Approve, and Save Resume Version stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation. Assisted Apply and the extension never submit forms.
+Opening Dashboard, Jobs, Job Detail, Prepare Application, Profile, Resume, or Settings never scores a job, extracts requirements, generates materials, approves, or creates a resume version by itself. Find Jobs persists a deterministic fit score (`score_job`) for each scoreable listing and does not call an LLM. Calculate Fit, Generate Materials, Prepare Interview, Approve, and Save Resume Version stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation. Assisted Apply and the extension never submit forms.
 
-Job discovery currently supports Greenhouse, Lever, Remotive, Adzuna, RemoteOK, and manual posting URLs. The Jobs workspace now uses a compact list plus desktop preview, internships/full-time/both title filter, and previous/next job navigation. Developer B still owns discovery, verification, ATS/form-fill, and the Chrome extension; see `docs/developer-b-ui-handoff.md`.
+Job discovery currently supports Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, and manual posting URLs. The Jobs workspace now uses a compact list plus desktop preview, internships/full-time/both title filter, and previous/next job navigation. Developer B still owns discovery, verification, ATS/form-fill, and the Chrome extension; see `docs/developer-b-ui-handoff.md`.
 
 PDF and DOCX export are **not** implemented. Do not expect download buttons.
 
@@ -119,7 +119,7 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - Validation errors never echo submitted `input` values.
 - No candidate skill, employer, metric, or education claim may be invented without stored evidence.
 - Assisted apply and the browser extension **never click submit**. The human reviews and submits.
-- Page load for Jobs, Job Detail, Prepare Application, Fit Score, Resume, and Interview Prep is read-only. Scoring and generation run only on an explicit user action.
+- Page load for Jobs, Job Detail, Prepare Application, Fit Score, Resume, and Interview Prep is read-only. Calculate Fit and generation run only on an explicit user action. Find Jobs also persists a deterministic fit score for scoreable listings (no LLM).
 - Private records are user-scoped. Shared job titles may be visible to every signed-in user; scores, recommendations, packages, tracker state, approval, and interview evidence are not.
 
 ## Setup
