@@ -41,4 +41,24 @@ describe("resolveApiBaseUrl", () => {
     expect(resolveApiBaseUrl("https://localhost:9000", "127.0.0.1")).toBe("https://127.0.0.1:9000");
     expect(resolveApiBaseUrl("http://127.0.0.1:8000", "localhost")).toBe("http://localhost:8000");
   });
+
+  it("serializes an unset IPv6 loopback page as a bracketed URL", () => {
+    expect(resolveApiBaseUrl(undefined, "[::1]")).toBe("http://[::1]:8000");
+  });
+
+  it("rewrites a localhost API onto a bracketed IPv6 loopback page", () => {
+    expect(resolveApiBaseUrl("http://localhost:8000", "[::1]")).toBe("http://[::1]:8000");
+  });
+
+  it("rewrites a 127.0.0.1 API onto a bracketed IPv6 loopback page", () => {
+    expect(resolveApiBaseUrl("http://127.0.0.1:8000", "[::1]")).toBe("http://[::1]:8000");
+  });
+
+  it("rewrites a bracketed IPv6 API onto localhost while keeping the port", () => {
+    expect(resolveApiBaseUrl("http://[::1]:9000", "localhost")).toBe("http://localhost:9000");
+  });
+
+  it("rewrites a bracketed IPv6 API onto 127.0.0.1 while keeping the port", () => {
+    expect(resolveApiBaseUrl("http://[::1]:9000", "127.0.0.1")).toBe("http://127.0.0.1:9000");
+  });
 });

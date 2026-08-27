@@ -14,8 +14,17 @@ function isLocalHostname(hostname: string): boolean {
   return LOCAL_HOSTNAMES.has(canonicalHostname(hostname));
 }
 
+function isIpv6Hostname(hostname: string): boolean {
+  return canonicalHostname(hostname).includes(":");
+}
+
+function hostnameForUrl(hostname: string): string {
+  const host = canonicalHostname(hostname);
+  return isIpv6Hostname(host) ? `[${host}]` : host;
+}
+
 function defaultLocalApiBase(pageHostname: string): string {
-  const host = isLocalHostname(pageHostname) ? canonicalHostname(pageHostname) : "localhost";
+  const host = isLocalHostname(pageHostname) ? hostnameForUrl(pageHostname) : "localhost";
   return `${DEFAULT_LOCAL_API_SCHEME}://${host}:${DEFAULT_LOCAL_API_PORT}`;
 }
 
@@ -36,7 +45,7 @@ export function resolveApiBaseUrl(
   }
 
   if (isLocalHostname(parsed.hostname) && isLocalHostname(pageHostname)) {
-    parsed.hostname = canonicalHostname(pageHostname);
+    parsed.hostname = hostnameForUrl(pageHostname);
   }
 
   const normalized = parsed.pathname === "/" ? `${parsed.origin}` : `${parsed.origin}${parsed.pathname}`;
