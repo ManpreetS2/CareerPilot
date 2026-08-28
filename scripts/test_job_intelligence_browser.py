@@ -286,6 +286,7 @@ def main() -> int:
                 )
 
                 extract_button = page.get_by_role("button", name="Extract requirements")
+                page.get_by_role("tab", name="Match").click()
                 fit_button = page.get_by_role("button", name="Calculate fit")
                 extract_button.evaluate(
                     """(button) => {
@@ -350,6 +351,7 @@ def main() -> int:
                     raise AssertionError("Refresh regenerated requirements or calculated fit.")
                 checks += 1
 
+                page.get_by_role("tab", name="Match").click()
                 with page.expect_request(
                     lambda request: request.method == "GET"
                     and request.url.rstrip("/").endswith("/intelligence")
