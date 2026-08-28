@@ -323,7 +323,7 @@ def main() -> int:
                 expect(intelligence_region.get_by_text("Seniority:", exact=False)).to_be_visible()
                 expect(intelligence_region.get_by_role("heading", name="Responsibilities")).to_be_visible()
                 expect(intelligence_region.get_by_role("heading", name="Likely interview focus")).to_be_visible()
-                expect(page.get_by_text("full Job Intelligence", exact=False)).to_be_visible()
+                expect(page.get_by_text("full Job Intelligence", exact=False).first).to_be_visible()
                 checks += 10
                 if intelligence_posts or len(score_posts) != 1:
                     raise AssertionError("Calculate fit did not issue exactly one score request.")
@@ -351,7 +351,7 @@ def main() -> int:
                 checks += 1
 
                 page.get_by_role("button", name="Calculate fit").click()
-                expect(page.get_by_text("full Job Intelligence", exact=False)).to_be_visible()
+                expect(page.get_by_text("full Job Intelligence", exact=False).first).to_be_visible()
                 if len(score_posts) != 2 or fake_client.calls != 1:
                     raise AssertionError("Repeat scoring regenerated stored requirements.")
                 if len(intelligence_gets) != 4:
