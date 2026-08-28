@@ -131,6 +131,42 @@ def _replace_unique_job_indexes() -> None:
         logger.info("Dropped superseded index %s on %s", old_index, table_name)
 
 
+def _dedupe_match_scores() -> None:
+    """Keep the newest MatchScore per (job_id, candidate_id) before uniqueness.
+
+    Linked MatchEvidence rows on discarded scores are deleted, not reassigned.
+    """
+    inspector = inspect(engine)
+    if "match_scores" not in inspector.get_table_names():
+        return
+    evidence_exists = "match_evidence" in inspector.get_table_names()
+    with engine.begin() as conn:
+        groups = conn.execute(
+            text(
+                "SELECT job_id, candidate_id, MAX(id) AS keep_id "
+                "FROM match_scores WHERE candidate_id IS NOT NULL "
+                "GROUP BY job_id, candidate_id HAVING COUNT(*) > 1"
+            )
+        ).fetchall()
+        for job_id, candidate_id, keep_id in groups:
+            discarded = conn.execute(
+                text(
+                    "SELECT id FROM match_scores "
+                    "WHERE job_id = :job_id AND candidate_id = :candidate_id AND id != :keep_id"
+                ),
+                {"job_id": job_id, "candidate_id": candidate_id, "keep_id": keep_id},
+            ).fetchall()
+            for (discarded_id,) in discarded:
+                if evidence_exists:
+                    conn.execute(
+                        text("DELETE FROM match_evidence WHERE match_score_id = :id"),
+                        {"id": discarded_id},
+                    )
+                conn.execute(text("DELETE FROM match_scores WHERE id = :id"), {"id": discarded_id})
+        if groups:
+            logger.info("Removed legacy duplicate match_scores rows for %s job/candidate pairs", len(groups))
+
+
 def init_db() -> None:
     """Create the data directory, create any missing Day 1 tables, and add
     any columns/indexes missing from tables that already existed."""
@@ -140,6 +176,7 @@ def init_db() -> None:
     _add_missing_columns()
     _replace_application_packages_job_index()
     _replace_unique_job_indexes()
+    _dedupe_match_scores()
     _add_missing_indexes()
     logger.info("Database initialized with tables: %s", ", ".join(sorted(Base.metadata.tables)))
 

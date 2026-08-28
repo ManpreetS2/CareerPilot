@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Any
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from backend.db.models import (
     Candidate,
@@ -1346,6 +1347,23 @@ def persist_score(
         if commit:
             db.commit()
             db.refresh(record)
+    except IntegrityError:
+        if not commit:
+            raise
+        db.rollback()
+        canonical = (
+            db.query(MatchScoreRecord)
+            .filter(MatchScoreRecord.job_id == job.id, MatchScoreRecord.candidate_id == candidate.id)
+            .order_by(MatchScoreRecord.id.desc())
+            .first()
+        )
+        if canonical is None:
+            raise
+        for key, value in payload.items():
+            setattr(canonical, key, value)
+        db.commit()
+        db.refresh(canonical)
+        record = canonical
     except Exception:
         if commit:
             db.rollback()
