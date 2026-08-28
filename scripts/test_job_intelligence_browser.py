@@ -64,6 +64,15 @@ def main() -> int:
         backend_port = _free_port()
         frontend_port = _free_port()
         os.environ["DATABASE_URL"] = f"sqlite:///{database_path}"
+        # The backend runs in-process below (imports backend.main directly,
+        # not a subprocess), so settings reads this from the same
+        # os.environ. Every mutating request made once a session cookie
+        # exists is checked against this list by OriginCSRFMiddleware —
+        # without it matching this run's actual dynamic frontend port, every
+        # authenticated POST here (Calculate fit, Extract, Re-verify) is
+        # rejected with "Invalid request origin," which is what this line
+        # fixes rather than a bug in that middleware.
+        os.environ["ALLOWED_ORIGINS"] = f"http://127.0.0.1:{frontend_port}"
 
         import uvicorn
         from sqlalchemy import create_engine
@@ -75,6 +84,7 @@ def main() -> int:
             JobIntelligenceRecord,
             JobRecord,
             MatchScoreRecord,
+            User,
         )
         from backend.main import app
         from backend.services import job_intelligence_service
@@ -86,6 +96,8 @@ def main() -> int:
         )
         Base.metadata.create_all(bind=engine)
         job_id = "browser-grounded-requirements"
+        candidate_email = "intelligence-browser@example.com"
+        candidate_password = "intelligence-browser-password-1"
         description = (
             "Requirements:\n"
             "Python\n"
@@ -103,33 +115,6 @@ def main() -> int:
         )
         with Session(engine) as session:
             session.add(
-                Candidate(
-                    name="Synthetic Browser Candidate",
-                    skills=["Python", "Terraform", "PostgreSQL", "Docker"],
-                    projects=[],
-                    experience=[
-                        {
-                            "title": "Platform Engineer",
-                            "company": "Fictional Harbor Labs",
-                            "start_date": "2020-01-01",
-                            "end_date": "Present",
-                            "highlights": ["Worked with Python and Terraform."],
-                        }
-                    ],
-                    education=[
-                        {
-                            "institution": "Fictional Lakeside University",
-                            "degree": "Bachelor's degree",
-                            "field": "Computer Science",
-                            "graduation_year": "2019",
-                        }
-                    ],
-                    certifications=[],
-                    strengths=[],
-                    evidence_links=[],
-                )
-            )
-            session.add(
                 JobRecord(
                     public_id=job_id,
                     title="Senior Platform Engineer",
@@ -145,6 +130,44 @@ def main() -> int:
                 )
             )
             session.commit()
+
+        def _seed_candidate_for(email: str) -> None:
+            # Every route the rest of this script exercises requires an
+            # authenticated session (ProtectedRoute redirects anonymous
+            # visitors to /login), so the candidate profile must be attached
+            # to whichever user actually signs up in the browser below,
+            # not created ahead of time with no owner.
+            with Session(engine) as session:
+                user = session.query(User).filter(User.email == email).one()
+                session.add(
+                    Candidate(
+                        user_id=user.id,
+                        name="Synthetic Browser Candidate",
+                        skills=["Python", "Terraform", "PostgreSQL", "Docker"],
+                        projects=[],
+                        experience=[
+                            {
+                                "title": "Platform Engineer",
+                                "company": "Fictional Harbor Labs",
+                                "start_date": "2020-01-01",
+                                "end_date": "Present",
+                                "highlights": ["Worked with Python and Terraform."],
+                            }
+                        ],
+                        education=[
+                            {
+                                "institution": "Fictional Lakeside University",
+                                "degree": "Bachelor's degree",
+                                "field": "Computer Science",
+                                "graduation_year": "2019",
+                            }
+                        ],
+                        certifications=[],
+                        strengths=[],
+                        evidence_links=[],
+                    )
+                )
+                session.commit()
 
         response_payload = {
             "job_id": None,
@@ -234,6 +257,14 @@ def main() -> int:
                         score_posts.append(request.url)
 
                 page.on("request", _track_request)
+
+                page.goto(f"http://127.0.0.1:{frontend_port}/signup")
+                page.locator('input[type="email"]').fill(candidate_email)
+                page.locator('input[type="password"]').fill(candidate_password)
+                page.get_by_role("button", name="Sign up").click()
+                page.wait_for_url("**/onboarding")
+                _seed_candidate_for(candidate_email)
+
                 job_url = f"http://127.0.0.1:{frontend_port}/jobs/{job_id}"
                 page.goto(job_url)
                 expect(page.get_by_role("heading", name="Senior Platform Engineer")).to_be_visible()
