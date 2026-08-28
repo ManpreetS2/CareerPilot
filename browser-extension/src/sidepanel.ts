@@ -1,19 +1,25 @@
 import {
   ApiError,
   BackendUnreachableError,
+  downloadResumeVersionFile,
   getActiveTabUrl,
   getAutofillData,
   getPanelData,
   ingestJobUrl,
   isJobPageUrl,
+  listResumeVersions,
   NotLoggedInError,
   originPattern,
   requestVerifiedFit,
   saveTrackedJob,
   unsaveTrackedJob,
+  type ExtensionResumeVersion,
   type PanelData,
+  type ResumeExportFormat,
 } from "./api";
+import { attachDocumentInPage, verifyResumeAttachmentInPage } from "./attachFile";
 import { WEB_APP_URL } from "./config";
+import { COVER_LETTER_FILE_SUPPORT } from "./cover-letter-file";
 import { classifyAutofillFields, type FieldStatusRow } from "./field-status";
 import { fillFormInPage } from "./fillForm";
 import { recognizeJobPage } from "./job-recognition";
@@ -29,6 +35,12 @@ let renderedUrl: string | null = null;
 let currentData: PanelData | null = null;
 let previewRows: FieldStatusRow[] | null = null;
 let verifyStageTimer: number | null = null;
+let resumeVersions: ExtensionResumeVersion[] = [];
+let selectedVersionId: string | null = null;
+let selectedFormat: ResumeExportFormat = "pdf";
+let attachStatus: "not_attached" | "attaching" | "attached" | "manual" | "failed" = "not_attached";
+let attachDetail = "";
+let versionsError = "";
 
 const VERIFY_STAGES = [
   "Reading full posting",
@@ -37,6 +49,70 @@ const VERIFY_STAGES = [
   "Calculating match",
   "Almost ready",
 ];
+
+function resetDocumentState() {
+  resumeVersions = [];
+  selectedVersionId = null;
+  selectedFormat = "pdf";
+  attachStatus = "not_attached";
+  attachDetail = "";
+  versionsError = "";
+}
+
+function defaultVersionId(versions: ExtensionResumeVersion[], jobId: string | null | undefined): string | null {
+  const forJob = versions.filter((version) => version.job_id === jobId);
+  if (forJob.length === 1) return forJob[0].id;
+  return null;
+}
+
+function attachStatusLabel(): string {
+  if (attachStatus === "attaching") return "Attaching…";
+  if (attachStatus === "attached") return "Attached ✓";
+  if (attachStatus === "manual") return "Needs manual upload";
+  if (attachStatus === "failed") return "Failed — Retry";
+  return "Not attached";
+}
+
+function formatVersionOption(version: ExtensionResumeVersion): string {
+  const when = version.created_at ? version.created_at.slice(0, 10) : "";
+  const job = version.job_title ? `${version.job_title} · ${version.company}` : "No linked job";
+  return `v${version.version_number} · ${job}${when ? ` · ${when}` : ""}`;
+}
+
+function documentsCard(): string {
+  const options = resumeVersions
+    .map((version) => {
+      const selected = version.id === selectedVersionId ? " selected" : "";
+      return `<option value="${escapeHtml(version.id)}"${selected}>${escapeHtml(formatVersionOption(version))}</option>`;
+    })
+    .join("");
+  const chosen = resumeVersions.find((version) => version.id === selectedVersionId);
+  const provenance = chosen
+    ? `${chosen.provenance_status.replaceAll("_", " ")}${chosen.matches_current_profile ? " · matches current profile" : ""}`
+    : "";
+  const cover = COVER_LETTER_FILE_SUPPORT.available
+    ? ""
+    : `<p class="mt-2 text-xs text-ink-500">Cover letter file: not available. Approved cover letter text can still be filled.</p>`;
+  return `
+    <div class="mt-3" id="documents-card">
+      <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Documents</p>
+      <label class="mt-2 block text-xs font-semibold text-ink-500" for="resume-version-select">Resume</label>
+      <select id="resume-version-select" class="btn-secondary mt-1 w-full text-left">
+        <option value="">Select a resume version</option>
+        ${options}
+      </select>
+      ${provenance ? `<p class="mt-1 text-xs text-ink-500">${escapeHtml(provenance)}</p>` : ""}
+      <p class="mt-2 text-xs font-semibold text-ink-500">Format</p>
+      <div class="mt-1 flex gap-3 text-xs">
+        <label><input type="radio" name="resume-format" value="pdf"${selectedFormat === "pdf" ? " checked" : ""} /> PDF</label>
+        <label><input type="radio" name="resume-format" value="docx"${selectedFormat === "docx" ? " checked" : ""} /> DOCX</label>
+      </div>
+      <p class="mt-2 text-xs" data-attach-status="${attachStatus}">Status: ${escapeHtml(attachStatusLabel())}</p>
+      ${attachDetail ? `<p class="mt-1 text-xs text-ink-500">${escapeHtml(attachDetail)}</p>` : ""}
+      ${versionsError ? `<p class="mt-1 text-xs text-danger-600">${escapeHtml(versionsError)}</p>` : ""}
+      ${cover}
+    </div>`;
+}
 
 function stopVerifyStages() {
   if (verifyStageTimer != null) {
@@ -189,6 +265,7 @@ function assistedApplyCard(data: PanelData, job: { id?: string | null }): string
         <button id="preview-btn" type="button" class="btn-secondary">Preview autofill</button>
         <button id="fill-btn" type="button" class="btn-primary">Fill safe fields</button>
       </div>
+      ${documentsCard()}
       ${preview}
       <div id="fill-status" role="status" class="mt-2"></div>
     </div>`;
@@ -335,6 +412,69 @@ function renderTracked(data: PanelData, url: string) {
   });
   document.getElementById("unsave-btn")?.addEventListener("click", () => void runSave(jobId, url, true));
   document.getElementById("verify-btn")?.addEventListener("click", () => void runVerify(jobId, url));
+  bindDocumentControls(jobId);
+}
+
+function refreshDocumentsCard() {
+  const jobId = currentData?.job?.id;
+  const slot = document.getElementById("documents-card");
+  if (!jobId || !slot) return;
+  slot.outerHTML = documentsCard();
+  bindDocumentControls(jobId);
+}
+
+function bindDocumentControls(jobId: string) {
+  document.getElementById("resume-version-select")?.addEventListener("change", (event) => {
+    selectedVersionId = (event.target as HTMLSelectElement).value || null;
+    attachStatus = "not_attached";
+    attachDetail = "";
+    const slot = document.getElementById("documents-card");
+    if (slot) {
+      slot.outerHTML = documentsCard();
+      bindDocumentControls(jobId);
+    }
+  });
+  document.querySelectorAll<HTMLInputElement>("input[name='resume-format']").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked && (input.value === "pdf" || input.value === "docx")) {
+        selectedFormat = input.value;
+        if (attachStatus === "attached") {
+          attachStatus = "not_attached";
+          attachDetail = "";
+        }
+      }
+    });
+  });
+}
+
+async function loadResumeVersions(jobId: string, token: number) {
+  try {
+    const started = performance.now();
+    const listed = await listResumeVersions(jobId);
+    console.debug(
+      `[CareerPilot] resume-version list ${Math.round(performance.now() - started)}ms count=${listed.versions.length}`,
+    );
+    if (token !== requestToken) return;
+    resumeVersions = listed.versions;
+    if (selectedVersionId && !resumeVersions.some((version) => version.id === selectedVersionId)) {
+      selectedVersionId = null;
+    }
+    if (!selectedVersionId) selectedVersionId = defaultVersionId(resumeVersions, jobId);
+    versionsError = "";
+    const slot = document.getElementById("documents-card");
+    if (slot) {
+      slot.outerHTML = documentsCard();
+      bindDocumentControls(jobId);
+    }
+  } catch (err) {
+    if (token !== requestToken) return;
+    versionsError = err instanceof NotLoggedInError || err instanceof Error ? err.message : "Could not load resume versions.";
+    const slot = document.getElementById("documents-card");
+    if (slot) {
+      slot.outerHTML = documentsCard();
+      bindDocumentControls(jobId);
+    }
+  }
 }
 
 /** chrome.scripting.executeScript needs access to the page's own origin.
@@ -389,7 +529,6 @@ async function runFill(url: string) {
     }
 
     statusEl.textContent = "Looking up this application…";
-    const autofill = await getAutofillData(url);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Could not read the current tab.");
     if (tab.url !== url) {
@@ -398,6 +537,47 @@ async function runFill(url: string) {
       return;
     }
 
+    let attachedName: string | null = null;
+    if (selectedVersionId) {
+      attachStatus = "attaching";
+      attachDetail = "";
+      refreshDocumentsCard();
+      statusEl.textContent = "Downloading resume…";
+      const downloadStarted = performance.now();
+      const file = await downloadResumeVersionFile(selectedVersionId, selectedFormat);
+      console.debug(
+        `[CareerPilot] resume ${selectedFormat} fetch ${Math.round(performance.now() - downloadStarted)}ms version_id=${selectedVersionId}`,
+      );
+      statusEl.textContent = "Attaching resume…";
+      const attachStarted = performance.now();
+      const attached = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: attachDocumentInPage,
+        args: [
+          {
+            kind: "resume" as const,
+            filename: file.filename,
+            mimeType: file.mimeType,
+            bytesBase64: file.bytesBase64,
+          },
+        ],
+      });
+      console.debug(`[CareerPilot] resume attach ${Math.round(performance.now() - attachStarted)}ms`);
+      const attachResult = attached?.[0]?.result;
+      if (!attachResult || attachResult.status !== "attached") {
+        attachStatus = attachResult?.status === "manual" || attachResult?.status === "ambiguous" ? "manual" : "failed";
+        attachDetail = attachResult?.reason || "Attach manually.";
+        refreshDocumentsCard();
+        statusEl.textContent = attachDetail;
+        return;
+      }
+      attachedName = attachResult.verifiedName;
+      attachStatus = "attached";
+      attachDetail = "";
+      refreshDocumentsCard();
+    }
+
+    const autofill = await getAutofillData(url);
     statusEl.textContent = "Filling the form…";
     const injection = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -409,27 +589,50 @@ async function runFill(url: string) {
       statusEl.textContent = "No result returned from the page.";
       return;
     }
+    if (attachedName) {
+      const verifyStarted = performance.now();
+      const stillThere = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: verifyResumeAttachmentInPage,
+        args: [attachedName],
+      });
+      console.debug(`[CareerPilot] resume verify ${Math.round(performance.now() - verifyStarted)}ms`);
+      if (!stillThere?.[0]?.result?.attached) {
+        attachStatus = "failed";
+        attachDetail = "Resume needs re-attachment.";
+        refreshDocumentsCard();
+        statusEl.textContent = "Resume needs re-attachment. Safe fields were not marked ready.";
+        return;
+      }
+    }
     const parts: string[] = [];
+    if (attachedName) parts.push(`<p class="mt-2 text-xs font-semibold">Resume attached</p>`);
     if (result.filled.length > 0) {
       parts.push(
-        `<p class="mt-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Filled automatically</p><ul class="mt-1 list-disc pl-4">${result.filled
+        `<p class="mt-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Safe fields filled</p><ul class="mt-1 list-disc pl-4">${result.filled
           .map((f) => `<li>${escapeHtml(f.name)}</li>`)
           .join("")}</ul>`,
       );
     }
     if (result.flagged.length > 0) {
       parts.push(
-        `<p class="mt-2 text-xs font-semibold uppercase tracking-wide text-warn-600">Needs your input</p><ul class="mt-1 list-disc pl-4">${result.flagged
+        `<p class="mt-2 text-xs font-semibold uppercase tracking-wide text-warn-600">Manual review required</p><ul class="mt-1 list-disc pl-4">${result.flagged
           .map((f) => `<li>${escapeHtml(f.name)} — ${escapeHtml(f.reason)}</li>`)
           .join("")}</ul>`,
       );
     }
+    parts.push(`<p class="mt-2 text-xs font-semibold">Ready for your review</p>`);
     parts.push(`<p class="mt-2 text-xs text-ink-500">Submit was not pressed. Review the page, then submit yourself.</p>`);
     statusEl.innerHTML = parts.join("") || "Nothing on this page matched.";
   } catch (err) {
     if (err instanceof NotLoggedInError) {
       renderError(err.message, "login");
       return;
+    }
+    if (attachStatus === "attaching") {
+      attachStatus = "failed";
+      attachDetail = err instanceof Error ? err.message : "Download failed.";
+      refreshDocumentsCard();
     }
     statusEl.textContent = err instanceof Error ? err.message : String(err);
   } finally {
@@ -515,7 +718,9 @@ async function loadForUrl(url: string) {
   const token = ++requestToken;
   previewRows = null;
   stopVerifyStages();
+  if (renderedUrl && renderedUrl !== url) resetDocumentState();
   if (!isJobPageUrl(url)) {
+    resetDocumentState();
     renderIdle();
     return;
   }
@@ -527,6 +732,7 @@ async function loadForUrl(url: string) {
     if (token !== requestToken) return;
     console.debug(`[CareerPilot] panel-data ${Math.round(performance.now() - started)}ms`);
     if (!data.tracked) {
+      resetDocumentState();
       if (recognition.supported) {
         renderSupportedUntracked(url, recognition.platform === "unsupported" ? "greenhouse" : recognition.platform);
         return;
@@ -535,6 +741,9 @@ async function loadForUrl(url: string) {
       return;
     }
     renderTracked(data, url);
+    if (data.apply_ready && data.job?.id) {
+      void loadResumeVersions(data.job.id, token);
+    }
   } catch (err) {
     if (token !== requestToken) return;
     if (err instanceof NotLoggedInError) {
