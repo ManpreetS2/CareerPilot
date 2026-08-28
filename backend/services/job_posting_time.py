@@ -69,10 +69,11 @@ def job_posting_datetime(
     *,
     now: datetime | None = None,
 ) -> datetime | None:
-    """Prefer a trustworthy employer/provider date_posted; scrape time is fallback only."""
-    posted = parse_posted_at(date_posted, now=now)
-    if posted is not None:
-        return posted
+    """Valid employer posting time only. Discovery/scrape is never posting time."""
+    return parse_posted_at(date_posted, now=now)
+
+
+def discovery_datetime(date_scraped: datetime | None) -> datetime | None:
     return _aware(date_scraped)
 
 

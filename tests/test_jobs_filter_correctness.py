@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from backend.db.models import JobRecord, JobRequirementProfileRecord
+from backend.schemas.job_requirements import EXTRACTION_VERSION
+from backend.services.job_content import source_fingerprint
 from backend.services.opportunity_type import infer_employment_type, infer_opportunity_type
 
 
@@ -38,6 +40,24 @@ def _job(
     db.commit()
     db.refresh(record)
     return record
+
+
+def _add_profile(db, job: JobRecord, fingerprint: str, **fields) -> JobRequirementProfileRecord:
+    payload = {
+        "source_fingerprint": fingerprint,
+        "extraction_version": EXTRACTION_VERSION,
+        **fields,
+    }
+    row = JobRequirementProfileRecord(
+        job_id=job.id,
+        source_fingerprint=fingerprint,
+        extraction_version=EXTRACTION_VERSION,
+        profile_json=payload,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 def test_date_posted_filter_and_newest_sort_use_employer_posting_time(isolated_client) -> None:
@@ -102,19 +122,21 @@ def test_date_posted_filter_and_newest_sort_use_employer_posting_time(isolated_c
     past_24h = client.get("/api/jobs/query", params={"date_posted": "past_24h"})
     assert past_24h.status_code == 200
     ids = set(_ids(past_24h))
-    assert "old-posted-new-scrape" not in ids
     assert "posted-yesterday" in ids
     assert "iso-datetime" in ids
-    # Missing or untrustworthy posting dates may fall back to scrape time.
-    assert "scrape-fallback" in ids
-    assert "invalid-posted" in ids
-    assert "epoch-garbage" in ids
+    assert "old-posted-new-scrape" not in ids
+    assert "scrape-fallback" not in ids
+    assert "invalid-posted" not in ids
+    assert "epoch-garbage" not in ids
 
     newest = client.get("/api/jobs/query", params={"sort": "newest"})
     assert newest.status_code == 200
     ranked = _ids(newest)
     assert ranked.index("posted-yesterday") < ranked.index("old-posted-new-scrape")
     assert ranked.index("iso-datetime") < ranked.index("old-posted-new-scrape")
+    assert ranked.index("iso-datetime") < ranked.index("scrape-fallback")
+    assert ranked.index("iso-datetime") < ranked.index("invalid-posted")
+    assert ranked.index("iso-datetime") < ranked.index("epoch-garbage")
 
     epoch_job = next(item["job"] for item in newest.json()["items"] if item["job"]["id"] == "epoch-garbage")
     assert epoch_job.get("date_posted") != "1970-01-01"
@@ -489,3 +511,225 @@ def test_malformed_and_future_posted_dates_do_not_500_or_rank_newest(isolated_cl
     assert by_id["nan-like"]["date_posted"] is None
     assert newest_ids[0] == "recent-iso"
     assert newest_ids[0] not in {"year-2286", "overflow", "microseconds"}
+
+
+def test_date_posted_filter_requires_valid_employer_posting_date(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        _job(
+            db,
+            public_id="valid-recent",
+            title="Software Engineer",
+            date_posted=(now - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            date_scraped=now,
+        )
+        _job(
+            db,
+            public_id="old-scraped-today",
+            title="Software Engineer II",
+            date_posted=(now - timedelta(days=45)).date().isoformat(),
+            date_scraped=now,
+        )
+        _job(
+            db,
+            public_id="missing-scraped-today",
+            title="Software Engineer III",
+            date_posted=None,
+            date_scraped=now,
+        )
+        _job(
+            db,
+            public_id="invalid-scraped-today",
+            title="Software Engineer IV",
+            date_posted="not-a-date",
+            date_scraped=now,
+        )
+        _job(
+            db,
+            public_id="epoch-scraped-today",
+            title="Software Engineer V",
+            date_posted="1970-01-01",
+            date_scraped=now,
+        )
+        _job(
+            db,
+            public_id="future-scraped-today",
+            title="Software Engineer VI",
+            date_posted=(now + timedelta(days=400)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            date_scraped=now,
+        )
+
+    past_24h = client.get("/api/jobs/query", params={"date_posted": "past_24h"})
+    assert past_24h.status_code == 200
+    ids = set(_ids(past_24h))
+    assert ids == {"valid-recent"}
+    newest = client.get("/api/jobs/query", params={"sort": "newest"})
+    assert newest.status_code == 200
+    ranked = _ids(newest)
+    assert ranked[0] == "valid-recent"
+    for junk in (
+        "missing-scraped-today",
+        "invalid-scraped-today",
+        "epoch-scraped-today",
+        "future-scraped-today",
+    ):
+        assert ranked.index("valid-recent") < ranked.index(junk)
+        assert ranked.index("old-scraped-today") < ranked.index(junk)
+
+
+def test_stale_requirement_profile_does_not_drive_jobs_filters(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(
+            db,
+            public_id="stale-profile-job",
+            title="Remote Software Engineer",
+            location="Remote - United States",
+            description="This is a remote role. Full-time. Senior software engineer.",
+        )
+        fingerprint_a = source_fingerprint(job.title, job.description)
+        _add_profile(
+            db,
+            job,
+            fingerprint_a,
+            work_mode="remote",
+            employment_type="full_time",
+            experience_level="senior",
+            locations=[{"label": "United States", "evidence_text": "Remote US"}],
+            remote_scope="US",
+        )
+        job.title = "On-site Software Engineer"
+        job.location = "Austin, TX"
+        job.description = "This is an onsite role. Full-time. Senior software engineer."
+        db.commit()
+        mutated_description = job.description
+
+    assert fingerprint_a != source_fingerprint("On-site Software Engineer", mutated_description)
+    remote = client.get("/api/jobs/query", params={"work_mode": "remote"})
+    onsite = client.get("/api/jobs/query", params={"work_mode": "onsite"})
+    assert "stale-profile-job" not in set(_ids(remote))
+    assert "stale-profile-job" in set(_ids(onsite))
+
+    with SessionLocal() as db:
+        job = db.query(JobRecord).filter(JobRecord.public_id == "stale-profile-job").one()
+        job.title = "Software Engineer"
+        job.location = "Austin, TX"
+        job.description = "Build products. Collaborate with contractors."
+        db.commit()
+        row = db.query(JobRequirementProfileRecord).filter(JobRequirementProfileRecord.job_id == job.id).one()
+        row.profile_json = {
+            **row.profile_json,
+            "employment_type": "contract",
+            "experience_level": "intern",
+            "locations": [{"label": "San Francisco", "evidence_text": "stale SF"}],
+            "work_mode": "remote",
+        }
+        db.commit()
+
+    assert "stale-profile-job" not in set(
+        _ids(client.get("/api/jobs/query", params={"employment_type": "contract"}))
+    )
+    assert "stale-profile-job" not in set(
+        _ids(client.get("/api/jobs/query", params={"experience_level": "intern"}))
+    )
+    assert "stale-profile-job" not in set(
+        _ids(client.get("/api/jobs/query", params={"location": "San Francisco"}))
+    )
+
+    with SessionLocal() as db:
+        job = db.query(JobRecord).filter(JobRecord.public_id == "stale-profile-job").one()
+        job.title = "On-site Software Engineer"
+        job.location = "Austin, TX"
+        job.description = "This is an onsite role. Full-time. Senior software engineer."
+        db.commit()
+        fingerprint_b = source_fingerprint(job.title, job.description)
+        row = db.query(JobRequirementProfileRecord).filter(JobRequirementProfileRecord.job_id == job.id).one()
+        row.source_fingerprint = fingerprint_b
+        row.profile_json = {
+            "source_fingerprint": fingerprint_b,
+            "extraction_version": EXTRACTION_VERSION,
+            "work_mode": "onsite",
+            "employment_type": "full_time",
+            "experience_level": "senior",
+            "locations": [{"label": "Austin, TX", "evidence_text": "Austin office"}],
+        }
+        db.commit()
+
+    assert "stale-profile-job" in set(_ids(client.get("/api/jobs/query", params={"work_mode": "onsite"})))
+    assert "stale-profile-job" not in set(_ids(client.get("/api/jobs/query", params={"work_mode": "remote"})))
+
+
+def test_jobs_endpoints_share_current_profile_metadata_and_drop_stale(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(
+            db,
+            public_id="canonical-meta",
+            title="Software Engineer",
+            location="Palo Alto, CA",
+            description="Collaborate with remote teams and contractors. Build products.",
+        )
+        fingerprint = source_fingerprint(job.title, job.description)
+        _add_profile(
+            db,
+            job,
+            fingerprint,
+            work_mode="hybrid",
+            employment_type="full_time",
+            experience_level="senior",
+        )
+
+    def _meta_from_catalog():
+        catalog = client.get("/api/jobs")
+        assert catalog.status_code == 200
+        return next(item for item in catalog.json() if item["id"] == "canonical-meta")
+
+    def _meta_from_detail():
+        detail = client.get("/api/jobs/canonical-meta")
+        assert detail.status_code == 200
+        return detail.json()
+
+    def _meta_from_query():
+        query = client.get("/api/jobs/query")
+        assert query.status_code == 200
+        return next(item["job"] for item in query.json()["items"] if item["job"]["id"] == "canonical-meta")
+
+    catalog_job = _meta_from_catalog()
+    detail_job = _meta_from_detail()
+    query_job = _meta_from_query()
+    for payload in (catalog_job, detail_job, query_job):
+        assert payload["work_mode"] == "hybrid"
+        assert payload["employment_type"] == "full_time"
+        assert payload["opportunity_type"] == "role"
+
+    assert "canonical-meta" in set(_ids(client.get("/api/jobs/query", params={"work_mode": "hybrid"})))
+    assert "canonical-meta" in set(
+        _ids(client.get("/api/jobs/query", params={"employment_type": "full_time"}))
+    )
+    assert "canonical-meta" in set(
+        _ids(client.get("/api/jobs/query", params={"experience_level": "senior"}))
+    )
+    assert "canonical-meta" in set(_ids(client.get("/api/jobs/query", params={"opportunity": "role"})))
+    assert "canonical-meta" not in set(
+        _ids(client.get("/api/jobs/query", params={"opportunity": "internship"}))
+    )
+
+    with SessionLocal() as db:
+        job = db.query(JobRecord).filter(JobRecord.public_id == "canonical-meta").one()
+        job.description = "Updated posting. Collaborate with remote teams and contractors."
+        db.commit()
+
+    catalog_job = _meta_from_catalog()
+    detail_job = _meta_from_detail()
+    query_job = _meta_from_query()
+    for payload in (catalog_job, detail_job, query_job):
+        assert payload["work_mode"] != "hybrid"
+        assert payload["employment_type"] != "full_time"
+    assert "canonical-meta" not in set(_ids(client.get("/api/jobs/query", params={"work_mode": "hybrid"})))
+    assert "canonical-meta" not in set(
+        _ids(client.get("/api/jobs/query", params={"employment_type": "full_time"}))
+    )
+    assert "canonical-meta" not in set(
+        _ids(client.get("/api/jobs/query", params={"experience_level": "senior"}))
+    )

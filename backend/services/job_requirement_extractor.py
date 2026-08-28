@@ -15,12 +15,26 @@ from sqlalchemy.orm import Session
 
 from backend.db.models import JobRecord, JobRequirementProfileRecord
 from backend.schemas.job_requirements import EXTRACTION_VERSION, JobRequirementProfile
-from backend.services.job_content import canonical_from_job
+from backend.services.job_content import canonical_from_job, source_fingerprint
 from backend.services.job_requirement_llm import enrich_profile_with_llm
 from backend.services.requirement_mining import mine_hard_requirements
 
 logger = logging.getLogger(__name__)
 GenerateFn = Callable[[str, str | None], str]
+
+
+def current_posting_fingerprint(job: JobRecord) -> str:
+    return source_fingerprint(job.title, job.description)
+
+
+def is_current_requirement_profile(job: JobRecord, row: JobRequirementProfileRecord | None) -> bool:
+    """True only when the stored profile belongs to this posting snapshot."""
+    if row is None:
+        return False
+    return (
+        row.source_fingerprint == current_posting_fingerprint(job)
+        and int(row.extraction_version) == EXTRACTION_VERSION
+    )
 
 
 def profile_from_job_record(job: JobRecord) -> JobRequirementProfile:
@@ -48,18 +62,7 @@ def load_requirement_profile(db: Session, job: JobRecord) -> JobRequirementProfi
     )
     if row is None:
         return None
-    current = canonical_from_job(
-        title=job.title,
-        company=job.company,
-        description=job.description or "",
-        source=job.source,
-        url=job.url or "",
-        source_job_id=getattr(job, "source_job_id", None),
-        posted_at=job.date_posted,
-        fetched_at=job.date_scraped,
-        content_status=getattr(job, "content_status", None),  # type: ignore[arg-type]
-    )
-    if row.source_fingerprint != current.source_fingerprint or row.extraction_version != EXTRACTION_VERSION:
+    if not is_current_requirement_profile(job, row):
         return None
     return JobRequirementProfile.model_validate(row.profile_json)
 

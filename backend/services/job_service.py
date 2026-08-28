@@ -8,16 +8,14 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, status
 
+from sqlalchemy.orm import joinedload
+
 from backend.db.database import SessionLocal
-from backend.db.models import Candidate, JobRecord
+from backend.db.models import Candidate, JobRecord, JobRequirementProfileRecord
 from backend.schemas.schemas import Job, JobIntelligence
 from backend.services.analysis_service import _candidate_work_modes, _city_state
+from backend.services.job_listing_metadata import resolve_job_listing_metadata
 from backend.services.job_posting_time import posted_date_for_display
-from backend.services.opportunity_type import (
-    infer_employment_type,
-    infer_opportunity_type,
-    infer_work_mode,
-)
 from backend.services.application_tracker_service import latest_preference
 
 logger = logging.getLogger(__name__)
@@ -30,7 +28,10 @@ logger = logging.getLogger(__name__)
 _VALID_JOB_STATUSES = {"discovered", "verified", "flagged", "stale"}
 
 
-def record_to_job(record: JobRecord) -> Job:
+def record_to_job(
+    record: JobRecord,
+    profile_row: JobRequirementProfileRecord | None = None,
+) -> Job:
     job_status = record.status
     if job_status not in _VALID_JOB_STATUSES:
         logger.warning(
@@ -40,6 +41,7 @@ def record_to_job(record: JobRecord) -> Job:
         )
         job_status = "flagged"
 
+    meta = resolve_job_listing_metadata(record, profile_row)
     return Job(
         id=record.public_id,
         title=record.title,
@@ -58,21 +60,31 @@ def record_to_job(record: JobRecord) -> Job:
         status=job_status,
         verification_notes=record.verification_notes,
         verified_at=record.verified_at,
-        opportunity_type=infer_opportunity_type(record.title, record.description),
-        employment_type=infer_employment_type(record.title, record.description),
-        work_mode=infer_work_mode(record.title, record.description, record.location),
+        opportunity_type=meta.opportunity_type,
+        employment_type=meta.employment_type,
+        work_mode=meta.work_mode,
     )
 
 
 def list_jobs() -> list[Job]:
     with SessionLocal() as db:
-        records = db.query(JobRecord).order_by(JobRecord.date_scraped.desc()).all()
+        records = (
+            db.query(JobRecord)
+            .options(joinedload(JobRecord.requirement_profile))
+            .order_by(JobRecord.date_scraped.desc())
+            .all()
+        )
         return [record_to_job(record) for record in records]
 
 
 def get_job(job_id: str) -> Job:
     with SessionLocal() as db:
-        record = db.query(JobRecord).filter(JobRecord.public_id == job_id).first()
+        record = (
+            db.query(JobRecord)
+            .options(joinedload(JobRecord.requirement_profile))
+            .filter(JobRecord.public_id == job_id)
+            .first()
+        )
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' not found")
         return record_to_job(record)

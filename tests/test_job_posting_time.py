@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from backend.services.job_posting_time import parse_posted_at
+from backend.services.job_posting_time import discovery_datetime, job_posting_datetime, parse_posted_at
 
 
 NOW = datetime(2026, 8, 28, 18, 0, tzinfo=timezone.utc)
@@ -35,3 +35,12 @@ def test_parse_posted_at_rejects_microseconds_garbage_and_future_dates() -> None
     assert parse_posted_at(far_future, now=NOW) is None
     slightly_ahead = (NOW + timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%SZ")
     assert parse_posted_at(slightly_ahead, now=NOW) is not None
+
+
+def test_job_posting_datetime_does_not_treat_scrape_time_as_posted_at() -> None:
+    scraped = NOW
+    assert job_posting_datetime("2026-08-20T15:30:00Z", scraped, now=NOW) is not None
+    assert job_posting_datetime(None, scraped, now=NOW) is None
+    assert job_posting_datetime("not-a-date", scraped, now=NOW) is None
+    assert job_posting_datetime("1970-01-01", scraped, now=NOW) is None
+    assert discovery_datetime(scraped) == scraped
