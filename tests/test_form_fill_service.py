@@ -1586,3 +1586,68 @@ def test_an_overridden_package_goes_stale_when_the_resume_changes(isolated_sessi
     )
     assert result.apply_ready is False
     assert result.materials_unverified is False
+
+
+def test_panel_data_reports_saved_false_by_default(isolated_session) -> None:
+    job = _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/1")
+    result = get_extension_panel_data(isolated_session, job.url, TEST_USER_ID)
+    assert result.saved is False
+    assert result.must_have == []
+    assert result.approval_status is None
+
+
+def test_extension_save_unsave_and_panel_saved_flag(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(db, url="https://boards.greenhouse.io/acme/jobs/42")
+        public_id = job.public_id
+        url = job.url
+    headers = _extension_auth_headers(client)
+    client.cookies.clear()
+
+    first = client.post(f"/api/extension/jobs/{public_id}/save", headers=headers)
+    assert first.status_code == 200
+    assert first.json()["saved"] is True
+    second = client.post(f"/api/extension/jobs/{public_id}/save", headers=headers)
+    assert second.status_code == 200
+
+    panel = client.get("/api/extension/panel-data", params={"url": url}, headers=headers)
+    assert panel.status_code == 200
+    assert panel.json()["saved"] is True
+
+    deleted = client.delete(f"/api/extension/jobs/{public_id}/save", headers=headers)
+    assert deleted.status_code == 204
+    panel_after = client.get("/api/extension/panel-data", params={"url": url}, headers=headers)
+    assert panel_after.json()["saved"] is False
+
+
+def test_extension_ingest_reuses_canonical_job_without_calling_ingest(isolated_client, monkeypatch) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(db, url="https://boards.greenhouse.io/acme/jobs/7761472003")
+        public_id = job.public_id
+
+    def _should_not_fetch(_url: str) -> dict:
+        raise AssertionError("existing canonical jobs must not be re-ingested")
+
+    monkeypatch.setattr("backend.api.routes.applications.ingest_job_url", _should_not_fetch)
+    headers = _extension_auth_headers(client)
+    client.cookies.clear()
+    response = client.post(
+        "/api/extension/ingest-url",
+        json={"url": "https://boards.greenhouse.io/acme/jobs/7761472003?utm_source=ext"},
+        headers=headers,
+    )
+    assert response.status_code == 201
+    assert response.json()["id"] == public_id
+
+
+def test_extension_mutating_routes_reject_cookie_only_auth(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        job = _job(db)
+        public_id = job.public_id
+    assert client.post("/api/extension/ingest-url", json={"url": "https://boards.greenhouse.io/acme/jobs/1"}).status_code == 401
+    assert client.post(f"/api/extension/jobs/{public_id}/save").status_code == 401
+    assert client.delete(f"/api/extension/jobs/{public_id}/save").status_code == 401
+    assert client.post(f"/api/extension/jobs/{public_id}/verified-fit").status_code == 401
