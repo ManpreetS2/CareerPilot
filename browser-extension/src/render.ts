@@ -86,7 +86,7 @@ export function matchBadge(
         ? "bg-amber-100 text-warn-600 dark:bg-amber-950/40 dark:text-amber-200"
         : "bg-rose-100 text-danger-600 dark:bg-rose-950/40 dark:text-rose-200";
   const rec = recommendation ? ` · ${escapeHtml(recommendation)}` : "";
-  return `<span class="status-pill ${tone}">${Math.round(score)}% MATCH${rec}</span>`;
+  return `<span class="status-pill ${tone}">Verified Match ${Math.round(score)}%${rec}</span>`;
 }
 
 const MATERIALS_LABELS: Record<NonNullable<MaterialsStatus>, string> = {

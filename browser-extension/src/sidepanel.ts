@@ -4,31 +4,81 @@ import {
   getActiveTabUrl,
   getAutofillData,
   getPanelData,
+  ingestJobUrl,
   isJobPageUrl,
   NotLoggedInError,
   originPattern,
+  requestVerifiedFit,
+  saveTrackedJob,
+  unsaveTrackedJob,
   type PanelData,
 } from "./api";
+import { WEB_APP_URL } from "./config";
+import { classifyAutofillFields, type FieldStatusRow } from "./field-status";
 import { fillFormInPage } from "./fillForm";
+import { recognizeJobPage } from "./job-recognition";
+import { eligibilityLabel, materialsActionLabel } from "./panel-states";
 import { escapeHtml, materialsBadge, matchBadge, scoutedTimeAgo, sourceBadge, statusBadge } from "./render";
-
-const WEB_APP_URL = "http://localhost:5173";
 
 const app = document.getElementById("app")!;
 // Guards against a fast tab switch firing a second load while the first
 // one's still awaiting the network — the response for the stale URL is
 // simply dropped instead of racing with the newer one to paint the panel.
 let requestToken = 0;
+let renderedUrl: string | null = null;
+let currentData: PanelData | null = null;
+let previewRows: FieldStatusRow[] | null = null;
+let verifyStageTimer: number | null = null;
+
+const VERIFY_STAGES = [
+  "Reading full posting",
+  "Checking requirements",
+  "Checking eligibility",
+  "Calculating match",
+  "Almost ready",
+];
+
+function stopVerifyStages() {
+  if (verifyStageTimer != null) {
+    window.clearInterval(verifyStageTimer);
+    verifyStageTimer = null;
+  }
+}
+
+function jobAnalysisUrl(jobId: string): string {
+  return `${WEB_APP_URL}/jobs/${encodeURIComponent(jobId)}`;
+}
+
+function jobPrepareUrl(jobId: string): string {
+  return `${WEB_APP_URL}/jobs/${encodeURIComponent(jobId)}/prepare`;
+}
+
+function header(opts: { signedIn?: boolean; company?: string; title?: string; extra?: string }): string {
+  const auth = opts.signedIn === false ? "Signed out" : "Signed in";
+  const role = opts.title
+    ? `<p class="mt-2 truncate-2 font-semibold leading-snug">${escapeHtml(opts.title)}</p>
+       <p class="truncate-2 text-ink-500">${escapeHtml(opts.company ?? "")}</p>`
+    : "";
+  return `
+    <header class="mb-3">
+      <p class="brand-mark text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-500">CareerPilot</p>
+      <p class="mt-1 text-xs text-ink-500">${auth}${opts.extra ? ` · ${escapeHtml(opts.extra)}` : ""}</p>
+      ${role}
+    </header>`;
+}
 
 function renderLoading() {
-  app.innerHTML = `<p class="text-ink-500">Checking this page…</p>`;
+  app.innerHTML = `${header({ extra: "Checking this page" })}<p class="text-ink-500">Checking this page…</p>`;
 }
 
 /** Shown for pages that could never be a job posting (chrome:// internals,
  * the New Tab page, file://). Deliberately not the "not tracked yet" state,
  * which would imply CareerPilot could track this page if you asked it to. */
 function renderIdle() {
+  currentData = null;
+  renderedUrl = null;
   app.innerHTML = `
+    ${header({ extra: "No job page" })}
     <div class="card p-4">
       <p class="font-semibold">No job page open</p>
       <p class="mt-1 text-ink-500">Open a job posting in this tab and the panel will check it automatically.</p>
@@ -36,7 +86,9 @@ function renderIdle() {
 }
 
 function renderError(message: string, kind: "login" | "retry" = "retry") {
+  currentData = null;
   app.innerHTML = `
+    ${header({ signedIn: kind !== "login", extra: kind === "login" ? "Signed out" : "Can't reach CareerPilot" })}
     <div class="card p-4">
       <p class="text-danger-600 dark:text-rose-300">${escapeHtml(message)}</p>
       ${
@@ -45,18 +97,33 @@ function renderError(message: string, kind: "login" | "retry" = "retry") {
           : `<button id="retry-btn" type="button" class="btn-secondary mt-3">Try again</button>`
       }
     </div>`;
-  // Without this the only way out of an error state is switching tabs and
-  // back, since the panel has no other trigger of its own.
   document.getElementById("retry-btn")?.addEventListener("click", () => void refresh());
 }
 
-function renderNotTracked() {
+function renderUnsupported(url: string) {
+  currentData = { tracked: false, job: null, score: null, materials_status: null, platform: "unsupported", apply_ready: false, apply_blocked_reason: null, materials_unverified: false };
+  renderedUrl = url;
   app.innerHTML = `
+    ${header({ extra: "Unsupported site" })}
     <div class="card p-4">
-      <p class="font-semibold">This page isn't tracked in CareerPilot yet</p>
-      <p class="mt-1 text-ink-500">Add it from the Jobs page to see its fit score and evidence here.</p>
-      <a class="btn-primary mt-3" href="${WEB_APP_URL}/jobs" target="_blank" rel="noreferrer">Open Jobs in CareerPilot</a>
+      <p class="font-semibold">This site isn't supported</p>
+      <p class="mt-1 text-ink-500">CareerPilot's side panel recognizes Greenhouse and Lever job pages. This tab is not one of those postings.</p>
     </div>`;
+}
+
+function renderSupportedUntracked(url: string, platform: "greenhouse" | "lever") {
+  const label = platform === "greenhouse" ? "Greenhouse" : "Lever";
+  currentData = { tracked: false, job: null, score: null, materials_status: null, platform, apply_ready: false, apply_blocked_reason: null, materials_unverified: false };
+  renderedUrl = url;
+  app.innerHTML = `
+    ${header({ extra: `${label} job recognized` })}
+    <div class="card p-4">
+      <p class="font-semibold">Supported ${escapeHtml(label)} job recognized</p>
+      <p class="mt-1 text-ink-500">This posting is not in CareerPilot yet. Add it once — CareerPilot will reuse the canonical job if it already exists.</p>
+      <button id="ingest-btn" type="button" class="btn-primary mt-3">Add this job</button>
+      <p id="ingest-status" class="mt-2 text-ink-500"></p>
+    </div>`;
+  document.getElementById("ingest-btn")?.addEventListener("click", () => void runIngest(url));
 }
 
 function evidenceList(label: string, skills: string[]): string {
@@ -67,13 +134,27 @@ function evidenceList(label: string, skills: string[]): string {
     </div></div>`;
 }
 
+function bulletList(items: string[]): string {
+  return `<ul class="mt-1 list-disc space-y-1 pl-4 text-ink-700 dark:text-ink-200">${items
+    .map((item) => `<li class="truncate-2">${escapeHtml(item)}</li>`)
+    .join("")}</ul>`;
+}
+
+function fieldPreviewList(rows: FieldStatusRow[]): string {
+  return `<ul class="mt-2 space-y-1">
+    ${rows
+      .map(
+        (row) =>
+          `<li class="flex items-start justify-between gap-2"><span class="truncate-2">${escapeHtml(row.label)}</span><span class="shrink-0 text-xs font-semibold">${escapeHtml(row.status)}</span></li>`,
+      )
+      .join("")}
+  </ul>
+  <p class="mt-2 text-xs text-ink-500">CareerPilot never presses Submit. Review the form on the page, then submit it yourself.</p>`;
+}
+
 function assistedApplyCard(data: PanelData, job: { id?: string | null }): string {
   const heading = `<p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Assisted apply</p>`;
 
-  // Assisted apply only exists for Greenhouse and Lever (the backend's
-  // detect_ats_platform decides, and sends the verdict in panel-data).
-  // Rendering a button here on, say, a Remotive posting would offer an
-  // action that can only ever fail — say why instead.
   if (data.platform === "unsupported") {
     return `
     <div class="card mt-3 p-4">
@@ -82,24 +163,21 @@ function assistedApplyCard(data: PanelData, job: { id?: string | null }): string
     </div>`;
   }
 
-  // Filling needs an approved application package. Showing the button
-  // anyway would mean clicking it just to be told no, with the panel unable
-  // to say what to do about it — so surface the backend's own reason and
-  // link straight to where it gets resolved.
   if (!data.apply_ready) {
     return `
     <div class="card mt-3 p-4">
       ${heading}
       <p class="mt-1 text-ink-500">${escapeHtml(data.apply_blocked_reason ?? "This application isn't ready to fill yet.")}</p>
-      <a class="btn-secondary mt-2" href="${WEB_APP_URL}/applications/${encodeURIComponent(job.id ?? "")}" target="_blank" rel="noreferrer">Prepare it in CareerPilot</a>
+      <a class="btn-secondary mt-2" href="${jobPrepareUrl(job.id ?? "")}" target="_blank" rel="noreferrer">Prepare it in CareerPilot</a>
     </div>`;
   }
 
-  // An overridden package is about to be typed into a real employer's
-  // application form. This is the last point before that happens, so the
-  // warning belongs here and not only back in the web app.
   const unverifiedNotice = data.materials_unverified
     ? `<p class="mt-2 rounded-lg bg-amber-100 px-2.5 py-2 text-xs font-semibold text-warn-600 dark:bg-amber-950/40 dark:text-amber-200">These materials were kept without evidence checks. Read them before you submit — they may claim experience your resume doesn't show.</p>`
+    : "";
+
+  const preview = previewRows
+    ? `<div class="mt-3" data-panel-state="autofill_preview">${fieldPreviewList(previewRows)}</div>`
     : "";
 
   return `
@@ -107,50 +185,156 @@ function assistedApplyCard(data: PanelData, job: { id?: string | null }): string
       ${heading}
       <p class="mt-1 text-ink-500">Fills what it can confidently map into the real form on this page. Never submits — you review and submit yourself.</p>
       ${unverifiedNotice}
-      <button id="fill-btn" type="button" class="btn-primary mt-2">Fill this page</button>
+      <div class="panel-actions">
+        <button id="preview-btn" type="button" class="btn-secondary">Preview autofill</button>
+        <button id="fill-btn" type="button" class="btn-primary">Fill safe fields</button>
+      </div>
+      ${preview}
       <div id="fill-status" role="status" class="mt-2"></div>
     </div>`;
+}
+
+function prepareCard(data: PanelData, jobId: string): string {
+  const verified = data.score?.score_kind === "verified";
+  const ineligible = data.score?.eligibility_status === "likely_ineligible";
+  const materials = materialsActionLabel(data.materials_status, data.approval_status);
+  let body = `<p class="mt-1 text-ink-500">Materials: ${escapeHtml(materials)}</p>`;
+  if (!verified) {
+    body += `<p class="mt-2 text-ink-500">Verify this match before preparing an application.</p>`;
+  } else if (ineligible) {
+    body += `<p class="mt-2 rounded-lg bg-rose-100 px-2.5 py-2 text-xs font-semibold text-danger-600 dark:bg-rose-950/40 dark:text-rose-200">This posting looks like a poor target based on stated requirements. CareerPilot will not treat it as a strong apply.</p>`;
+  } else {
+    body += `<a class="btn-secondary mt-2" href="${jobPrepareUrl(jobId)}" target="_blank" rel="noreferrer">Prepare Application</a>`;
+  }
+  return `
+    <div class="card mt-3 p-4">
+      <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Prepare Application</p>
+      ${body}
+    </div>`;
+}
+
+function matchSection(data: PanelData, jobId: string): string {
+  const score = data.score;
+  const verified = score?.score_kind === "verified";
+  const mustHave = (data.must_have ?? []).filter(Boolean).slice(0, 4);
+  const why = (score?.match_reasons?.length ? score.match_reasons : score?.matched_skills ?? []).slice(0, 4);
+  const watch = score?.watchouts?.[0] || score?.gap_reasons?.[0] || score?.missing_skills?.[0] || "";
+  const verifiedDetails =
+    verified && score
+      ? `<dl class="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+          ${score.qualification_score != null ? `<dt class="text-ink-500">Qualification</dt><dd>${Math.round(score.qualification_score)}</dd>` : ""}
+          ${score.preference_score != null ? `<dt class="text-ink-500">Preference</dt><dd>${Math.round(score.preference_score)}</dd>` : ""}
+          ${score.eligibility_status ? `<dt class="text-ink-500">Eligibility</dt><dd class="truncate-2">${escapeHtml(eligibilityLabel(score.eligibility_status))}</dd>` : ""}
+          ${score.confidence_level ? `<dt class="text-ink-500">Confidence</dt><dd>${escapeHtml(score.confidence_level)}</dd>` : ""}
+        </dl>`
+      : score?.eligibility_status
+        ? `<p class="mt-2 text-xs text-ink-500">Eligibility: ${escapeHtml(eligibilityLabel(score.eligibility_status))}</p>`
+        : "";
+  const verifyCta = !verified
+    ? `<button id="verify-btn" type="button" class="btn-secondary mt-2">Verify Match</button><p id="verify-status" class="mt-2 text-ink-500"></p>`
+    : "";
+  return `
+    <div class="card mt-3 p-4">
+      <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Match state</p>
+      <div class="mt-2">${matchBadge(score?.overall_score, score?.recommendation, score?.score_kind)}</div>
+      ${
+        score
+          ? `${verifiedDetails}`
+          : `<p class="mt-2 text-ink-500">Not scored yet.</p><a class="btn-secondary mt-2" href="${jobAnalysisUrl(jobId)}" target="_blank" rel="noreferrer">Calculate in CareerPilot</a>`
+      }
+      ${verifyCta}
+    </div>
+    ${
+      score
+        ? `<div class="card mt-3 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Eligibility</p>
+            <p class="mt-1 font-semibold">${escapeHtml(eligibilityLabel(score.eligibility_status))}</p>
+          </div>`
+        : ""
+    }
+    ${
+      mustHave.length
+        ? `<div class="card mt-3 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Top requirements</p>
+            ${bulletList(mustHave)}
+          </div>`
+        : ""
+    }
+    ${
+      why.length
+        ? `<div class="card mt-3 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Why you match</p>
+            ${bulletList(why)}
+          </div>`
+        : evidenceList("Matched", score?.matched_skills ?? [])
+    }
+    ${
+      watch
+        ? `<div class="card mt-3 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Gaps / watch out</p>
+            <p class="mt-1 truncate-2">${escapeHtml(watch)}</p>
+          </div>`
+        : evidenceList("Missing", score?.missing_skills ?? [])
+    }`;
 }
 
 function renderTracked(data: PanelData, url: string) {
   const job = data.job!;
   const seenAgo = scoutedTimeAgo(job.date_scraped);
-  const score = data.score;
+  const saved = Boolean(data.saved || job.saved);
+  const jobId = job.id ?? "";
+  const stale = job.status === "stale";
+
+  currentData = data;
+  renderedUrl = url;
 
   app.innerHTML = `
+    ${header({ company: job.company, title: job.title, extra: data.platform === "unsupported" ? "Tracked job" : "Job recognized" })}
     <div class="card p-4">
-      <p class="text-xs text-ink-500">${escapeHtml(job.company)}</p>
-      <h1 class="font-semibold leading-snug">${escapeHtml(job.title)}</h1>
+      <p class="truncate-2 text-xs text-ink-500">${escapeHtml(job.company)}</p>
+      <h1 class="truncate-2 font-semibold leading-snug">${escapeHtml(job.title)}</h1>
       <div class="mt-2 flex flex-wrap items-center gap-1.5">
         ${statusBadge(job.status)}
         ${sourceBadge(job.source)}
         ${seenAgo ? `<span class="text-xs text-ink-500">${escapeHtml(seenAgo)}</span>` : ""}
       </div>
+      ${stale ? `<p class="mt-2 text-xs font-semibold text-warn-600">This posting looks stale or closed. Confirm it is still open before applying.</p>` : ""}
     </div>
 
-    <div class="card mt-3 p-4">
-      <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Fit score</p>
-      <div class="mt-2">${matchBadge(score?.overall_score, score?.recommendation, score?.score_kind)}</div>
-      ${
-        score
-          ? `${evidenceList("Matched", score.matched_skills)}${evidenceList("Missing", score.missing_skills)}`
-          : `<p class="mt-2 text-ink-500">Not scored yet.</p><a class="btn-secondary mt-2" href="${WEB_APP_URL}/jobs/${encodeURIComponent(job.id ?? "")}" target="_blank" rel="noreferrer">Calculate in CareerPilot</a>`
-      }
-    </div>
+    ${matchSection(data, jobId)}
 
     <div class="card mt-3 p-4">
       <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Application materials</p>
       <div class="mt-2">${materialsBadge(data.materials_status)}</div>
+      <p class="mt-1 text-xs text-ink-500">${escapeHtml(materialsActionLabel(data.materials_status, data.approval_status))}</p>
       ${
         data.materials_status === "current"
           ? ""
-          : `<a class="btn-secondary mt-2" href="${WEB_APP_URL}/applications/${encodeURIComponent(job.id ?? "")}" target="_blank" rel="noreferrer">Open in CareerPilot</a>`
+          : `<a class="btn-secondary mt-2" href="${jobPrepareUrl(jobId)}" target="_blank" rel="noreferrer">Open in CareerPilot</a>`
       }
+    </div>
+
+    ${prepareCard(data, jobId)}
+
+    <div class="card mt-3 p-4">
+      <p class="text-xs font-semibold uppercase tracking-wide text-ink-500">Actions</p>
+      <div class="panel-actions">
+        <button id="save-btn" type="button" class="btn-secondary">${saved ? "Saved" : "Save"}</button>
+        ${saved ? `<button id="unsave-btn" type="button" class="btn-ghost">Unsave</button>` : ""}
+        <a class="btn-secondary" href="${jobAnalysisUrl(jobId)}" target="_blank" rel="noreferrer">Open full CareerPilot analysis</a>
+      </div>
     </div>
 
     ${assistedApplyCard(data, job)}`;
 
   document.getElementById("fill-btn")?.addEventListener("click", () => void runFill(url));
+  document.getElementById("preview-btn")?.addEventListener("click", () => void runPreview(url));
+  document.getElementById("save-btn")?.addEventListener("click", () => {
+    if (saved) return;
+    void runSave(jobId, url, false);
+  });
+  document.getElementById("unsave-btn")?.addEventListener("click", () => void runSave(jobId, url, true));
+  document.getElementById("verify-btn")?.addEventListener("click", () => void runVerify(jobId, url));
 }
 
 /** chrome.scripting.executeScript needs access to the page's own origin.
@@ -174,13 +358,28 @@ function ensurePageAccess(url: string): Promise<boolean> {
   return chrome.permissions.request({ origins: [pattern] });
 }
 
+async function runPreview(url: string) {
+  const statusEl = document.getElementById("fill-status");
+  if (statusEl) statusEl.textContent = "Loading field preview…";
+  try {
+    const autofill = await getAutofillData(url);
+    if (renderedUrl !== url) return;
+    previewRows = classifyAutofillFields(autofill.fields);
+    if (currentData) renderTracked(currentData, url);
+  } catch (err) {
+    if (err instanceof NotLoggedInError) {
+      renderError(err.message, "login");
+      return;
+    }
+    if (statusEl) statusEl.textContent = err instanceof Error ? err.message : String(err);
+  }
+}
+
 async function runFill(url: string) {
   const button = document.getElementById("fill-btn") as HTMLButtonElement | null;
   const statusEl = document.getElementById("fill-status");
   if (!button || !statusEl) return;
   button.disabled = true;
-  // Synchronous DOM writes only before ensurePageAccess — see its comment
-  // on why nothing may be awaited ahead of the permission request.
   statusEl.textContent = "Checking page access…";
 
   try {
@@ -193,10 +392,6 @@ async function runFill(url: string) {
     const autofill = await getAutofillData(url);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Could not read the current tab.");
-    // The panel renders one job but fills whatever tab is active when the
-    // button is clicked. If those have drifted apart — a tab switch the
-    // panel hasn't caught up with yet — filling would write this job's
-    // answers into a different company's form. Refuse and resync instead.
     if (tab.url !== url) {
       statusEl.textContent = "This tab changed — rechecking it now.";
       void refresh();
@@ -229,6 +424,7 @@ async function runFill(url: string) {
           .join("")}</ul>`,
       );
     }
+    parts.push(`<p class="mt-2 text-xs text-ink-500">Submit was not pressed. Review the page, then submit yourself.</p>`);
     statusEl.innerHTML = parts.join("") || "Nothing on this page matched.";
   } catch (err) {
     if (err instanceof NotLoggedInError) {
@@ -241,18 +437,101 @@ async function runFill(url: string) {
   }
 }
 
+async function runSave(jobId: string, url: string, currentlySaved: boolean) {
+  const button = document.getElementById("save-btn") as HTMLButtonElement | null;
+  if (button) button.disabled = true;
+  try {
+    if (currentlySaved) {
+      await unsaveTrackedJob(jobId);
+    } else {
+      await saveTrackedJob(jobId);
+    }
+    if (renderedUrl !== url || !currentData?.job) return;
+    currentData.saved = !currentlySaved;
+    currentData.job.saved = !currentlySaved;
+    renderTracked(currentData, url);
+  } catch (err) {
+    if (err instanceof NotLoggedInError) {
+      renderError(err.message, "login");
+      return;
+    }
+    if (button) button.disabled = false;
+  }
+}
+
+async function runVerify(jobId: string, url: string) {
+  const statusEl = document.getElementById("verify-status");
+  const button = document.getElementById("verify-btn") as HTMLButtonElement | null;
+  if (button) button.disabled = true;
+  let stage = 0;
+  if (statusEl) statusEl.textContent = VERIFY_STAGES[0];
+  stopVerifyStages();
+  verifyStageTimer = window.setInterval(() => {
+    stage = Math.min(stage + 1, VERIFY_STAGES.length - 1);
+    if (statusEl) statusEl.textContent = VERIFY_STAGES[stage];
+  }, 400);
+  try {
+    await requestVerifiedFit(jobId);
+    stopVerifyStages();
+    if (renderedUrl !== url) return;
+    const data = await getPanelData(url);
+    if (renderedUrl !== url) return;
+    previewRows = null;
+    renderTracked(data, url);
+  } catch (err) {
+    stopVerifyStages();
+    if (err instanceof NotLoggedInError) {
+      renderError(err.message, "login");
+      return;
+    }
+    if (statusEl) {
+      statusEl.textContent =
+        err instanceof Error ? `${err.message} Remaining a Potential Match.` : "Verification failed. Remaining a Potential Match.";
+    }
+    if (button) button.disabled = false;
+  }
+}
+
+async function runIngest(url: string) {
+  const button = document.getElementById("ingest-btn") as HTMLButtonElement | null;
+  const statusEl = document.getElementById("ingest-status");
+  if (button) button.disabled = true;
+  if (statusEl) statusEl.textContent = "Adding this job…";
+  try {
+    await ingestJobUrl(url);
+    if (renderedUrl !== url) return;
+    await loadForUrl(url);
+  } catch (err) {
+    if (err instanceof NotLoggedInError) {
+      renderError(err.message, "login");
+      return;
+    }
+    if (statusEl) statusEl.textContent = err instanceof Error ? err.message : String(err);
+    if (button) button.disabled = false;
+  }
+}
+
 async function loadForUrl(url: string) {
   const token = ++requestToken;
+  previewRows = null;
+  stopVerifyStages();
   if (!isJobPageUrl(url)) {
     renderIdle();
     return;
   }
+  const recognition = recognizeJobPage(url);
   renderLoading();
+  const started = performance.now();
   try {
     const data = await getPanelData(url);
-    if (token !== requestToken) return; // a newer tab switch has already superseded this
+    if (token !== requestToken) return;
+    console.debug(`[CareerPilot] panel-data ${Math.round(performance.now() - started)}ms`);
     if (!data.tracked) {
-      renderNotTracked();
+      if (recognition.supported) {
+        renderSupportedUntracked(url, recognition.platform === "unsupported" ? "greenhouse" : recognition.platform);
+        return;
+      }
+      renderUnsupported(url);
       return;
     }
     renderTracked(data, url);
@@ -281,10 +560,6 @@ async function refresh() {
 }
 
 chrome.runtime.onMessage.addListener((message: { type?: string; url?: string }) => {
-  // Reloads even when the URL is unchanged. Coming back to a tab is the
-  // main way stored data goes stale: you follow "Calculate in CareerPilot",
-  // score the job in the web app, return here — and without a re-fetch the
-  // panel would still be insisting the job was never scored.
   if (message?.type === "TAB_CHANGED" && message.url) {
     void loadForUrl(message.url);
   }

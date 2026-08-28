@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type TabChangedListener = (message: { type?: string; url?: string }) => void;
 
 const JOB_URL = "https://boards.greenhouse.io/acme/jobs/1";
+const LEVER_URL = "https://jobs.lever.co/acme/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const OTHER_URL = "https://boards.greenhouse.io/other-co/jobs/9";
 
 function panelData(overrides: Record<string, unknown> = {}) {
@@ -78,9 +79,28 @@ beforeEach(() => {
     autofill: () => ({ job_id: "greenhouse-abc123", platform: "greenhouse", fields: { email: "a@b.c" } }),
   };
 
-  fetchMock = vi.fn(async (url: string) => {
-    const key = Object.keys(responders).find((k) => url.includes(k))!;
-    return { ok: true, status: 200, json: async () => responders[key]() } as unknown as Response;
+  fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    const method = (init?.method || "GET").toUpperCase();
+    if (href.includes("panel-data")) {
+      return { ok: true, status: 200, json: async () => responders["panel-data"]() } as unknown as Response;
+    }
+    if (href.includes("autofill")) {
+      return { ok: true, status: 200, json: async () => responders["autofill"]() } as unknown as Response;
+    }
+    if (href.includes("ingest-url")) {
+      return { ok: true, status: 201, json: async () => responders["ingest-url"]() } as unknown as Response;
+    }
+    if (href.includes("/save")) {
+      if (method === "DELETE") {
+        return { ok: true, status: 204, json: async () => ({}) } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => responders["save"]?.() ?? panelData({ saved: true }) } as unknown as Response;
+    }
+    if (href.includes("verified-fit")) {
+      return { ok: true, status: 200, json: async () => responders["verified-fit"]() } as unknown as Response;
+    }
+    return { ok: false, status: 404, json: async () => ({ detail: "missing mock" }) } as unknown as Response;
   });
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("chrome", {
@@ -275,6 +295,13 @@ describe("assisted apply", () => {
     expect(executeScript).not.toHaveBeenCalled();
   });
 
+  it("states that Submit was not pressed after a fill", async () => {
+    await loadPanel();
+    document.getElementById("fill-btn")!.click();
+    await flush();
+    expect(document.getElementById("fill-status")!.textContent).toContain("Submit was not pressed");
+  });
+
   it("reports what was filled and what still needs the user", async () => {
     executeScript = vi.fn(async () => [
       {
@@ -345,14 +372,250 @@ describe("failure states", () => {
     expect(panelHtml()).toContain("Something specific broke");
   });
 
-  it("shows the untracked state for a job CareerPilot has not seen", async () => {
+  it("shows an honest unsupported state for a page CareerPilot does not recognize", async () => {
+    activeTab = { id: 42, url: "https://remotive.com/remote-jobs/software-dev/x-1" };
     responders["panel-data"] = () => ({
       tracked: false, job: null, score: null, materials_status: null,
       platform: "unsupported", apply_ready: false, apply_blocked_reason: null,
       materials_unverified: false,
     });
     await loadPanel();
-    expect(panelHtml()).toContain("isn't tracked");
+    expect(panelHtml()).toContain("isn't supported");
     expect(document.getElementById("fill-btn")).toBeNull();
+  });
+});
+
+describe("supported vs unsupported recognition", () => {
+  it("offers ingest on an untracked Greenhouse posting instead of applying a dead query", async () => {
+    responders["panel-data"] = () => ({
+      tracked: false, job: null, score: null, materials_status: null,
+      platform: "greenhouse", apply_ready: false, apply_blocked_reason: null,
+      materials_unverified: false,
+    });
+    await loadPanel();
+    expect(panelHtml()).toContain("Supported Greenhouse job recognized");
+    expect(document.getElementById("ingest-btn")).not.toBeNull();
+    expect(document.getElementById("fill-btn")).toBeNull();
+  });
+
+  it("recognizes a Lever posting", async () => {
+    activeTab = { id: 42, url: LEVER_URL };
+    responders["panel-data"] = () =>
+      panelData({
+        platform: "lever",
+        job: { ...panelData().job, url: LEVER_URL, source: "lever", company: "LeverCo", title: "Platform Engineer" },
+      });
+    await loadPanel();
+    expect(panelHtml()).toContain("Platform Engineer");
+    expect(panelHtml()).toContain("LeverCo");
+    expect(document.getElementById("fill-btn")).not.toBeNull();
+  });
+
+  it("does not keep the previous job when the tab becomes unsupported", async () => {
+    await loadPanel();
+    expect(panelHtml()).toContain("Backend Engineer");
+    responders["panel-data"] = () => ({
+      tracked: false, job: null, score: null, materials_status: null,
+      platform: "unsupported", apply_ready: false, apply_blocked_reason: null,
+      materials_unverified: false,
+    });
+    fireTabChanged("https://example.com/careers/not-a-job");
+    await flush();
+    expect(panelHtml()).toContain("isn't supported");
+    expect(panelHtml()).not.toContain("Backend Engineer");
+  });
+});
+
+describe("Potential vs Verified Match", () => {
+  it("hides a fake percentage for a Potential Match", async () => {
+    responders["panel-data"] = () =>
+      panelData({
+        score: {
+          overall_score: 91,
+          matched_skills: ["Python"],
+          partial_matches: [],
+          missing_skills: ["Go"],
+          recommendation: "apply",
+          rationale: "",
+          score_kind: "preliminary",
+          match_reasons: ["Python in production"],
+        },
+      });
+    await loadPanel();
+    expect(panelHtml()).toContain("Potential Match");
+    expect(panelHtml()).not.toContain("91%");
+    expect(panelHtml()).toContain("Verify Match");
+  });
+
+  it("shows Verified Match details when full-job fit exists", async () => {
+    responders["panel-data"] = () =>
+      panelData({
+        score: {
+          overall_score: 88,
+          matched_skills: ["Python"],
+          partial_matches: [],
+          missing_skills: [],
+          recommendation: "apply",
+          rationale: "",
+          score_kind: "verified",
+          eligibility_status: "likely_eligible",
+          qualification_score: 84,
+          preference_score: 72,
+          confidence_level: "high",
+          match_reasons: ["Shipped Python APIs"],
+          watchouts: ["On-site days in SF"],
+        },
+        must_have: ["Work authorization in the US"],
+      });
+    await loadPanel();
+    expect(panelHtml()).toContain("Verified Match 88%");
+    expect(panelHtml()).toContain("Qualification");
+    expect(panelHtml()).toContain("Preference");
+    expect(panelHtml()).toContain("Eligible based on stated requirements");
+    expect(panelHtml()).toContain("high");
+    expect(panelHtml()).toContain("Work authorization in the US");
+    expect(panelHtml()).toContain("Shipped Python APIs");
+    expect(panelHtml()).toContain("On-site days in SF");
+    expect(document.getElementById("verify-btn")).toBeNull();
+  });
+
+  it("warns on likely ineligible instead of treating the job as a strong target", async () => {
+    responders["panel-data"] = () =>
+      panelData({
+        apply_ready: false,
+        apply_blocked_reason: "Eligibility is unresolved or the posting's stated requirements are not met. Review before autofill.",
+        review_required: true,
+        score: {
+          overall_score: 40,
+          matched_skills: [],
+          partial_matches: [],
+          missing_skills: ["US work authorization"],
+          recommendation: "skip",
+          rationale: "",
+          score_kind: "verified",
+          eligibility_status: "likely_ineligible",
+        },
+      });
+    await loadPanel();
+    expect(panelHtml()).toContain("Likely ineligible");
+    expect(panelHtml()).toContain("poor target");
+    expect(document.getElementById("fill-btn")).toBeNull();
+  });
+
+  it("keeps Potential Match when verification fails", async () => {
+    responders["panel-data"] = () =>
+      panelData({
+        apply_ready: false,
+        score: {
+          overall_score: 70,
+          matched_skills: ["Python"],
+          partial_matches: [],
+          missing_skills: [],
+          recommendation: "consider",
+          rationale: "",
+          score_kind: "preliminary",
+        },
+      });
+    responders["verified-fit"] = () => {
+      throw new Error("should use HTTP error");
+    };
+    fetchMock.mockImplementation(async (url: string) => {
+      const href = String(url);
+      if (href.includes("verified-fit")) {
+        return { ok: false, status: 502, json: async () => ({ detail: "Unable to extract structured job requirements." }) } as unknown as Response;
+      }
+      if (href.includes("panel-data")) {
+        return { ok: true, status: 200, json: async () => responders["panel-data"]() } as unknown as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+    });
+    await loadPanel();
+    document.getElementById("verify-btn")!.click();
+    await flush(12);
+    expect(panelHtml()).toContain("Potential Match");
+    expect(panelHtml()).toContain("Remaining a Potential Match");
+    expect(panelHtml()).not.toContain("Verified Match");
+  });
+
+  it("shows verification stages without a fake percentage", async () => {
+    let release: (v: unknown) => void = () => {};
+    const pending = new Promise((resolve) => {
+      release = resolve;
+    });
+    responders["panel-data"] = () =>
+      panelData({
+        apply_ready: false,
+        score: {
+          overall_score: 70,
+          matched_skills: ["Python"],
+          partial_matches: [],
+          missing_skills: [],
+          recommendation: "consider",
+          rationale: "",
+          score_kind: "preliminary",
+        },
+      });
+    fetchMock.mockImplementation(async (url: string) => {
+      const href = String(url);
+      if (href.includes("verified-fit")) {
+        await pending;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ overall_score: 88, score_kind: "verified", recommendation: "apply" }),
+        } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => responders["panel-data"]() } as unknown as Response;
+    });
+    await loadPanel();
+    document.getElementById("verify-btn")!.click();
+    await flush();
+    expect(document.getElementById("verify-status")!.textContent).toMatch(/Reading full posting|Checking requirements|Checking eligibility|Calculating match|Almost ready/);
+    expect(panelHtml()).not.toContain("70%");
+    release(null);
+    await flush(8);
+  });
+});
+
+describe("save and materials", () => {
+  it("saves and unsaves without a reload", async () => {
+    await loadPanel();
+    expect(panelHtml()).toContain(">Save<");
+    document.getElementById("save-btn")!.click();
+    await flush();
+    expect(panelHtml()).toContain(">Saved<");
+    expect(panelHtml()).toContain("Unsave");
+    document.getElementById("unsave-btn")!.click();
+    await flush();
+    expect(panelHtml()).toContain(">Save<");
+    expect(panelHtml()).not.toContain("Unsave");
+  });
+
+  it("shows materials states for prepare", async () => {
+    responders["panel-data"] = () => panelData({ materials_status: "missing", apply_ready: false, approval_status: null });
+    await loadPanel();
+    expect(panelHtml()).toContain("Not prepared");
+  });
+});
+
+describe("autofill preview", () => {
+  it("classifies detected fields without filling until asked", async () => {
+    responders["autofill"] = () => ({
+      job_id: "greenhouse-abc123",
+      platform: "greenhouse",
+      fields: { email: "a@b.c", linkedin_url: "https://linkedin.com/in/a", work_authorization: "US citizen", gender: "decline" },
+    });
+    await loadPanel();
+    document.getElementById("preview-btn")!.click();
+    await flush();
+    expect(panelHtml()).toContain("Email");
+    expect(panelHtml()).toContain("Ready");
+    expect(panelHtml()).toContain("LinkedIn");
+    expect(panelHtml()).toContain("Work authorization");
+    expect(panelHtml()).toContain("Needs review");
+    expect(panelHtml()).toContain("EEO question — gender");
+    expect(panelHtml()).toContain("Manual");
+    expect(panelHtml()).toContain("never presses Submit");
+    expect(executeScript).not.toHaveBeenCalled();
   });
 });

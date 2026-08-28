@@ -95,7 +95,7 @@ describe("badges", () => {
 
   it("hides preliminary percentages and shows verified scores", () => {
     expect(matchBadge(87.4, "apply")).toContain("Potential Match");
-    expect(matchBadge(87.4, "apply", "verified")).toContain("87% MATCH");
+    expect(matchBadge(87.4, "apply", "verified")).toContain("Verified Match 87%");
     expect(matchBadge(87.4, "apply", "verified")).toContain("apply");
     expect(matchBadge(87.4, undefined, "verified")).not.toContain("·");
   });

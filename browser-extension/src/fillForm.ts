@@ -228,7 +228,7 @@ export async function fillFormInPage(data: {
     // candidate to answer themselves rather than infer or guess.
     const eeoFields: [string, string, string[]][] = [
       ["gender", "Gender", ["^gender$"]],
-      ["race_ethnicity", "Race/ethnicity", ["hispanic", "latino"]],
+      ["race_ethnicity", "Race/ethnicity", ["hispanic", "latino", "ethnicity"]],
       ["veteran_status", "Veteran status", ["veteran"]],
       ["disability_status", "Disability status", ["disability"]],
     ];
