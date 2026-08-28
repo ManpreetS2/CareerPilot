@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -19,12 +20,16 @@ from backend.schemas.schemas import (
 )
 from backend.services.analysis_service import (
     CandidateRequiredError,
-    RequirementsUnavailableError,
-    ScoringError,
     list_stored_match_scores,
-    score_job,
+    score_jobs_batch,
 )
-from backend.services.job_scout_service import JobScoutError, ingest_job_url, normalize_job, persist_jobs
+from backend.services.job_scout_service import (
+    JobScoutError,
+    consume_scout_run_stats,
+    ingest_job_url,
+    normalize_job,
+    persist_jobs,
+)
 from backend.services.job_service import (
     clean_search_term,
     derive_scout_criteria,
@@ -39,27 +44,57 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
+_SCOUT_LOG_KEYS = frozenset(
+    {
+        "stage",
+        "source",
+        "duration_ms",
+        "count",
+        "scored",
+        "skipped",
+        "jobs",
+        "query_count",
+        "sources_ok",
+        "sources_failed",
+    }
+)
 
-def _auto_score_scouted_jobs(db: Session, jobs: list[Job], user_id: int) -> int:
+
+def _log_job_scout(stage: str, **fields: object) -> None:
+    parts = [f"job_scout stage={stage}"]
+    for key, value in fields.items():
+        if key not in _SCOUT_LOG_KEYS or value is None:
+            continue
+        parts.append(f"{key}={value}")
+    logger.info(" ".join(parts))
+
+
+def _auto_score_scouted_jobs(db: Session, jobs: list[Job], user_id: int) -> tuple[int, int]:
     """Persist a deterministic fit score for each scouted job.
 
-    Uses `score_job` only — never `score_job_with_intelligence` — so Find Jobs
+    Uses `score_jobs_batch` only — never `score_job_with_intelligence` — so Find Jobs
     does not call Gemini/Ollama/Claude/OpenAI. One unscoreable listing is
     skipped; it must not fail the scout response.
     """
-    scored = 0
-    for job in jobs:
-        if not job.id:
-            logger.info("Scout auto-score skipped job without id")
-            continue
-        try:
-            score_job(db, job.id, user_id)
-            scored += 1
-        except (CandidateRequiredError, RequirementsUnavailableError, ScoringError) as exc:
-            logger.info("Scout auto-score skipped job_id=%s reason=%s", job.id, type(exc).__name__)
-        except Exception as exc:  # noqa: BLE001 — one bad listing must not fail Find Jobs
-            logger.warning("Scout auto-score failed job_id=%s error=%s", job.id, type(exc).__name__)
-    return scored
+    started = time.perf_counter()
+    missing_ids = sum(1 for job in jobs if not job.id)
+    ids = [job.id for job in jobs if job.id]
+    try:
+        scored, skipped = score_jobs_batch(db, ids, user_id)
+    except CandidateRequiredError:
+        logger.info("Scout auto-score skipped all jobs reason=CandidateRequiredError")
+        scored, skipped = 0, len(ids)
+    skipped += missing_ids
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    avg_ms = int(elapsed_ms / scored) if scored else 0
+    logger.info(
+        "Scout auto-score done scored=%s skipped=%s duration_ms=%s avg_ms=%s",
+        scored,
+        skipped,
+        elapsed_ms,
+        avg_ms,
+    )
+    return scored, skipped
 
 
 @router.get("/jobs", response_model=list[Job])
@@ -93,6 +128,9 @@ def trigger_scout(
     An explicit `what`/`where` still wins outright: this reads preferences to
     fill in a blank, never to override a deliberate search.
     """
+    consume_scout_run_stats()
+    total_started = time.perf_counter()
+    criteria_started = time.perf_counter()
     criteria = derive_scout_criteria(db, user.id)
     # An explicit query is cleaned exactly like a saved one: both end up in
     # the same outbound query string, so both need the same whitespace
@@ -101,17 +139,49 @@ def trigger_scout(
     explicit_location = clean_search_term(where) if where else ""
     queries = [explicit_query] if explicit_query else criteria.queries
     location = explicit_location or criteria.location
+    _log_job_scout(
+        "criteria",
+        duration_ms=int((time.perf_counter() - criteria_started) * 1000),
+        query_count=len(queries),
+    )
 
     jobs = scout_jobs(queries=queries, location=location)
-    auto_scored = _auto_score_scouted_jobs(db, jobs, user.id)
-    searched = ", ".join(queries)
-    where_note = f" in {location}" if location else ""
+    stats = consume_scout_run_stats()
+    score_started = time.perf_counter()
+    auto_scored, auto_skipped = _auto_score_scouted_jobs(db, jobs, user.id)
+    _log_job_scout(
+        "score",
+        duration_ms=int((time.perf_counter() - score_started) * 1000),
+        scored=auto_scored,
+        skipped=auto_skipped,
+    )
+    sources_ok = len(stats.sources_ok) if stats is not None else 0
+    sources_failed = len(stats.sources_failed) if stats is not None else 0
+    if stats is not None and jobs and sources_failed:
+        note = (
+            f"Scouted and stored {len(jobs)} job(s) from live sources. "
+            f"Auto-scored {auto_scored}. Some sources were unavailable, but we "
+            "found opportunities from the remaining sources."
+        )
+    else:
+        note = (
+            f"Scouted and stored {len(jobs)} job(s) from live sources. "
+            f"Auto-scored {auto_scored}."
+        )
+    _log_job_scout(
+        "total",
+        duration_ms=int((time.perf_counter() - total_started) * 1000),
+        jobs=len(jobs),
+        sources_ok=sources_ok,
+        sources_failed=sources_failed,
+    )
     return ScoutJobsResponse(
         jobs=jobs,
-        note=(
-            f"Scouted and stored {len(jobs)} job(s) from live sources for "
-            f"{searched}{where_note}. Auto-scored {auto_scored}."
-        ),
+        note=note,
+        jobs_found=len(jobs),
+        matched_count=auto_scored,
+        sources_searched=sources_ok,
+        sources_unavailable=sources_failed,
     )
 
 

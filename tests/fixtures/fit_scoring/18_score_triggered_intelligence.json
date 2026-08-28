@@ -13,7 +13,9 @@
   },
   "candidate": {
     "name": "Synthetic Candidate 018",
-    "skills": ["Python"],
+    "skills": [
+      "Python"
+    ],
     "projects": [],
     "experience": [],
     "education": [],
@@ -25,8 +27,12 @@
   "intelligence": null,
   "extraction_response": {
     "job_id": null,
-    "required_skills": ["Python"],
-    "preferred_skills": ["Docker"],
+    "required_skills": [
+      "Python"
+    ],
+    "preferred_skills": [
+      "Docker"
+    ],
     "years_experience": null,
     "education_requirements": [],
     "tech_stack": [],
@@ -36,14 +42,31 @@
   },
   "expected_provider_calls": 1,
   "expected": {
-    "available_components": ["skill"],
-    "null_components": ["experience", "education", "location", "preference"],
-    "component_scores": {"skill": 75.0, "experience": null, "education": null, "location": null, "preference": null},
-    "overall_score": 75.0,
+    "available_components": [
+      "skill"
+    ],
+    "null_components": [
+      "experience",
+      "education",
+      "location",
+      "preference"
+    ],
+    "component_scores": {
+      "skill": 75.0,
+      "experience": null,
+      "education": null,
+      "location": null,
+      "preference": null
+    },
+    "overall_score": 57.9,
     "recommendation": "consider",
-    "matched": ["Python"],
+    "matched": [
+      "Python"
+    ],
     "partial": [],
-    "missing": ["Docker"],
+    "missing": [
+      "Docker"
+    ],
     "http_status": 200,
     "row_count": 1,
     "persistence": "insert"

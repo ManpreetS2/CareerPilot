@@ -13,7 +13,14 @@
   },
   "candidate": {
     "name": "Synthetic Candidate 005",
-    "skills": ["Google Cloud", "Django", "ongoing", "C++", "C#", "Career research"],
+    "skills": [
+      "Google Cloud",
+      "Django",
+      "ongoing",
+      "C++",
+      "C#",
+      "Career research"
+    ],
     "projects": [],
     "experience": [],
     "education": [],
@@ -23,7 +30,11 @@
   },
   "preferences": null,
   "intelligence": {
-    "required_skills": ["Go", "C", "R"],
+    "required_skills": [
+      "Go",
+      "C",
+      "R"
+    ],
     "preferred_skills": [],
     "years_experience": null,
     "education_requirements": [],
@@ -33,14 +44,31 @@
     "likely_interview_focus": []
   },
   "expected": {
-    "available_components": ["skill"],
-    "null_components": ["experience", "education", "location", "preference"],
-    "component_scores": {"skill": 0.0, "experience": null, "education": null, "location": null, "preference": null},
-    "overall_score": 0.0,
+    "available_components": [
+      "skill"
+    ],
+    "null_components": [
+      "experience",
+      "education",
+      "location",
+      "preference"
+    ],
+    "component_scores": {
+      "skill": 0.0,
+      "experience": null,
+      "education": null,
+      "location": null,
+      "preference": null
+    },
+    "overall_score": 35.3,
     "recommendation": "skip",
     "matched": [],
     "partial": [],
-    "missing": ["Go", "C", "R"],
+    "missing": [
+      "Go",
+      "C",
+      "R"
+    ],
     "http_status": 200,
     "row_count": 1,
     "persistence": "insert"

@@ -88,9 +88,13 @@ export function JobDetailPage() {
           const [jobs, storedScores] = await Promise.all([api.getJobs(), api.getStoredScores()]);
           if (cancelled) return;
           const ranked = [...jobs].sort((a, b) => {
-            const as = a.id ? storedScores.find((score) => score.job_id === a.id)?.overall_score ?? -1 : -1;
-            const bs = b.id ? storedScores.find((score) => score.job_id === b.id)?.overall_score ?? -1 : -1;
-            return bs - as;
+            const rank = (job: typeof a) => {
+              const score = job.id ? storedScores.find((item) => item.job_id === job.id) : undefined;
+              if (!score) return -1;
+              if ((score.scoring_version ?? 1) < 2 && score.ranking_score == null) return -0.5;
+              return score.ranking_score ?? score.overall_score ?? -1;
+            };
+            return rank(b) - rank(a);
           });
           const ids = ranked.map((item) => item.id).filter((id): id is string => Boolean(id));
           const index = ids.indexOf(jobId);

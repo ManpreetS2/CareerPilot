@@ -162,7 +162,7 @@ def _persisted_matches_response(
     payload: dict[str, Any],
     public_job_id: str,
 ) -> bool:
-    return {
+    persisted = {
         "job_id": public_job_id,
         "overall_score": row.overall_score,
         "skill_score": row.skill_score,
@@ -175,7 +175,23 @@ def _persisted_matches_response(
         "missing_skills": list(row.missing_skills or []),
         "recommendation": row.recommendation,
         "rationale": row.rationale,
-    } == payload
+        "qualification_score": getattr(row, "qualification_score", None),
+        "confidence_score": getattr(row, "confidence_score", None),
+        "confidence_level": getattr(row, "confidence_level", None),
+        "eligibility_status": getattr(row, "eligibility_status", None),
+        "match_tier": getattr(row, "match_tier", None),
+        "apply_recommendation": getattr(row, "apply_recommendation", None),
+        "ranking_score": getattr(row, "ranking_score", None),
+        "scoring_version": getattr(row, "scoring_version", None) or 1,
+        "score_kind": getattr(row, "score_kind", None),
+        "match_reasons": list(getattr(row, "match_reasons", None) or []),
+        "gap_reasons": list(getattr(row, "gap_reasons", None) or []),
+        "watchouts": list(getattr(row, "watchouts", None) or []),
+        "covered_responsibilities": list(getattr(row, "covered_responsibilities", None) or []),
+        "partial_responsibilities": list(getattr(row, "partial_responsibilities", None) or []),
+        "uncovered_responsibilities": list(getattr(row, "uncovered_responsibilities", None) or []),
+    }
+    return all(payload.get(key) == value for key, value in persisted.items())
 
 
 @contextmanager

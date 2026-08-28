@@ -9,8 +9,11 @@ import html
 import json
 import logging
 import re
+import time
 import uuid
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -24,6 +27,66 @@ from backend.services.job_service import record_to_job
 from backend.services.url_safety import UnsafeURLError, assert_safe_outbound_url, fetch_url_safely
 
 logger = logging.getLogger(__name__)
+
+_SCOUT_FETCH_WORKERS = 6
+_SCOUT_LOG_KEYS = frozenset(
+    {
+        "stage",
+        "source",
+        "duration_ms",
+        "count",
+        "input_count",
+        "output_count",
+        "scored",
+        "skipped",
+        "jobs",
+        "query_count",
+        "sources_ok",
+        "sources_failed",
+    }
+)
+_SCOUT_SOURCE_NAMES = (
+    "adzuna",
+    "remoteok",
+    "greenhouse",
+    "lever",
+    "remotive",
+    "jobicy",
+    "himalayas",
+)
+
+
+@dataclass(frozen=True)
+class ScoutRunStats:
+    """Privacy-safe counters for one Find Jobs run. No queries or listings."""
+
+    sources_ok: tuple[str, ...] = ()
+    sources_failed: tuple[str, ...] = ()
+    raw_count: int = 0
+    normalized_count: int = 0
+    deduped_count: int = 0
+    persisted_count: int = 0
+    source_raw_counts: dict[str, int] = field(default_factory=dict)
+
+
+_scout_run_stats: ContextVar[ScoutRunStats | None] = ContextVar("scout_run_stats", default=None)
+
+
+def _log_job_scout(stage: str, **fields: object) -> None:
+    """Privacy-safe scout timings. Never log queries, listings, or credentials."""
+    parts = [f"job_scout stage={stage}"]
+    for key, value in fields.items():
+        if key not in _SCOUT_LOG_KEYS or value is None:
+            continue
+        parts.append(f"{key}={value}")
+    logger.info(" ".join(parts))
+
+
+def consume_scout_run_stats() -> ScoutRunStats | None:
+    stats = _scout_run_stats.get()
+    _scout_run_stats.set(None)
+    return stats
+
 
 ADZUNA_SEARCH_URL = "https://api.adzuna.com/v1/api/jobs/{country}/search/1"
 REMOTEOK_URL = "https://remoteok.com/api"
@@ -1114,82 +1177,117 @@ def _normalize_listings(raw_listings: list[dict], source: str) -> list[Job]:
     return jobs
 
 
+def _fetch_source_listings(source: str, fetch_fn) -> tuple[str, list[dict], bool]:
+    """Run one outbound source fetch. Isolated: JobScoutError becomes empty."""
+    started = time.perf_counter()
+    try:
+        listings = fetch_fn() or []
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        _log_job_scout("source", source=source, duration_ms=duration_ms, count=len(listings))
+        return source, list(listings), True
+    except JobScoutError as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        _log_job_scout("source", source=source, duration_ms=duration_ms, count=0, skipped=1)
+        logger.warning("%s scout skipped category=%s", source, type(exc).__name__)
+        return source, [], False
+
+
 def run_scout(queries: list[str], location: str | None = None) -> list[Job]:
     """Query every configured source, normalize, dedupe, and persist. Missing
     or failing sources are skipped (logged), not fatal — a scout run should
     still return whatever sources are actually reachable/configured.
 
-    `queries` is the candidate's target roles, so a scout run covers all of
-    them at once. The sources split into two kinds and are spent accordingly:
-
-      - Adzuna, Remotive, Jobicy, and Himalayas search server-side, so they
-        are called once per role. There is no way to ask them for several
-        roles in one request.
-      - RemoteOK, Greenhouse and Lever return a fixed feed and are filtered
-        locally, so they are fetched ONCE and matched against every role.
-        Calling them per role would refetch the same listings — and, for
-        Greenhouse and Lever, re-walk every configured board — to obtain
-        results already in hand.
-
-    With three roles that is 4x3 + 3 = 15 source calls rather than 7x3 = 21.
+    Independent source fetches run concurrently with a bounded worker pool.
+    Normalize, dedupe, and persist stay serial afterwards so SQLite writes
+    and first-wins dedupe order stay deterministic.
     """
+    jobs, _stats = run_scout_with_stats(queries, location)
+    return jobs
+
+
+def run_scout_with_stats(
+    queries: list[str], location: str | None = None
+) -> tuple[list[Job], ScoutRunStats]:
     _reject_bare_query_string(queries)
     if not queries:
-        # An empty list would make _title_matches_any_query match everything,
-        # so every feed source would be persisted unfiltered — hundreds of
-        # irrelevant jobs, silently. Callers always have at least the default
-        # query available; arriving here with none is a caller bug.
         raise ValueError("run_scout requires at least one query")
-    raw_jobs: list[Job] = []
 
-    # Full-feed sources: fetched once, filtered against every role.
-    try:
-        raw_jobs.extend(_normalize_listings(scout_remoteok(queries), "remoteok"))
-    except JobScoutError as exc:
-        logger.warning("RemoteOK scout skipped: %s", exc)
-
-    try:
-        raw_jobs.extend(_normalize_listings(scout_greenhouse(queries), "greenhouse"))
-    except JobScoutError as exc:
-        logger.warning("Greenhouse scout skipped: %s", exc)
-
-    try:
-        raw_jobs.extend(_normalize_listings(scout_lever(queries), "lever"))
-    except JobScoutError as exc:
-        logger.warning("Lever scout skipped: %s", exc)
-
-    # Server-side search sources: one call per role.
+    # Feed sources once; search sources once per role. Task order is the
+    # historical serial order so first-wins dedupe stays stable after gather.
+    tasks: list[tuple[str, object]] = [
+        ("remoteok", lambda: scout_remoteok(queries)),
+        ("greenhouse", lambda: scout_greenhouse(queries)),
+        ("lever", lambda: scout_lever(queries)),
+    ]
     for query in queries:
-        try:
-            raw_jobs.extend(_normalize_listings(scout_adzuna(query, location), "adzuna"))
-        except JobScoutError as exc:
-            logger.warning("Adzuna scout skipped for %r: %s", query, exc)
+        tasks.append(("adzuna", lambda q=query: scout_adzuna(q, location)))
+        tasks.append(("remotive", lambda q=query: scout_remotive(q)))
+        tasks.append(("jobicy", lambda q=query: scout_jobicy(q)))
+        tasks.append(("himalayas", lambda q=query: scout_himalayas(q)))
 
-        try:
-            raw_jobs.extend(_normalize_listings(scout_remotive(query), "remotive"))
-        except JobScoutError as exc:
-            logger.warning("Remotive scout skipped for %r: %s", query, exc)
+    fetch_started = time.perf_counter()
+    workers = max(1, min(_SCOUT_FETCH_WORKERS, len(tasks)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_fetch_source_listings, name, fn) for name, fn in tasks]
+        fetched = [future.result() for future in futures]
+    _log_job_scout(
+        "fetch",
+        duration_ms=int((time.perf_counter() - fetch_started) * 1000),
+        count=len(tasks),
+    )
 
-        try:
-            raw_jobs.extend(_normalize_listings(scout_jobicy(query), "jobicy"))
-        except JobScoutError as exc:
-            logger.warning("Jobicy scout skipped for %r: %s", query, exc)
+    source_success: dict[str, bool] = {name: False for name in _SCOUT_SOURCE_NAMES}
+    source_raw_counts: dict[str, int] = {name: 0 for name in _SCOUT_SOURCE_NAMES}
+    raw_jobs: list[Job] = []
+    normalize_started = time.perf_counter()
+    for source, listings, ok in fetched:
+        source_raw_counts[source] = source_raw_counts.get(source, 0) + len(listings)
+        if ok:
+            source_success[source] = True
+            raw_jobs.extend(_normalize_listings(listings, source))
+    _log_job_scout(
+        "normalize",
+        duration_ms=int((time.perf_counter() - normalize_started) * 1000),
+        input_count=sum(source_raw_counts.values()),
+        output_count=len(raw_jobs),
+    )
 
-        try:
-            raw_jobs.extend(_normalize_listings(scout_himalayas(query), "himalayas"))
-        except JobScoutError as exc:
-            logger.warning("Himalayas scout skipped for %r: %s", query, exc)
+    dedupe_started = time.perf_counter()
+    deduped = deduplicate_jobs(raw_jobs)
+    _log_job_scout(
+        "dedupe",
+        duration_ms=int((time.perf_counter() - dedupe_started) * 1000),
+        input_count=len(raw_jobs),
+        output_count=len(deduped),
+    )
 
-    # Dedupe spans all roles: the same posting surfaced by two different role
-    # queries collapses to one row through the existing key tiers.
-    stored = persist_jobs(deduplicate_jobs(raw_jobs))
+    persist_started = time.perf_counter()
+    stored = persist_jobs(deduped)
+    _log_job_scout(
+        "persist",
+        duration_ms=int((time.perf_counter() - persist_started) * 1000),
+        count=len(stored),
+    )
 
-    # Deferred import: job_verification_service imports
-    # MANUAL_INGEST_PLACEHOLDER_DESCRIPTION from this module, so the reverse
-    # import must happen at call time to avoid a circular import (same
-    # pattern already used between job_service.py and this module).
     from backend.services.job_verification_service import mark_stale_if_unseen
 
     mark_stale_if_unseen()
 
-    return stored
+    sources_ok = tuple(name for name in _SCOUT_SOURCE_NAMES if source_success[name])
+    sources_failed = tuple(name for name in _SCOUT_SOURCE_NAMES if not source_success[name])
+    stats = ScoutRunStats(
+        sources_ok=sources_ok,
+        sources_failed=sources_failed,
+        raw_count=sum(source_raw_counts.values()),
+        normalized_count=len(raw_jobs),
+        deduped_count=len(deduped),
+        persisted_count=len(stored),
+        source_raw_counts=source_raw_counts,
+    )
+    _scout_run_stats.set(stats)
+    _log_job_scout(
+        "sources",
+        sources_ok=len(sources_ok),
+        sources_failed=len(sources_failed),
+    )
+    return stored, stats

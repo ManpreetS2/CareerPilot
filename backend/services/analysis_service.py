@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -18,10 +20,17 @@ from backend.db.models import (
     TargetPreference,
 )
 from backend.schemas.schemas import MatchScore
+from backend.services.fit_v2 import SCORING_VERSION, compute_fit_v2, has_occupational_signal, seniority_from_text
+from backend.services.skill_taxonomy import ALIAS_TO_CANONICAL as _ALIAS_TO_CANONICAL
+from backend.services.skill_taxonomy import PARTIAL_CANDIDATE_FOR_JOB as _PARTIAL_CANDIDATE_FOR_JOB
+
+_SORTED_ALIASES = tuple(
+    sorted(_ALIAS_TO_CANONICAL.items(), key=lambda item: len(item[0]), reverse=True)
+)
 
 logger = logging.getLogger(__name__)
 
-# Component weights. Unavailable components are omitted and remaining weights renormalized.
+# Legacy V1 weights kept only so older comments/tests can name the historical model.
 WEIGHT_SKILLS = 0.55
 WEIGHT_EXPERIENCE = 0.20
 WEIGHT_EDUCATION = 0.10
@@ -37,61 +46,9 @@ PARTIAL_MATCH = 0.5
 MISSING_MATCH = 0.0
 
 APPLY_THRESHOLD = 80.0
-CONSIDER_THRESHOLD = 60.0
+CONSIDER_THRESHOLD = 55.0
 
-# Closed CareerPilot MVP vocabulary. Values are canonical labels.
-_ALIAS_TO_CANONICAL: dict[str, str] = {
-    "python": "Python",
-    "java": "Java",
-    "javascript": "JavaScript",
-    "js": "JavaScript",
-    "typescript": "TypeScript",
-    "ts": "TypeScript",
-    "react": "React",
-    "node.js": "Node.js",
-    "node js": "Node.js",
-    "node-js": "Node.js",
-    "nodejs": "Node.js",
-    "fastapi": "FastAPI",
-    "django": "Django",
-    "flask": "Flask",
-    "sql": "SQL",
-    "postgresql": "PostgreSQL",
-    "postgres": "PostgreSQL",
-    "mysql": "MySQL",
-    "mongodb": "MongoDB",
-    "redis": "Redis",
-    "rest": "REST",
-    "rest api": "REST",
-    "graphql": "GraphQL",
-    "git": "Git",
-    "docker": "Docker",
-    "kubernetes": "Kubernetes",
-    "k8s": "Kubernetes",
-    "aws": "AWS",
-    "azure": "Azure",
-    "gcp": "GCP",
-    "linux": "Linux",
-    "c": "C",
-    "c++": "C++",
-    "cpp": "C++",
-    "c#": "C#",
-    "csharp": "C#",
-    "go": "Go",
-    "golang": "Go",
-    "r": "R",
-    ".net": ".NET",
-    "dotnet": ".NET",
-    "spring": "Spring",
-    "spring boot": "Spring Boot",
-}
-
-# Job requirement canonical -> candidate canonicals that count as documented partials only.
-_PARTIAL_CANDIDATE_FOR_JOB: dict[str, frozenset[str]] = {
-    "SQL": frozenset({"PostgreSQL", "MySQL"}),
-    "JavaScript": frozenset({"TypeScript"}),
-    "Spring": frozenset({"Spring Boot"}),
-}
+# Skill aliases and related-transferable maps live in skill_taxonomy.py.
 
 _REQUIRED_SIGNALS = (
     "required",
@@ -202,8 +159,9 @@ class GroundedRequirements:
     years_experience: int | None
     education_requirements: list[str]
     seniority: str | None
-    source: str  # "intelligence" | "description"
+    source: str  # "intelligence" | "description" | "preliminary"
     dropped: int = 0
+    responsibilities: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -228,6 +186,21 @@ class ScoreBreakdown:
     matched: list[str] = field(default_factory=list)
     partial: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    qualification: float | None = None
+    confidence_score: float | None = None
+    confidence_level: str | None = None
+    eligibility_status: str | None = None
+    match_tier: str | None = None
+    apply_recommendation: str | None = None
+    ranking_score: float | None = None
+    scoring_version: int = SCORING_VERSION
+    score_kind: str | None = None
+    match_reasons: list[str] = field(default_factory=list)
+    gap_reasons: list[str] = field(default_factory=list)
+    watchouts: list[str] = field(default_factory=list)
+    covered_responsibilities: list[str] = field(default_factory=list)
+    partial_responsibilities: list[str] = field(default_factory=list)
+    uncovered_responsibilities: list[str] = field(default_factory=list)
 
 
 def _skill_key(value: str) -> str:
@@ -243,6 +216,7 @@ def _canonical_skill_key(label: str) -> str:
     return canonicalize_skill(label) or _skill_key(label)
 
 
+@lru_cache(maxsize=None)
 def _alias_pattern(alias: str) -> re.Pattern[str]:
     lowered = alias.lower()
     body = re.escape(lowered)
@@ -277,13 +251,18 @@ def _alias_pattern(alias: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![a-z0-9+#]){body}(?![a-z0-9+#])", re.I)
 
 
+@lru_cache(maxsize=256)
+def _aliases_for_canonical(canonical: str, extra_key: str) -> tuple[str, ...]:
+    aliases = [alias for alias, canon in _ALIAS_TO_CANONICAL.items() if canon == canonical]
+    if extra_key not in _ALIAS_TO_CANONICAL:
+        aliases.append(extra_key)
+    aliases.sort(key=len, reverse=True)
+    return tuple(aliases)
+
+
 def _skill_in_text(label: str, text: str) -> bool:
     canonical = canonicalize_skill(label) or label
-    aliases = [alias for alias, canon in _ALIAS_TO_CANONICAL.items() if canon == canonical]
-    if _skill_key(label) not in _ALIAS_TO_CANONICAL:
-        aliases.append(_skill_key(label))
-    aliases.sort(key=len, reverse=True)
-    for alias in aliases:
+    for alias in _aliases_for_canonical(canonical, _skill_key(label)):
         if _alias_pattern(alias).search(text):
             return True
     return False
@@ -408,9 +387,7 @@ def _source_section_heading_kind(text: str) -> str | None:
         "equal opportunity",
         "interview focus",
         "interview topics",
-        "responsibilities",
-        "the role",
-        "what you will do",
+        "the company",
     } or (
         normalized.startswith("about ")
         or normalized.startswith("why ")
@@ -422,6 +399,16 @@ def _source_section_heading_kind(text: str) -> str | None:
         or normalized.startswith("who we are")
     ):
         return "other"
+    if normalized in {
+        "responsibilities",
+        "the role",
+        "what you will do",
+        "what you'll do",
+        "you will",
+        "day to day",
+        "day-to-day",
+    } or normalized.startswith("what you"):
+        return "responsibilities"
     return None
 
 
@@ -492,9 +479,10 @@ def _ground_intelligence(
         tech_stack=tech,
         years_experience=years,
         education_requirements=education,
-        seniority=seniority,
+        seniority=seniority or seniority_from_text(job.title),
         source="intelligence",
         dropped=dropped,
+        responsibilities=_ground_responsibilities(intelligence, job),
     )
 
 
@@ -534,9 +522,61 @@ def _clause_at_position(line: str, position: int) -> str:
     return line[start:]
 
 
+def _extract_education_requirements(description: str) -> list[str]:
+    found: list[str] = []
+    for line in description.splitlines() or [description]:
+        degree = _closed_alias_in_text(line, _DEGREE_ALIASES)
+        if degree and _has_signal(line, _REQUIRED_SIGNALS):
+            field = _closed_alias_in_text(line, _FIELD_ALIASES)
+            label = f"{degree}" if not field else f"{degree} in {field}"
+            if label not in found:
+                found.append(label)
+    return found[:4]
+
+
+def _extract_responsibility_lines(description: str) -> list[str]:
+    lines: list[str] = []
+    in_section = False
+    for raw in description.splitlines():
+        stripped = raw.strip().lstrip("-*•").strip()
+        if not stripped:
+            if in_section:
+                continue
+            continue
+        kind = _source_section_heading_kind(stripped)
+        if kind == "responsibilities":
+            in_section = True
+            continue
+        if kind in {"technical", "other"}:
+            in_section = False
+            continue
+        if in_section and len(stripped) >= 12:
+            lines.append(stripped)
+        if len(lines) >= 12:
+            break
+    return lines
+
+
+def _ground_responsibilities(intelligence: JobIntelligenceRecord, job: JobRecord) -> list[str]:
+    source = f"{job.title}\n{job.description}".lower()
+    kept: list[str] = []
+    for raw in intelligence.responsibilities or []:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        text = raw.strip()
+        tokens = [tok for tok in re.findall(r"[a-z]{3,}", text.lower())]
+        if not tokens:
+            continue
+        hits = sum(1 for tok in tokens if tok in source)
+        if hits >= max(2, len(tokens) // 4) or text.lower() in source:
+            kept.append(text)
+    if kept:
+        return kept[:12]
+    return _extract_responsibility_lines(job.description)
+
+
 def extract_explicit_skills_from_description(description: str) -> GroundedRequirements:
     """Closed-vocabulary explicit mentions only. Stable source order, alias-deduped."""
-    aliases = sorted(_ALIAS_TO_CANONICAL.items(), key=lambda item: len(item[0]), reverse=True)
     lines = description.splitlines() or [description]
     found: dict[str, tuple[int, int, str, str]] = {}
     occupied = [[False] * len(line) for line in lines]
@@ -559,7 +599,7 @@ def extract_explicit_skills_from_description(description: str) -> GroundedRequir
         elif section_kind == "other":
             heading = None
         lowered = line.lower()
-        for alias, canonical in aliases:
+        for alias, canonical in _SORTED_ALIASES:
             for match in _alias_pattern(alias).finditer(lowered):
                 start, end = match.span()
                 if any(occupied[line_idx][pos] for pos in range(start, end)):
@@ -586,15 +626,18 @@ def extract_explicit_skills_from_description(description: str) -> GroundedRequir
             preferred.append(canonical)
         else:
             stack.append(canonical)
+    years_found = sorted(_explicit_year_requirements(description))
+    years = years_found[0] if years_found else None
     return GroundedRequirements(
         required=required,
         preferred=preferred,
         tech_stack=stack,
-        years_experience=None,
-        education_requirements=[],
-        seniority=None,
+        years_experience=years,
+        education_requirements=_extract_education_requirements(description),
+        seniority=seniority_from_text(description),
         source="description",
         dropped=0,
+        responsibilities=_extract_responsibility_lines(description),
     )
 
 
@@ -1061,36 +1104,70 @@ def load_preferences(db: Session, candidate: Candidate) -> TargetPreference | No
     )
 
 
-def load_requirements(db: Session, job: JobRecord) -> GroundedRequirements:
-    intelligence = (
-        db.query(JobIntelligenceRecord).filter(JobIntelligenceRecord.job_id == job.id).first()
-    )
+_UNSET = object()
+
+
+def load_requirements(
+    db: Session,
+    job: JobRecord,
+    intelligence: JobIntelligenceRecord | None | object = _UNSET,
+    *,
+    verbose: bool = True,
+) -> GroundedRequirements:
+    if intelligence is _UNSET:
+        intelligence = (
+            db.query(JobIntelligenceRecord).filter(JobIntelligenceRecord.job_id == job.id).first()
+        )
     if intelligence is not None:
         grounded = _ground_intelligence(intelligence, job)
-        logger.info(
-            "scoring requirement_source=intelligence dropped=%s job_pk=%s",
-            grounded.dropped,
-            job.id,
-        )
+        if verbose:
+            logger.info(
+                "scoring requirement_source=intelligence dropped=%s job_pk=%s",
+                grounded.dropped,
+                job.id,
+            )
         if (
             grounded.required
             or grounded.preferred
             or grounded.tech_stack
             or grounded.years_experience is not None
             or grounded.education_requirements
+            or grounded.responsibilities
         ):
             return grounded
-        # Intelligence existed but nothing scoreable; do not invent from the posting.
-        raise RequirementsUnavailableError()
+        if verbose:
+            logger.info("scoring intelligence empty; falling back to description job_pk=%s", job.id)
     fallback = extract_explicit_skills_from_description(f"{job.title}\n{job.description}")
-    logger.info(
-        "scoring requirement_source=description skills=%s job_pk=%s",
-        len(fallback.required) + len(fallback.preferred) + len(fallback.tech_stack),
-        job.id,
-    )
-    if not (fallback.required or fallback.preferred or fallback.tech_stack):
-        raise RequirementsUnavailableError()
-    return fallback
+    if verbose:
+        logger.info(
+            "scoring requirement_source=description skills=%s job_pk=%s",
+            len(fallback.required) + len(fallback.preferred) + len(fallback.tech_stack),
+            job.id,
+        )
+    if (
+        fallback.required
+        or fallback.preferred
+        or fallback.tech_stack
+        or fallback.years_experience is not None
+        or fallback.education_requirements
+        or fallback.responsibilities
+    ):
+        return fallback
+    if has_occupational_signal(job.title) or fallback.seniority:
+        if verbose:
+            logger.info("scoring requirement_source=preliminary job_pk=%s", job.id)
+        return GroundedRequirements(
+            required=[],
+            preferred=[],
+            tech_stack=[],
+            years_experience=None,
+            education_requirements=[],
+            seniority=seniority_from_text(job.title, job.description),
+            source="preliminary",
+            dropped=0,
+            responsibilities=[],
+        )
+    raise RequirementsUnavailableError()
 
 
 def compute_breakdown(
@@ -1104,28 +1181,51 @@ def compute_breakdown(
     when = as_of or date.today()
     evidence = _candidate_skill_evidence(candidate)
     skill_match = _match_skills(requirements, evidence)
-    components = {
-        "skill": _skill_component(skill_match),
-        "experience": _experience_score(requirements, candidate, when),
-        "education": _education_score(requirements, candidate),
-        "location": _location_score(job, preferences),
-        "preference": _preference_score(job, preferences),
-    }
-    overall = _combine(components)
-    has_explicit = bool(requirements.required or requirements.preferred or requirements.tech_stack)
-    recommendation = _recommend(overall, requirements.source, has_explicit)
+    skill_component = _skill_component(skill_match)
+    experience_years = _experience_years(candidate, when)
+    experience = _experience_score(requirements, candidate, when)
+    education = _education_score(requirements, candidate)
+    location = _location_score(job, preferences)
+    v2 = compute_fit_v2(
+        job,
+        candidate,
+        preferences,
+        requirements,
+        skill_match,
+        skill_component,
+        experience,
+        education,
+        location,
+        as_of=when,
+        experience_years=experience_years,
+    )
     return ScoreBreakdown(
-        skill=None if components["skill"] is None else round(components["skill"], 1),
-        experience=None if components["experience"] is None else round(components["experience"], 1),
-        education=None if components["education"] is None else round(components["education"], 1),
-        location=None if components["location"] is None else round(components["location"], 1),
-        preference=None if components["preference"] is None else round(components["preference"], 1),
-        overall=overall,
-        recommendation=recommendation,
-        rationale=_rationale(requirements.source, components, skill_match, recommendation),
-        matched=skill_match.matched,
-        partial=skill_match.partial,
-        missing=skill_match.missing,
+        skill=v2.skill,
+        experience=v2.experience,
+        education=v2.education,
+        location=v2.location,
+        preference=v2.preference,
+        overall=v2.overall,
+        recommendation=v2.recommendation,
+        rationale=v2.rationale,
+        matched=v2.matched,
+        partial=v2.partial,
+        missing=v2.missing,
+        qualification=v2.qualification,
+        confidence_score=v2.confidence_score,
+        confidence_level=v2.confidence_level,
+        eligibility_status=v2.eligibility_status,
+        match_tier=v2.match_tier,
+        apply_recommendation=v2.apply_recommendation,
+        ranking_score=v2.ranking_score,
+        scoring_version=SCORING_VERSION,
+        score_kind=v2.score_kind,
+        match_reasons=v2.match_reasons,
+        gap_reasons=v2.gap_reasons,
+        watchouts=v2.watchouts,
+        covered_responsibilities=v2.covered_responsibilities,
+        partial_responsibilities=v2.partial_responsibilities,
+        uncovered_responsibilities=v2.uncovered_responsibilities,
     )
 
 
@@ -1134,13 +1234,19 @@ def persist_score(
     job: JobRecord,
     candidate: Candidate,
     breakdown: ScoreBreakdown,
+    *,
+    existing_rows: list[MatchScoreRecord] | None = None,
+    commit: bool = True,
 ) -> MatchScore:
-    existing_rows = (
-        db.query(MatchScoreRecord)
-        .filter(MatchScoreRecord.job_id == job.id, MatchScoreRecord.candidate_id == candidate.id)
-        .order_by(MatchScoreRecord.id.desc())
-        .all()
-    )
+    if existing_rows is None:
+        existing_rows = (
+            db.query(MatchScoreRecord)
+            .filter(MatchScoreRecord.job_id == job.id, MatchScoreRecord.candidate_id == candidate.id)
+            .order_by(MatchScoreRecord.id.desc())
+            .all()
+        )
+    else:
+        existing_rows = sorted(existing_rows, key=lambda row: row.id, reverse=True)
     existing = existing_rows[0] if existing_rows else None
     payload = {
         "job_id": job.id,
@@ -1156,6 +1262,21 @@ def persist_score(
         "missing_skills": list(breakdown.missing),
         "recommendation": breakdown.recommendation,
         "rationale": breakdown.rationale,
+        "qualification_score": breakdown.qualification,
+        "confidence_score": breakdown.confidence_score,
+        "confidence_level": breakdown.confidence_level,
+        "eligibility_status": breakdown.eligibility_status,
+        "match_tier": breakdown.match_tier,
+        "apply_recommendation": breakdown.apply_recommendation,
+        "ranking_score": breakdown.ranking_score,
+        "scoring_version": breakdown.scoring_version,
+        "score_kind": breakdown.score_kind,
+        "match_reasons": list(breakdown.match_reasons),
+        "gap_reasons": list(breakdown.gap_reasons),
+        "watchouts": list(breakdown.watchouts),
+        "covered_responsibilities": list(breakdown.covered_responsibilities),
+        "partial_responsibilities": list(breakdown.partial_responsibilities),
+        "uncovered_responsibilities": list(breakdown.uncovered_responsibilities),
     }
     try:
         if existing is not None:
@@ -1167,10 +1288,13 @@ def persist_score(
         else:
             record = MatchScoreRecord(**payload)
             db.add(record)
-        db.commit()
-        db.refresh(record)
+        db.flush()
+        if commit:
+            db.commit()
+            db.refresh(record)
     except Exception:
-        db.rollback()
+        if commit:
+            db.rollback()
         logger.error(
             "scoring persist failed job_pk=%s candidate_pk=%s category=%s",
             job.id,
@@ -1178,26 +1302,14 @@ def persist_score(
             "database",
         )
         raise
-    logger.info(
-        "scoring persisted job_pk=%s candidate_pk=%s rows=%s",
-        job.id,
-        candidate.id,
-        1,
-    )
-    return MatchScore(
-        job_id=job.public_id,
-        overall_score=record.overall_score,
-        skill_score=record.skill_score,
-        experience_score=record.experience_score,
-        education_score=record.education_score,
-        location_score=record.location_score,
-        preference_score=record.preference_score,
-        matched_skills=list(record.matched_skills or []),
-        partial_matches=list(record.partial_matches or []),
-        missing_skills=list(record.missing_skills or []),
-        recommendation=record.recommendation,  # type: ignore[arg-type]
-        rationale=record.rationale,
-    )
+    if commit:
+        logger.info(
+            "scoring persisted job_pk=%s candidate_pk=%s rows=%s",
+            job.id,
+            candidate.id,
+            1,
+        )
+    return _record_to_match_score(record, job.public_id)
 
 
 def score_job(db: Session, job_public_id: str, user_id: int, *, as_of: date | None = None) -> MatchScore:
@@ -1210,12 +1322,89 @@ def score_job(db: Session, job_public_id: str, user_id: int, *, as_of: date | No
     return persist_score(db, job, candidate, breakdown)
 
 
+def score_jobs_batch(
+    db: Session,
+    job_public_ids: list[str],
+    user_id: int,
+    *,
+    as_of: date | None = None,
+) -> tuple[int, int]:
+    """Score many jobs with one candidate/preference/intelligence preload.
+
+    Same user isolation and scoring_version as score_job. Sequential writes on
+    the request session — never shared across threads.
+    """
+    ids = [item for item in job_public_ids if item]
+    skipped = len(job_public_ids) - len(ids)
+    if not ids:
+        return 0, skipped
+    candidate = load_latest_candidate(db, user_id)
+    preferences = load_preferences(db, candidate)
+    jobs = db.query(JobRecord).filter(JobRecord.public_id.in_(ids)).all()
+    by_public = {job.public_id: job for job in jobs}
+    intel_rows = (
+        db.query(JobIntelligenceRecord)
+        .filter(JobIntelligenceRecord.job_id.in_([job.id for job in jobs]))
+        .all()
+        if jobs
+        else []
+    )
+    intel_by_pk = {row.job_id: row for row in intel_rows}
+    existing_scores = (
+        db.query(MatchScoreRecord)
+        .filter(
+            MatchScoreRecord.candidate_id == candidate.id,
+            MatchScoreRecord.job_id.in_([job.id for job in jobs]),
+        )
+        .all()
+        if jobs
+        else []
+    )
+    rows_by_job: dict[int, list[MatchScoreRecord]] = defaultdict(list)
+    for row in existing_scores:
+        rows_by_job[row.job_id].append(row)
+    scored = 0
+    for public_id in ids:
+        job = by_public.get(public_id)
+        if job is None:
+            skipped += 1
+            continue
+        nested = db.begin_nested()
+        try:
+            requirements = load_requirements(
+                db, job, intelligence=intel_by_pk.get(job.id), verbose=False
+            )
+            breakdown = compute_breakdown(job, candidate, preferences, requirements, as_of=as_of)
+            persist_score(
+                db,
+                job,
+                candidate,
+                breakdown,
+                existing_rows=rows_by_job.get(job.id, []),
+                commit=False,
+            )
+            nested.commit()
+            scored += 1
+        except (CandidateRequiredError, RequirementsUnavailableError, ScoringError) as exc:
+            nested.rollback()
+            skipped += 1
+            logger.info("batch score skipped job_id=%s reason=%s", public_id, type(exc).__name__)
+        except Exception as exc:  # noqa: BLE001 — one listing must not fail Find Jobs
+            nested.rollback()
+            skipped += 1
+            logger.warning("batch score failed job_id=%s error=%s", public_id, type(exc).__name__)
+    db.commit()
+    logger.info("batch score done scored=%s skipped=%s", scored, skipped)
+    return scored, skipped
+
+
 class StoredScoreNotFoundError(Exception):
     def __init__(self) -> None:
         super().__init__("Stored fit score not found.")
 
 
 def _record_to_match_score(record: MatchScoreRecord, job_public_id: str) -> MatchScore:
+    version = getattr(record, "scoring_version", None) or 1
     return MatchScore(
         job_id=job_public_id,
         overall_score=record.overall_score,
@@ -1229,6 +1418,21 @@ def _record_to_match_score(record: MatchScoreRecord, job_public_id: str) -> Matc
         missing_skills=list(record.missing_skills or []),
         recommendation=record.recommendation,  # type: ignore[arg-type]
         rationale=record.rationale,
+        qualification_score=getattr(record, "qualification_score", None),
+        confidence_score=getattr(record, "confidence_score", None),
+        confidence_level=getattr(record, "confidence_level", None),
+        eligibility_status=getattr(record, "eligibility_status", None),
+        match_tier=getattr(record, "match_tier", None),
+        apply_recommendation=getattr(record, "apply_recommendation", None),
+        ranking_score=getattr(record, "ranking_score", None),
+        scoring_version=version,
+        score_kind=getattr(record, "score_kind", None),
+        match_reasons=list(getattr(record, "match_reasons", None) or []),
+        gap_reasons=list(getattr(record, "gap_reasons", None) or []),
+        watchouts=list(getattr(record, "watchouts", None) or []),
+        covered_responsibilities=list(getattr(record, "covered_responsibilities", None) or []),
+        partial_responsibilities=list(getattr(record, "partial_responsibilities", None) or []),
+        uncovered_responsibilities=list(getattr(record, "uncovered_responsibilities", None) or []),
     )
 
 

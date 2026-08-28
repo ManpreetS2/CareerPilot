@@ -13,7 +13,9 @@
   },
   "candidate": {
     "name": "Synthetic Candidate 014",
-    "skills": ["Python"],
+    "skills": [
+      "Python"
+    ],
     "projects": [],
     "experience": [],
     "education": [],
@@ -23,7 +25,9 @@
   },
   "preferences": {
     "target_roles": [],
-    "preferred_locations": ["Dallas, TX"],
+    "preferred_locations": [
+      "Dallas, TX"
+    ],
     "remote_preference": "remote",
     "salary_min": null,
     "work_authorization": null,
@@ -31,7 +35,9 @@
     "constraints": []
   },
   "intelligence": {
-    "required_skills": ["Python"],
+    "required_skills": [
+      "Python"
+    ],
     "preferred_skills": [],
     "years_experience": null,
     "education_requirements": [],
@@ -41,12 +47,27 @@
     "likely_interview_focus": []
   },
   "expected": {
-    "available_components": ["skill", "location"],
-    "null_components": ["experience", "education", "preference"],
-    "component_scores": {"skill": 100.0, "experience": null, "education": null, "location": 0.0, "preference": null},
-    "overall_score": 91.7,
-    "recommendation": "apply",
-    "matched": ["Python"],
+    "available_components": [
+      "skill",
+      "location",
+      "preference"
+    ],
+    "null_components": [
+      "experience",
+      "education"
+    ],
+    "component_scores": {
+      "skill": 100.0,
+      "experience": null,
+      "education": null,
+      "location": 0.0,
+      "preference": 0.0
+    },
+    "overall_score": 55.0,
+    "recommendation": "skip",
+    "matched": [
+      "Python"
+    ],
     "partial": [],
     "missing": [],
     "http_status": 200,

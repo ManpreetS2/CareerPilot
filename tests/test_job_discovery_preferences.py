@@ -256,11 +256,11 @@ def test_feed_sources_receive_every_role_to_match_against(counted_sources) -> No
 def test_search_sources_receive_one_role_each(counted_sources) -> None:
     job_scout_service.run_scout(["Cloud Engineer", "SRE"], location="Austin, TX")
 
-    assert [args[0] for args, _ in counted_sources["adzuna"]] == ["Cloud Engineer", "SRE"]
+    assert sorted(args[0] for args, _ in counted_sources["adzuna"]) == ["Cloud Engineer", "SRE"]
     assert [args[1] for args, _ in counted_sources["adzuna"]] == ["Austin, TX", "Austin, TX"]
-    assert [args[0] for args, _ in counted_sources["remotive"]] == ["Cloud Engineer", "SRE"]
-    assert [args[0] for args, _ in counted_sources["jobicy"]] == ["Cloud Engineer", "SRE"]
-    assert [args[0] for args, _ in counted_sources["himalayas"]] == ["Cloud Engineer", "SRE"]
+    assert sorted(args[0] for args, _ in counted_sources["remotive"]) == ["Cloud Engineer", "SRE"]
+    assert sorted(args[0] for args, _ in counted_sources["jobicy"]) == ["Cloud Engineer", "SRE"]
+    assert sorted(args[0] for args, _ in counted_sources["himalayas"]) == ["Cloud Engineer", "SRE"]
 
 
 def test_one_failing_source_does_not_stop_the_others(counted_sources, monkeypatch) -> None:
@@ -289,7 +289,7 @@ def test_one_role_failing_a_search_source_does_not_stop_the_rest(counted_sources
     monkeypatch.setattr(job_scout_service, "scout_remotive", _fail_first)
     job_scout_service.run_scout(["Cloud Engineer", "SRE"])
 
-    assert seen == ["Cloud Engineer", "SRE"]
+    assert set(seen) == {"Cloud Engineer", "SRE"}
 
 
 def test_jobicy_failure_does_not_stop_the_other_sources(counted_sources, monkeypatch) -> None:
@@ -387,9 +387,8 @@ def test_route_searches_saved_roles_when_no_query_given(isolated_client, capture
     assert response.status_code == 202
     assert captured_scout["queries"] == ["Cloud Engineer", "SRE"]
     assert captured_scout["location"] == "Austin, TX"
-    # The user can see what was actually searched rather than guessing why
-    # the results look wrong.
-    assert "Cloud Engineer" in response.json()["note"]
+    assert "Cloud Engineer" not in response.json()["note"]
+    assert "Auto-scored" in response.json()["note"]
 
 
 def test_route_lets_an_explicit_query_override_preferences(isolated_client, captured_scout) -> None:

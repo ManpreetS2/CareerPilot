@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowUpRight, Link2, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { JobDiscoveryProgress } from "../components/JobDiscoveryProgress";
 import { MatchBadge } from "../components/MatchBadge";
 import { LoadingState } from "../components/LoadingState";
 import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { ScoreAssembly } from "../components/signature/ScoreAssembly";
 import { ScoreOrb } from "../components/signature/ScoreOrb";
 import { Glass } from "../components/ui/glass";
 import { PageHeader } from "../components/ui/page-header";
@@ -17,15 +19,20 @@ import {
   type RoleTypeFilter,
 } from "../lib/job-role-type";
 import { topMatchPercentileLabel } from "../lib/match-percentile";
+import { jobDiscoveryErrorHeading } from "../lib/job-discovery-error";
 import { getSelectedJobId, saveSelectedJobId } from "../lib/session";
-import type { Job, MatchScore } from "../lib/types";
+import type { Job, MatchScore, ScoutJobsResponse } from "../lib/types";
 
 function sortJobs(list: Job[], scores: Record<string, MatchScore>, sort: "match" | "title") {
   return [...list].sort((a, b) => {
     if (sort === "title") return a.title.localeCompare(b.title);
-    const as = a.id ? (scores[a.id]?.overall_score ?? -1) : -1;
-    const bs = b.id ? (scores[b.id]?.overall_score ?? -1) : -1;
-    return bs - as;
+    const rank = (job: Job) => {
+      const score = job.id ? scores[job.id] : undefined;
+      if (!score) return -1;
+      if ((score.scoring_version ?? 1) < 2 && score.ranking_score == null) return -0.5;
+      return score.ranking_score ?? score.overall_score ?? -1;
+    };
+    return rank(b) - rank(a);
   });
 }
 
@@ -48,25 +55,61 @@ export function JobsPage() {
   const [roleType, setRoleType] = useState<RoleTypeFilter>("both");
   const [manualUrl, setManualUrl] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(() => getSelectedJobId());
+  const [scoutSummary, setScoutSummary] = useState<{
+    jobsFound: number;
+    matchedCount: number;
+    sourcesSearched: number;
+    sourcesUnavailable: number;
+    partial: boolean;
+  } | null>(null);
+  const scoutingRef = useRef(false);
+
+  async function loadStoredScores() {
+    const stored = await api.getStoredScores();
+    const nextScores: Record<string, MatchScore> = {};
+    for (const score of stored) {
+      if (score.job_id) nextScores[score.job_id] = score;
+    }
+    setScores(nextScores);
+  }
 
   async function loadJobs(fromScout = false) {
+    if (fromScout) {
+      if (scoutingRef.current) return;
+      scoutingRef.current = true;
+    }
     setError(null);
-    if (fromScout) setScouting(true);
-    else setLoading(true);
+    if (fromScout) {
+      setScouting(true);
+      setScoutSummary(null);
+    } else {
+      setLoading(true);
+    }
     try {
-      const nextJobs = fromScout ? (await api.scoutJobs()).jobs : await api.getJobs();
-      setJobs(nextJobs);
-      const stored = await api.getStoredScores();
-      const nextScores: Record<string, MatchScore> = {};
-      for (const score of stored) {
-        if (score.job_id) nextScores[score.job_id] = score;
+      if (fromScout) {
+        const result: ScoutJobsResponse = await api.scoutJobs();
+        setJobs(result.jobs);
+        const jobsFound = result.jobs_found ?? result.jobs.length;
+        const matchedCount = result.matched_count ?? 0;
+        const sourcesSearched = result.sources_searched ?? 0;
+        const sourcesUnavailable = result.sources_unavailable ?? 0;
+        setScoutSummary({
+          jobsFound,
+          matchedCount,
+          sourcesSearched,
+          sourcesUnavailable,
+          partial: sourcesUnavailable > 0 && jobsFound > 0,
+        });
+      } else {
+        setJobs(await api.getJobs());
       }
-      setScores(nextScores);
+      await loadStoredScores();
     } catch (err) {
       setError(err);
     } finally {
       setLoading(false);
       setScouting(false);
+      if (fromScout) scoutingRef.current = false;
     }
   }
 
@@ -182,9 +225,16 @@ export function JobsPage() {
         description="Discover and triage roles from Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, and manually added URLs. Find Jobs stores a fit score when a listing is scoreable. Selecting a job never scores or extracts on its own."
         actions={
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-primary btn-stable" onClick={() => void loadJobs(true)} disabled={scouting}>
-              <RefreshCw className={`h-4 w-4 ${scouting ? "animate-spin" : ""}`} aria-hidden />
-              {scouting ? "Finding…" : "Find Jobs"}
+            <button
+              type="button"
+              className="btn-primary btn-stable"
+              onClick={() => void loadJobs(true)}
+              disabled={scouting}
+              aria-busy={scouting}
+              data-testid="find-jobs-button"
+            >
+              <RefreshCw className={`h-4 w-4 ${scouting ? "animate-pulse" : ""}`} aria-hidden />
+              {scouting ? "Searching…" : "Find Jobs"}
             </button>
             <button type="button" className="btn-secondary" onClick={() => void handleIngestUrl()} disabled={ingesting}>
               <Link2 className={`h-4 w-4 ${ingesting ? "animate-pulse" : ""}`} aria-hidden />
@@ -198,7 +248,31 @@ export function JobsPage() {
         }
       />
 
-      <ErrorBanner error={error} />
+      <ErrorBanner error={error} heading={jobDiscoveryErrorHeading(error)} />
+
+      {scouting ? <JobDiscoveryProgress active /> : null}
+      {!scouting && scoutSummary ? (
+        <Glass
+          variant="atmosphere"
+          className="rounded-[var(--radius-lg)] p-4"
+          data-testid="job-discovery-summary"
+        >
+          <p className="font-display text-base font-semibold tracking-tight">
+            {scoutSummary.jobsFound} {scoutSummary.jobsFound === 1 ? "opportunity" : "opportunities"} found
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {scoutSummary.matchedCount} matched to your profile
+            {scoutSummary.sourcesSearched > 0
+              ? ` · ${scoutSummary.sourcesSearched} ${scoutSummary.sourcesSearched === 1 ? "source" : "sources"} searched`
+              : ""}
+          </p>
+          {scoutSummary.partial ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Some sources were unavailable, but we found opportunities from the remaining sources.
+            </p>
+          ) : null}
+        </Glass>
+      ) : null}
 
       <Glass variant="atmosphere" className="grid min-w-0 grid-cols-1 gap-3 rounded-[var(--radius-lg)] p-4 sm:grid-cols-2 xl:grid-cols-4">
         <label className="relative block min-w-0">
@@ -291,17 +365,22 @@ export function JobsPage() {
 
       {loading ? (
         <LoadingState label="Loading jobs…" />
-      ) : filtered.length === 0 ? (
+      ) : filtered.length === 0 && !scouting ? (
         <EmptyState
           title="No jobs to show"
           description="Try Find Jobs, clear filters, or wait until Job Scout persists live listings."
           action={
-            <button type="button" className="btn-primary" onClick={() => void loadJobs(true)}>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => void loadJobs(true)}
+              disabled={scouting}
+            >
               Find Jobs
             </button>
           }
         />
-      ) : (
+      ) : filtered.length === 0 && scouting ? null : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
           <ul className="space-y-2" aria-label="Job results">
             {filtered.map((job) => {
@@ -327,7 +406,13 @@ export function JobsPage() {
                           <p className="wrap-anywhere font-semibold">{job.title}</p>
                           <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
                         </div>
-                        <MatchBadge score={match?.overall_score} recommendation={match?.recommendation} />
+                        <MatchBadge
+                          score={match?.overall_score}
+                          recommendation={match?.recommendation}
+                          matchTier={match?.match_tier}
+                          confidenceLevel={match?.confidence_level}
+                          compact
+                        />
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <StatusBadge status={job.status} />
@@ -370,11 +455,15 @@ export function JobsPage() {
                       <MatchBadge
                         score={selectedMatch?.overall_score}
                         recommendation={selectedMatch?.recommendation}
+                        matchTier={selectedMatch?.match_tier}
+                        applyRecommendation={selectedMatch?.apply_recommendation}
+                        confidenceLevel={selectedMatch?.confidence_level}
                       />
                     </div>
                     {percentile ? <p className="mt-2 text-xs font-medium text-primary">{percentile}</p> : null}
                   </div>
                 </div>
+                {selectedMatch ? <ScoreAssembly match={selectedMatch} assembling={false} /> : null}
                 <p className="line-clamp-8 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
                   {selected.description}
                 </p>

@@ -9,12 +9,16 @@ function Factor({
   value,
   delay,
   skip,
+  suffix = "",
 }: {
   label: string;
-  value?: number | null;
+  value?: number | string | null;
   delay: number;
   skip: boolean;
+  suffix?: string;
 }) {
+  const display =
+    value == null ? "—" : typeof value === "number" ? `${Math.round(value)}${suffix}` : value;
   return (
     <motion.div
       className="flex items-center justify-between gap-3 border-b border-border/70 py-1.5 text-sm last:border-0"
@@ -23,12 +27,36 @@ function Factor({
       transition={{ duration: motionDuration.fast, ease: motionEase.standard, delay }}
     >
       <span className="text-muted-foreground">{label}</span>
-      <span className="tabular font-semibold">
-        {value == null ? "—" : Math.round(value)}
-      </span>
+      <span className="tabular font-semibold">{display}</span>
     </motion.div>
   );
 }
+
+function ReasonList({ title, items, tone }: { title: string; items: string[]; tone: string }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <ul className={`mt-2 space-y-1 text-sm ${tone}`}>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const ELIGIBILITY_LABEL: Record<string, string> = {
+  likely_eligible: "Eligible based on stated requirements",
+  eligibility_uncertain: "Eligibility uncertain",
+  likely_ineligible: "Likely ineligible",
+};
+
+const CONFIDENCE_LABEL: Record<string, string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
 
 export function ScoreAssembly({
   match,
@@ -39,13 +67,27 @@ export function ScoreAssembly({
 }) {
   const reduce = useReducedMotion();
   const skip = Boolean(reduce) || !assembling;
-  const factors = [
-    { label: "Skills", value: match.skill_score },
-    { label: "Experience", value: match.experience_score },
-    { label: "Education", value: match.education_score },
-    { label: "Location", value: match.location_score },
-    { label: "Preferences", value: match.preference_score },
-  ];
+  const v2 = (match.scoring_version ?? 1) >= 2;
+  const factors = v2
+    ? [
+        { label: "Qualification Fit", value: match.qualification_score, suffix: "%" },
+        { label: "Preference Fit", value: match.preference_score, suffix: "%" },
+        {
+          label: "Eligibility",
+          value: match.eligibility_status ? ELIGIBILITY_LABEL[match.eligibility_status] : null,
+        },
+        {
+          label: "Confidence",
+          value: match.confidence_level ? CONFIDENCE_LABEL[match.confidence_level] : null,
+        },
+      ]
+    : [
+        { label: "Skills", value: match.skill_score, suffix: "" },
+        { label: "Experience", value: match.experience_score, suffix: "" },
+        { label: "Education", value: match.education_score, suffix: "" },
+        { label: "Location", value: match.location_score, suffix: "" },
+        { label: "Preferences", value: match.preference_score, suffix: "" },
+      ];
 
   return (
     <div className="space-y-4" data-testid="score-assembly">
@@ -64,20 +106,35 @@ export function ScoreAssembly({
           animate={{ opacity: 1 }}
           transition={{ duration: motionDuration.base, delay: skip ? 0 : 0.62 }}
         >
-          <MatchBadge score={match.overall_score} recommendation={match.recommendation} />
+          <MatchBadge
+            score={match.overall_score}
+            recommendation={match.recommendation}
+            matchTier={match.match_tier}
+            applyRecommendation={match.apply_recommendation}
+            confidenceLevel={match.confidence_level}
+          />
         </motion.div>
       </div>
+      {match.score_kind === "preliminary" ? (
+        <p className="text-sm text-muted-foreground">
+          Preliminary match from the posting text. Generating Job Intelligence can refine this.
+        </p>
+      ) : null}
       <div>
         {factors.map((factor, index) => (
           <Factor
             key={factor.label}
             label={factor.label}
             value={factor.value}
+            suffix={"suffix" in factor ? factor.suffix : ""}
             delay={skip ? 0 : index * 0.07}
             skip={skip}
           />
         ))}
       </div>
+      <ReasonList title="Why you match" items={match.match_reasons ?? []} tone="text-foreground" />
+      <ReasonList title="Gaps" items={match.gap_reasons ?? []} tone="text-muted-foreground" />
+      <ReasonList title="Watch out" items={match.watchouts ?? []} tone="text-muted-foreground" />
       {match.matched_skills.length > 0 ? (
         <div>
           <h3 className="text-sm font-semibold">Matched skills</h3>
@@ -99,7 +156,7 @@ export function ScoreAssembly({
       ) : null}
       {match.partial_matches.length > 0 ? (
         <p className="text-sm text-muted-foreground">
-          Partial: {match.partial_matches.join(", ")}
+          Related: {match.partial_matches.join(", ")}
         </p>
       ) : null}
       {match.missing_skills.length > 0 ? (
