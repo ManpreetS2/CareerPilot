@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { BookmarkPlus } from "lucide-react";
+import { BookmarkPlus, Download } from "lucide-react";
 import { ErrorBanner } from "./ErrorBanner";
 import { LoadingState } from "./LoadingState";
 import { LockIn } from "./signature/LockIn";
@@ -28,6 +28,8 @@ export function ResumeVersionPanel({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [conflict, setConflict] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<unknown>(null);
 
   const loadVersions = useCallback(async () => {
     setLoading(true);
@@ -72,6 +74,20 @@ export function ResumeVersionPanel({
 
   const canSave = materials.approval_status === "approved" && !saving;
 
+  async function downloadVersion(versionId: string, format: "pdf" | "docx") {
+    const key = `${versionId}:${format}`;
+    if (downloading) return;
+    setDownloading(key);
+    setDownloadError(null);
+    try {
+      await api.downloadResumeVersion(versionId, format);
+    } catch (err) {
+      setDownloadError(err);
+    } finally {
+      setDownloading(null);
+    }
+  }
+
   return (
     <section
       className="card space-y-4 p-6"
@@ -107,6 +123,7 @@ export function ResumeVersionPanel({
       </div>
 
       <ErrorBanner error={error} />
+      <ErrorBanner error={downloadError} />
       <LockIn active={saved} message="Resume version saved and locked in." />
       {conflict ? (
         <div role="alert" className="card border-accent-300/60 bg-accent-50/70 p-4 text-sm text-accent-900 dark:border-accent-800 dark:bg-accent-950/30 dark:text-accent-100">
@@ -128,12 +145,32 @@ export function ResumeVersionPanel({
               className="rounded-xl border border-[var(--line)] p-4"
               data-testid={`resume-version-${version.version_number}`}
             >
-              <p className="text-sm font-semibold">
-                Version {version.version_number}
-                <span className="ml-2 font-normal text-ink-500">
-                  {formatCreatedAt(version.created_at)}
-                </span>
-              </p>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="text-sm font-semibold">
+                  Version {version.version_number}
+                  <span className="ml-2 font-normal text-ink-500">
+                    {formatCreatedAt(version.created_at)}
+                  </span>
+                </p>
+                <div className="flex gap-2">
+                  {(["pdf", "docx"] as const).map((format) => {
+                    const key = `${version.id}:${format}`;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className="btn-secondary text-xs"
+                        data-testid={`download-resume-${version.version_number}-${format}`}
+                        disabled={downloading !== null}
+                        onClick={() => void downloadVersion(version.id, format)}
+                      >
+                        <Download className={`h-3 w-3 ${downloading === key ? "animate-pulse" : ""}`} aria-hidden />
+                        {downloading === key ? "Downloading…" : format.toUpperCase()}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-700 dark:text-ink-200">
                 {version.tailored_bullets.map((bullet, index) => (
                   <li key={`${version.id}:${index}`}>{bullet}</li>
