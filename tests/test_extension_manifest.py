@@ -35,11 +35,14 @@ def test_manifest_permissions_are_an_allowed_subset() -> None:
     assert permissions <= ALLOWED_PERMISSIONS, permissions - ALLOWED_PERMISSIONS
 
 
-def test_manifest_host_permissions_are_an_allowed_subset() -> None:
+def test_manifest_host_permissions_are_exactly_the_loopback_api_origins() -> None:
+    """Local API access is limited to the two loopback origins the extension
+    actually talks to. Arbitrary HTTP (or a missing 127.0.0.1 entry that
+    would break cookie probing) is a CI failure, not a review comment.
+    """
     manifest = _manifest()
     host_permissions = set(manifest.get("host_permissions", []))
-    assert host_permissions <= ALLOWED_HOST_PERMISSIONS, host_permissions - ALLOWED_HOST_PERMISSIONS
-    assert ALLOWED_HOST_PERMISSIONS <= host_permissions, ALLOWED_HOST_PERMISSIONS - host_permissions
+    assert host_permissions == ALLOWED_HOST_PERMISSIONS, host_permissions
 
 
 def test_manifest_optional_host_permissions_are_an_allowed_subset() -> None:

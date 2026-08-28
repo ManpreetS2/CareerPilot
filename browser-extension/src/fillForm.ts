@@ -219,26 +219,30 @@ export async function fillFormInPage(data: {
         filled.push({ name: "sponsorship required", value: answer });
       }
     }
-    flagSensitiveEeoFields();
-  }
-
-  // EEO questions stay manual. Never infer gender, race/ethnicity, veteran
-  // status, or disability from stored preference values or loose labels.
-  function flagSensitiveEeoFields() {
-    const eeoFields: { name: string; patterns: string[] }[] = [
-      { name: "gender", patterns: ["^gender$"] },
-      { name: "race / ethnicity", patterns: ["hispanic", "latino", "ethnicity"] },
-      { name: "veteran status", patterns: ["veteran"] },
-      { name: "disability", patterns: ["disability"] },
+    // Gender, race/ethnicity, veteran, and disability status are never
+    // auto-answered, regardless of whether a value is on file: label-text
+    // matching here is a loose heuristic (e.g. "veteran" or "hispanic" as a
+    // bare substring), not a verified mapping to this posting's exact
+    // options, and these are protected-class questions where a wrong or
+    // unconfirmed answer carries real consequences. Always flag for the
+    // candidate to answer themselves rather than infer or guess.
+    const eeoFields: [string, string, string[]][] = [
+      ["gender", "Gender", ["^gender$"]],
+      ["race_ethnicity", "Race/ethnicity", ["hispanic", "latino", "ethnicity"]],
+      ["veteran_status", "Veteran status", ["veteran"]],
+      ["disability_status", "Disability status", ["disability"]],
     ];
-    const labels = [...document.querySelectorAll("label")];
-    for (const field of eeoFields) {
-      const present = field.patterns.some((pattern) => {
+    const labelTexts = [...document.querySelectorAll("label")].map((l) => l.textContent || "");
+    for (const [key, label, patterns] of eeoFields) {
+      const present = patterns.some((pattern) => {
         const re = new RegExp(pattern, "i");
-        return labels.some((label) => re.test((label.textContent || "").trim()));
+        return labelTexts.some((text) => re.test(text));
       });
       if (present) {
-        flagged.push({ name: field.name, reason: "Sensitive EEO field — answer this yourself" });
+        flagged.push({
+          name: key.replace(/_/g, " "),
+          reason: `${label} is a sensitive question — answer it yourself rather than have it auto-filled.`,
+        });
       }
     }
   }

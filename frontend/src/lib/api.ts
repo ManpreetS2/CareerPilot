@@ -68,10 +68,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-export function resumeVersionFileUrl(versionId: string, format: "pdf" | "docx"): string {
-  return `${API_BASE_URL}/api/resume-versions/${encodeURIComponent(versionId)}/file?format=${encodeURIComponent(format)}`;
-}
-
 export const api = {
   health: (init?: RequestInit) => request<HealthResponse>("/health", init),
 
@@ -238,12 +234,45 @@ export const api = {
   getResumeVersionDetail: (versionId: string, init?: RequestInit) =>
     request<ResumeVersionDetail>(`/api/resume-versions/${versionId}`, init),
 
-  resumeVersionFileUrl,
-
   createResumeVersion: (jobId: string) =>
     request<ResumeVersion>(`/api/jobs/${jobId}/resume-versions`, {
       method: "POST",
     }),
+
+  downloadResumeVersion: async (versionId: string, format: "pdf" | "docx"): Promise<void> => {
+    // Not request<T>(): that helper always parses JSON, but this endpoint
+    // returns raw PDF/DOCX bytes.
+    let response: Response;
+    try {
+      response = await fetch(
+        `${API_BASE_URL}/api/resume-versions/${versionId}/export?format=${format}`,
+        { credentials: "include" },
+      );
+    } catch {
+      throw new ApiClientError(0, `Cannot reach backend at ${API_BASE_URL}.`);
+    }
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      const message =
+        typeof detail.detail === "string" ? detail.detail : `Download failed (${response.status})`;
+      throw new ApiClientError(response.status, message, detail);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    const filename = match?.[1] ?? `resume.${format}`;
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
 
   approveApplication: (
     jobId: string,

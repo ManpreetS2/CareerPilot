@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
@@ -48,6 +50,7 @@ from backend.services.url_safety import UnsafeURLError
 from backend.services.analysis_service import load_job
 from backend.services.scoring_orchestrator import score_job_with_intelligence
 from backend.services.verified_fit_service import score_job_verified
+from backend.services.resume_export_service import export_filename, render_resume_docx, render_resume_pdf
 from backend.services.resume_version_service import (
     ResumeVersionConflictError,
     ResumeVersionNotFoundError,
@@ -60,6 +63,11 @@ from backend.services.resume_version_service import (
     save_resume_version,
 )
 from backend.services.resume_export import InvalidResumeExportFormatError, ResumeExportError
+
+_EXPORT_MEDIA_TYPES = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 
 router = APIRouter(prefix="/api", tags=["applications"])
 
@@ -233,15 +241,30 @@ def get_user_resume_version_route(
         raise _http_for_resume_version_error(exc) from exc
 
 
-@router.get("/resume-versions/{version_id}/file")
-def resume_version_file(
+@router.get("/resume-versions/{version_id}/export")
+def export_resume_version_route(
     version_id: str,
-    format: str = Query(default="pdf"),
+    format: Literal["pdf", "docx"],
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    """Cookie-authenticated PDF/DOCX download. Cross-user access is a sanitized 404."""
-    return _resume_version_file_response(db, version_id, user.id, format)
+    """Render one owned resume version to PDF or DOCX on demand.
+
+    Regenerated fresh from the stored structured snapshot every call, never
+    from a saved file — there is no resume file on disk to serve. Ownership
+    is the same sanitized-404 check as the JSON detail route above.
+    """
+    try:
+        detail = get_user_resume_version(db, version_id, user.id)
+    except ResumeVersionNotFoundError as exc:
+        raise _http_for_resume_version_error(exc) from exc
+    content = render_resume_pdf(detail) if format == "pdf" else render_resume_docx(detail)
+    filename = export_filename(detail, format)
+    return Response(
+        content=content,
+        media_type=_EXPORT_MEDIA_TYPES[format],
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/jobs/{job_id}/fill-application", response_model=FormFillResult)
