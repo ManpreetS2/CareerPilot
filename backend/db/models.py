@@ -136,6 +136,7 @@ class JobRecord(Base):
         back_populates="job"
     )
     match_scores: Mapped[list["MatchScoreRecord"]] = relationship(back_populates="job")
+    saved_by: Mapped[list["SavedJobRecord"]] = relationship(back_populates="job")
     applications: Mapped[list["ApplicationPackageRecord"]] = relationship(back_populates="job")
     resume_versions: Mapped[list["ResumeVersionRecord"]] = relationship(back_populates="job")
     form_fill_attempts: Mapped[list["FormFillAttemptRecord"]] = relationship(back_populates="job")
@@ -178,6 +179,22 @@ class JobRequirementProfileRecord(Base):
     provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     job: Mapped[JobRecord] = relationship(back_populates="requirement_profile")
+
+
+class SavedJobRecord(Base):
+    """User-scoped bookmark. Jobs themselves remain a shared catalog."""
+
+    __tablename__ = "saved_jobs"
+    __table_args__ = (Index("ux_saved_jobs_user_job", "user_id", "job_id", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    job: Mapped[JobRecord] = relationship(back_populates="saved_by")
 
 
 class MatchScoreRecord(Base):

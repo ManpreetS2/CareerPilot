@@ -84,4 +84,14 @@ This is a product/UX/search branch. It must not rewrite Fit V2, requirement extr
 3. Filter in Python over SQLite rows (~200) rather than a query-builder/ORM-from-LLM path.
 4. New `saved_jobs` table only — no Alembic, no ALTER pile.
 5. Deterministic NL parser first; Gemini flash-lite optional with a short timeout; never wait on Ollama for search.
-6. Opportunity type is computed server-side: internship includes `internship` / `co_op` / `new_grad`; role is explicit non-intern employment; otherwise `unknown`. Ambiguous listings stay `unknown` and appear in Both.
+6. Opportunity type is computed server-side: internship includes `internship` / `co_op` / `new_grad`; role is explicit non-intern employment; otherwise `unknown`. Ambiguous listings stay `unknown` and appear in Both. Internships filter = internship only. Roles filter = role only. Both includes unknown.
+
+## Opportunity type contract
+
+| Canonical value | How it is inferred | Discover filter |
+| --- | --- | --- |
+| `internship` | employment is internship, co_op, or new_grad | Internships |
+| `role` | employment is full_time, part_time, contract, temporary, or fellowship | Roles |
+| `unknown` | no reliable employment signal | Both only |
+
+Do not use `title.includes("intern")` in React. The Jobs workspace reads `job.opportunity_type` from the API.

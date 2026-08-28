@@ -13,6 +13,11 @@ from backend.db.database import SessionLocal
 from backend.db.models import Candidate, JobRecord
 from backend.schemas.schemas import Job, JobIntelligence
 from backend.services.analysis_service import _candidate_work_modes, _city_state
+from backend.services.opportunity_type import (
+    infer_employment_type,
+    infer_opportunity_type,
+    infer_work_mode,
+)
 from backend.services.application_tracker_service import latest_preference
 
 logger = logging.getLogger(__name__)
@@ -53,6 +58,9 @@ def record_to_job(record: JobRecord) -> Job:
         status=job_status,
         verification_notes=record.verification_notes,
         verified_at=record.verified_at,
+        opportunity_type=infer_opportunity_type(record.title, record.description),
+        employment_type=infer_employment_type(record.title, record.description),
+        work_mode=infer_work_mode(record.title, record.description),
     )
 
 

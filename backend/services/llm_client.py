@@ -224,7 +224,7 @@ class LLMClient:
                 timeout=int(self._request_timeout_seconds * 1000)
             )
         client = genai.Client(**client_kwargs)
-        config_kwargs: dict[str, Any] = {}
+        config_kwargs: dict[str, Any] = {"temperature": 0}
         if system_prompt:
             config_kwargs["system_instruction"] = system_prompt
         if json_schema is not None:
