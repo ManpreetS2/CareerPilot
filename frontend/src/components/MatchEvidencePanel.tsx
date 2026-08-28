@@ -215,10 +215,12 @@ export function MatchEvidencePanel({
           </p>
         ) : null}
       </div>
-      {data.groups.map((group) => (
+      {data.provenance.stale ? null : data.groups.map((group) => (
         <GroupCard key={group.group_id} group={group} evaluations={data.evaluations} evidence={data.evidence} />
       ))}
-      {sections.map((section) => {
+      {data.provenance.stale
+        ? null
+        : sections.map((section) => {
         const rows = data.factors.filter((factor) => {
           if (factor.section !== section) return false;
           if (factor.group_id) return false;

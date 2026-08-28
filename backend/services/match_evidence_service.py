@@ -734,8 +734,8 @@ def get_match_evidence(db: Session, job_public_id: str, user_id: int) -> MatchEv
                 candidate_fingerprint=candidate_fp,
                 preference_fingerprint=preference_fp,
                 requirement_fingerprint=requirement_fp,
-                stale=verified,
-                stale_reasons=["unstored"] if verified else [],
+                stale=False,
+                stale_reasons=[],
             ),
             factors=[
                 MatchFactor(

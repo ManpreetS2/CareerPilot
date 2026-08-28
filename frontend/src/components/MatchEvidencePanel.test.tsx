@@ -176,6 +176,7 @@ describe("MatchEvidencePanel", () => {
       />,
     );
     expect(screen.getByTestId("evidence-stale")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View evidence" })).not.toBeInTheDocument();
     wrap(<MatchEvidencePanel data={null} loading error={null} onRetry={() => undefined} />);
     expect(screen.getByTestId("evidence-loading")).toBeInTheDocument();
   });

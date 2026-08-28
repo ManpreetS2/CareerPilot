@@ -159,6 +159,21 @@ def test_unknown_work_auth_is_not_failure(isolated_session) -> None:
     assert any("not stated" in item.lower() for item in (payload.score.watchouts or [])) or unknown or payload.notice is None
 
 
+def test_missing_evidence_row_is_unstored_not_stale(isolated_session) -> None:
+    _user(isolated_session)
+    job = _job(isolated_session)
+    candidate = _candidate(isolated_session, 1, graduation_year="2027")
+    _prefs(isolated_session, candidate, academic_year="final_year", expected_graduation="2027-05")
+    score_job_verified(isolated_session, job, 1, as_of=AS_OF)
+    isolated_session.query(MatchEvidenceRecord).delete()
+    isolated_session.commit()
+    payload = get_match_evidence(isolated_session, job.public_id, 1)
+    assert payload.full_evidence is False
+    assert payload.provenance.stale is False
+    assert payload.notice is not None
+    assert "not stored" in payload.notice.lower()
+
+
 def test_stale_when_candidate_fingerprint_changes(isolated_session) -> None:
     _user(isolated_session)
     job = _job(isolated_session)
