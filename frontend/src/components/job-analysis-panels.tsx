@@ -286,8 +286,7 @@ export function EvidencePanel() {
     <section className="rounded-[var(--radius-lg)] border border-border/70 bg-surface/90 p-6">
       <h2 className="font-display text-2xl font-semibold">Evidence</h2>
       <p className="mt-2 text-sm text-muted-foreground">
-        Clickable evidence links are not available yet. When they are, each requirement will show the
-        candidate evidence CareerPilot used and the posting sentence it was grounded in.
+        Open the Evidence tab after Calculate Fit to see stored job and candidate evidence.
       </p>
     </section>
   );
