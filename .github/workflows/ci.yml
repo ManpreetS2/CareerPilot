@@ -67,6 +67,9 @@ jobs:
       - name: MVP foundation browser workflow
         run: python scripts/test_mvp_foundation_browser.py
 
+      - name: Normal-browser CORS/cookie security check
+        run: python scripts/test_normal_browser_security.py
+
       - name: Frontend unit tests
         working-directory: frontend
         run: npm run test:run
