@@ -20,8 +20,10 @@ describe("fillForm safety", () => {
     const source = readFileSync(join(here, "../src/fillForm.ts"), "utf8");
     const code = stripComments(source);
     expect(code).not.toMatch(/\.submit\s*\(/);
+    expect(code).not.toMatch(/requestSubmit/);
     expect(code).not.toMatch(/press\s*\(\s*["']Enter["']\s*\)/);
     expect(code).not.toMatch(/type\s*=\s*["']submit["']/);
+    expect(code).not.toMatch(/input\[type=['"]file['"]\]/);
   });
 
   it("fills safe fields, leaves EEO manual, and never submits", async () => {
