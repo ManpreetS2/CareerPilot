@@ -219,16 +219,26 @@ export async function fillFormInPage(data: {
         filled.push({ name: "sponsorship required", value: answer });
       }
     }
-    const eeoFields: [string, string[]][] = [
-      ["gender", ["^gender$"]],
-      ["race_ethnicity", ["hispanic", "latino"]],
-      ["veteran_status", ["veteran"]],
-      ["disability_status", ["disability"]],
+    flagSensitiveEeoFields();
+  }
+
+  // EEO questions stay manual. Never infer gender, race/ethnicity, veteran
+  // status, or disability from stored preference values or loose labels.
+  function flagSensitiveEeoFields() {
+    const eeoFields: { name: string; patterns: string[] }[] = [
+      { name: "gender", patterns: ["^gender$"] },
+      { name: "race / ethnicity", patterns: ["hispanic", "latino", "ethnicity"] },
+      { name: "veteran status", patterns: ["veteran"] },
+      { name: "disability", patterns: ["disability"] },
     ];
-    for (const [key, patterns] of eeoFields) {
-      const value = fields[key] as string | undefined;
-      if (value && (await trySelectOrReactSelectByLabel(patterns, value))) {
-        filled.push({ name: key.replace(/_/g, " "), value });
+    const labels = [...document.querySelectorAll("label")];
+    for (const field of eeoFields) {
+      const present = field.patterns.some((pattern) => {
+        const re = new RegExp(pattern, "i");
+        return labels.some((label) => re.test((label.textContent || "").trim()));
+      });
+      if (present) {
+        flagged.push({ name: field.name, reason: "Sensitive EEO field — answer this yourself" });
       }
     }
   }

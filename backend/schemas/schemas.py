@@ -407,6 +407,9 @@ class ExtensionPanelData(BaseModel):
     # application form with claims that were never verified.
     materials_unverified: bool = False
     review_required: bool = False
+    saved: bool = False
+    must_have: list[str] = Field(default_factory=list)
+    approval_status: str | None = None
 
 
 TrackerStatus = Literal[

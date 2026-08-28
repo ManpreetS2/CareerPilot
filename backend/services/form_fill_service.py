@@ -73,7 +73,9 @@ from backend.services.job_scout_service import (
     parse_greenhouse_posting_url,
     parse_lever_posting_url,
 )
+from backend.services.job_requirement_extractor import load_requirement_profile
 from backend.services.job_service import record_to_job
+from backend.services.saved_job_service import list_saved_job_ids
 
 logger = logging.getLogger(__name__)
 
@@ -770,9 +772,11 @@ def get_extension_panel_data(db: Session, url: str, user_id: int) -> ExtensionPa
     except (StoredScoreNotFoundError, JobNotFoundError):
         score = None
 
+    approval_status: str | None = None
     try:
-        get_stored_application_package(db, job.public_id, user_id)
+        stored_package = get_stored_application_package(db, job.public_id, user_id)
         materials_status: str | None = "current"
+        approval_status = getattr(stored_package, "approval_status", None)
     except StoredMaterialsNotFoundError:
         materials_status = "missing"
     except StaleApplicationMaterialsError as exc:
@@ -802,9 +806,20 @@ def get_extension_panel_data(db: Session, url: str, user_id: int) -> ExtensionPa
             "Review before autofill."
         )
 
+    job_schema = record_to_job(job)
+    job_schema.saved = job.id in list_saved_job_ids(db, user_id)
+    must_have: list[str] = []
+    profile = load_requirement_profile(db, job)
+    if profile is not None:
+        must_have = [
+            item.text
+            for item in profile.requirements
+            if item.importance in {"hard_required", "required"} and item.text
+        ][:4]
+
     return ExtensionPanelData(
         tracked=True,
-        job=record_to_job(job),
+        job=job_schema,
         score=score,
         materials_status=materials_status,  # type: ignore[arg-type]
         platform=platform,  # type: ignore[arg-type]
@@ -812,6 +827,9 @@ def get_extension_panel_data(db: Session, url: str, user_id: int) -> ExtensionPa
         apply_blocked_reason=apply_blocked_reason,
         materials_unverified=materials_unverified,
         review_required=review_required,
+        saved=job_schema.saved,
+        must_have=must_have,
+        approval_status=approval_status,
     )
 
 

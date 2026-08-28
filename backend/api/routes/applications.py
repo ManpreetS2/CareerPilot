@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user, get_extension_user
@@ -18,6 +18,9 @@ from backend.schemas.schemas import (
     CreateResumeVersionRequest,
     ExtensionPanelData,
     FormFillResult,
+    IngestJobUrlRequest,
+    Job,
+    MatchScore,
     ResumeVersion,
     ResumeVersionDetail,
     ResumeVersionSummary,
@@ -30,7 +33,19 @@ from backend.services.application_service import (
     get_stored_application_package,
 )
 from backend.services.application_materials_agent import StaleApplicationMaterialsError
-from backend.services.form_fill_service import get_autofill_data, get_extension_panel_data, run_assisted_apply
+from backend.services.form_fill_service import (
+    find_job_by_url,
+    get_autofill_data,
+    get_extension_panel_data,
+    run_assisted_apply,
+)
+from backend.services.job_scout_service import JobScoutError, ingest_job_url, normalize_job, persist_jobs
+from backend.services.job_service import record_to_job
+from backend.services.saved_job_service import save_job, unsave_job
+from backend.services.url_safety import UnsafeURLError
+from backend.services.analysis_service import load_job
+from backend.services.scoring_orchestrator import score_job_with_intelligence
+from backend.services.verified_fit_service import score_job_verified
 from backend.services.resume_version_service import (
     ResumeVersionConflictError,
     ResumeVersionNotFoundError,
@@ -224,3 +239,58 @@ def extension_panel_data(
     the same /api/extension/ prefix does not expand what the session header
     can authorize. Unlike autofill, never requires an approved package."""
     return get_extension_panel_data(db, url, user.id)
+
+
+@router.post("/extension/ingest-url", response_model=Job, status_code=status.HTTP_201_CREATED)
+def extension_ingest_url(
+    payload: IngestJobUrlRequest, db: Session = Depends(get_db), user: User = Depends(get_extension_user)
+) -> Job:
+    """Find the canonical stored job or ingest once. Never duplicates."""
+    url = (payload.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="url is required")
+    existing = find_job_by_url(db, url)
+    if existing is not None:
+        return record_to_job(existing)
+    try:
+        raw = ingest_job_url(url)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="URL is malformed.") from exc
+    except JobScoutError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    stored = persist_jobs([normalize_job(raw, "manual")])
+    return stored[0]
+
+
+@router.post("/extension/jobs/{job_id}/save", response_model=Job)
+def extension_save_job(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_extension_user)
+) -> Job:
+    return save_job(db, user.id, job_id).job
+
+
+@router.delete("/extension/jobs/{job_id}/save", status_code=status.HTTP_204_NO_CONTENT)
+def extension_unsave_job(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_extension_user)
+) -> Response:
+    unsave_job(db, user.id, job_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/extension/jobs/{job_id}/verified-fit", response_model=MatchScore)
+def extension_verified_fit(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_extension_user)
+) -> MatchScore:
+    """Run full-job Verified Fit. The panel must not call this on open."""
+    from backend.api.routes.scoring import _http_for_intelligence_error, _http_for_scoring_error, _is_intelligence_pipeline_error
+
+    try:
+        score_job_with_intelligence(db, job_id, user.id)
+        job = load_job(db, job_id)
+        return score_job_verified(db, job, user.id)
+    except Exception as exc:  # noqa: BLE001
+        if _is_intelligence_pipeline_error(exc):
+            raise _http_for_intelligence_error(exc) from exc
+        raise _http_for_scoring_error(exc) from exc
