@@ -18,12 +18,15 @@ vi.mock("../lib/api", async (importOriginal) => {
       getJobIntelligence: vi.fn(),
       extractJobIntelligence: vi.fn(),
       getJobs: vi.fn(),
+      queryJobs: vi.fn(),
       getStoredScores: vi.fn(),
       getStoredScore: vi.fn(),
       scoreJob: vi.fn(),
       getInterviewPrep: vi.fn(),
       prepareInterview: vi.fn(),
       verifyJob: vi.fn(),
+      getRequirementProfile: vi.fn(),
+      extractRequirementProfile: vi.fn(),
     },
   };
 });
@@ -44,6 +47,7 @@ function renderJob() {
 
 describe("JobDetailPage", () => {
   beforeEach(() => {
+    sessionStorage.clear();
     vi.mocked(api.getJob).mockResolvedValue({
       id: "job-1",
       title: "Staff Platform Engineer for Extremely-Long-Company-Name-That-Must-Wrap",
@@ -55,9 +59,19 @@ describe("JobDetailPage", () => {
     });
     vi.mocked(api.getJobIntelligence).mockRejectedValue(new ApiClientError(404, "None"));
     vi.mocked(api.getJobs).mockResolvedValue([]);
+    vi.mocked(api.queryJobs).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 40,
+      verified_count: 0,
+      potential_count: 0,
+      ids: [],
+    });
     vi.mocked(api.getStoredScores).mockResolvedValue([]);
     vi.mocked(api.getStoredScore).mockRejectedValue(new ApiClientError(404, "None"));
     vi.mocked(api.getInterviewPrep).mockRejectedValue(new ApiClientError(404, "None"));
+    vi.mocked(api.getRequirementProfile).mockRejectedValue(new ApiClientError(404, "None"));
     vi.mocked(api.extractJobIntelligence).mockReset();
     vi.mocked(api.scoreJob).mockReset();
     vi.mocked(api.prepareInterview).mockReset();
@@ -81,5 +95,30 @@ describe("JobDetailPage", () => {
     const heading = await screen.findByRole("heading", { name: /Staff Platform Engineer/i });
     expect(heading).toHaveClass("wrap-anywhere");
     expect(getComputedStyle(heading).overflowWrap).toBe("anywhere");
+  });
+
+  it("moves Previous and Next within the stored result context without wrapping", async () => {
+    sessionStorage.setItem("careerpilot.jobsNavIds", JSON.stringify(["job-0", "job-1", "job-2"]));
+    renderJob();
+    expect(await screen.findByRole("link", { name: /Previous job/i })).toHaveAttribute("href", "/jobs/job-0");
+    expect(screen.getByRole("link", { name: /Next job/i })).toHaveAttribute("href", "/jobs/job-2");
+  });
+
+  it("keeps Potential Match until a verified score exists", async () => {
+    vi.mocked(api.getStoredScore).mockResolvedValue({
+      job_id: "job-1",
+      overall_score: 91,
+      matched_skills: [],
+      partial_matches: [],
+      missing_skills: [],
+      recommendation: "apply",
+      rationale: "preliminary",
+      score_kind: "preliminary",
+    });
+    vi.mocked(api.extractRequirementProfile).mockRejectedValue(new ApiClientError(502, "unavailable"));
+    renderJob();
+    expect((await screen.findAllByText(/Potential Match/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText("91%")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Retry verification/i })).toBeInTheDocument();
   });
 });

@@ -583,6 +583,42 @@ body {
   animation: job-discovery-spin 8s linear infinite;
 }
 
+.job-card-selected {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 45%, transparent),
+    0 12px 32px -18px color-mix(in oklab, var(--primary) 55%, transparent),
+    inset 0 1px 0 color-mix(in oklab, var(--primary) 22%, transparent);
+}
+
+.filter-chip {
+  animation: filter-chip-in var(--motion-fast) var(--ease-standard);
+}
+
+@keyframes filter-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.bookmark-saved {
+  transform-origin: center;
+  animation: bookmark-lock-in var(--motion-base) var(--ease-expressive);
+}
+
+@keyframes bookmark-lock-in {
+  from {
+    transform: scale(0.7);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .intelligence-field,
   .pointer-halo,

@@ -7,8 +7,11 @@ import { InterviewPrepPanel } from "../components/InterviewPrepPanel";
 import { JobIntelligencePanel } from "../components/JobIntelligencePanel";
 import {
   EligibilityPanel,
+  EvidencePanel,
+  JobFreshnessBadge,
   JobRequirementSection,
   RequirementGroupView,
+  VerificationProgress,
   VerifiedFitPanel,
   WorkLocationPanel,
 } from "../components/job-analysis-panels";
@@ -17,8 +20,11 @@ import { MatchBadge } from "../components/MatchBadge";
 import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { ScoreOrb } from "../components/signature/ScoreOrb";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { api, ApiClientError } from "../lib/api";
+import { getJobsNavIds, jobsListPath } from "../lib/jobs-workspace";
 import { topMatchPercentileLabel } from "../lib/match-percentile";
+import { chipLabel } from "../lib/search-intent";
 import { saveSelectedJobId } from "../lib/session";
 import type { InterviewPrep, Job, JobIntelligence, JobRequirementProfile, MatchScore } from "../lib/types";
 
@@ -96,28 +102,24 @@ export function JobDetailPage() {
         }
         if (nextJob.id) saveSelectedJobId(nextJob.id);
         try {
-          const [jobs, storedScores] = await Promise.all([api.getJobs(), api.getStoredScores()]);
+          const storedIds = getJobsNavIds();
+          const ids =
+            storedIds.length > 0
+              ? storedIds
+              : (await api.queryJobs({ sort: "best_match", page_size: 50 })).ids;
           if (cancelled) return;
-          const ranked = [...jobs].sort((a, b) => {
-            const rank = (job: typeof a) => {
-              const score = job.id ? storedScores.find((item) => item.job_id === job.id) : undefined;
-              if (!score) return -1;
-              if ((score.scoring_version ?? 1) < 2 && score.ranking_score == null) return -0.5;
-              return score.ranking_score ?? score.overall_score ?? -1;
-            };
-            return rank(b) - rank(a);
-          });
-          const ids = ranked.map((item) => item.id).filter((id): id is string => Boolean(id));
           const index = ids.indexOf(jobId);
+          setNeighbors({
+            prev: index > 0 ? ids[index - 1] ?? null : null,
+            next: index >= 0 && index < ids.length - 1 ? ids[index + 1] ?? null : null,
+          });
+          const storedScores = await api.getStoredScores();
+          if (cancelled) return;
           storedScoreValues.current = Object.fromEntries(
             storedScores
               .filter((score) => score.job_id)
               .map((score) => [score.job_id as string, score.overall_score]),
           );
-          setNeighbors({
-            prev: index > 0 ? ids[index - 1] ?? null : null,
-            next: index >= 0 && index < ids.length - 1 ? ids[index + 1] ?? null : null,
-          });
         } catch {
           if (!cancelled) setNeighbors({ prev: null, next: null });
         }
@@ -181,6 +183,7 @@ export function JobDetailPage() {
   useEffect(() => {
     if (!jobId || loading) return;
     if (match?.score_kind === "verified") return;
+    if (match?.score_kind !== "preliminary" && match?.score_kind !== "full") return;
     if (deepAnalyzeJobId.current === jobId) return;
     deepAnalyzeJobId.current = jobId;
     let cancelled = false;
@@ -334,13 +337,20 @@ export function JobDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <Link to={jobsListPath()} className="btn-ghost h-9 px-2">
+          Back to Jobs
+        </Link>
+        <div className="flex flex-wrap items-center gap-2">
         {neighbors.prev ? (
           <Link to={`/jobs/${neighbors.prev}`} className="btn-ghost h-9 px-2">
             <ChevronLeft className="h-4 w-4" aria-hidden />
             Previous job
           </Link>
         ) : (
-          <span className="text-muted-foreground">Start of your stored list</span>
+          <button type="button" className="btn-ghost h-9 px-2" disabled>
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+            Previous job
+          </button>
         )}
         {neighbors.next ? (
           <Link to={`/jobs/${neighbors.next}`} className="btn-ghost h-9 px-2">
@@ -348,8 +358,12 @@ export function JobDetailPage() {
             <ChevronRight className="h-4 w-4" aria-hidden />
           </Link>
         ) : (
-          <span className="text-muted-foreground">End of your stored list</span>
+          <button type="button" className="btn-ghost h-9 px-2" disabled>
+            Next job
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </button>
         )}
+        </div>
       </div>
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-4">
@@ -358,12 +372,16 @@ export function JobDetailPage() {
             <p className="wrap-anywhere text-sm text-ink-500">{job.company}</p>
             <h1 className="wrap-anywhere font-display text-4xl font-semibold">{job.title}</h1>
             <p className="mt-2 text-ink-600 dark:text-ink-300">
-              {job.location || "Location n/a"}
-              {job.salary ? ` · ${job.salary}` : ""}
-              {profile?.work_mode ? ` · ${profile.work_mode}` : ""}
-              {profile?.employment_type && profile.employment_type !== "unknown"
-                ? ` · ${profile.employment_type.replaceAll("_", " ")}`
-                : ""}
+              {[
+                job.location || "Location n/a",
+                job.salary,
+                profile?.work_mode ? chipLabel(profile.work_mode) : null,
+                profile?.employment_type && profile.employment_type !== "unknown"
+                  ? chipLabel(profile.employment_type)
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <StatusBadge status={job.status} />
@@ -398,39 +416,89 @@ export function JobDetailPage() {
               if (job.id) saveSelectedJobId(job.id);
             }}
           >
-            {match?.score_kind === "verified" ? "Prepare Application" : "View Full Analysis"}
+            Prepare Application
           </Link>
         </div>
       </div>
 
       <VerifiedFitPanel match={match?.job_id === jobId ? match : null} />
-
-      {profile ? (
-        <section className="card space-y-4 p-6">
-          <h2 className="font-display text-2xl font-semibold">What they&apos;re looking for</h2>
-          <JobRequirementSection
-            title="Must have"
-            items={profile.requirements.filter((item) => item.importance !== "preferred")}
-          />
-          <JobRequirementSection
-            title="Preferred"
-            items={profile.requirements.filter((item) => item.importance === "preferred")}
-          />
-          {profile.requirement_groups.map((group) => (
-            <RequirementGroupView key={group.id} group={group} />
-          ))}
-        </section>
+      <VerificationProgress active={scoring && match?.score_kind !== "verified"} />
+      {scoreError ? (
+        <div className="space-y-2">
+          <ErrorBanner error={scoreError} heading="Could not verify this posting" />
+          <button type="button" className="btn-secondary" onClick={() => void handleCalculateFit()}>
+            Retry verification
+          </button>
+        </div>
       ) : null}
 
-      <WorkLocationPanel profile={profile} />
-      <EligibilityPanel match={match?.job_id === jobId ? match : null} />
-
-      <section className="card p-6">
-        <h2 className="font-display text-2xl font-semibold">Full original employer posting</h2>
-        <p className="mt-3 wrap-anywhere whitespace-pre-wrap text-sm leading-relaxed text-ink-700 dark:text-ink-200">
-          {job.description}
-        </p>
-      </section>
+      <Tabs defaultValue="overview">
+        <TabsList aria-label="Job analysis sections">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="match">Match</TabsTrigger>
+          <TabsTrigger value="evidence">Evidence</TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview" className="mt-4 space-y-4">
+          <section className="rounded-[var(--radius-lg)] border border-border/70 bg-surface/90 p-6">
+            <h2 className="font-display text-2xl font-semibold">Employer posting</h2>
+            <JobFreshnessBadge
+              datePosted={job.date_posted}
+              dateScraped={job.date_scraped}
+              verifiedAt={job.verified_at}
+              status={job.status}
+            />
+            <p className="mt-4 wrap-anywhere whitespace-pre-wrap text-sm leading-relaxed text-ink-700 dark:text-ink-200">
+              {job.description}
+            </p>
+          </section>
+          <WorkLocationPanel profile={profile} />
+        </TabsContent>
+        <TabsContent value="match" className="mt-4 space-y-4">
+          {profile ? (
+            <section className="rounded-[var(--radius-lg)] border border-border/70 bg-surface/90 p-6 space-y-4">
+              <h2 className="font-display text-2xl font-semibold">What they&apos;re looking for</h2>
+              <JobRequirementSection
+                title="Must have"
+                items={profile.requirements.filter((item) => item.importance !== "preferred")}
+              />
+              <JobRequirementSection
+                title="Preferred"
+                items={profile.requirements.filter((item) => item.importance === "preferred")}
+              />
+              {profile.requirement_groups.map((group) => {
+                const blockers = match?.gap_reasons ?? [];
+                const groupStatus =
+                  match?.score_kind !== "verified"
+                    ? "unknown"
+                    : blockers.some((reason) => reason === group.text || reason.includes(group.text))
+                      ? "not_satisfied"
+                      : match?.eligibility_status === "likely_eligible"
+                        ? "satisfied"
+                        : "unknown";
+                return (
+                  <RequirementGroupView
+                    key={group.id}
+                    group={group}
+                    requirements={profile.requirements}
+                    groupStatus={groupStatus}
+                  />
+                );
+              })}
+            </section>
+          ) : null}
+          <EligibilityPanel match={match?.job_id === jobId ? match : null} />
+          <FitScorePanel
+            match={match?.job_id === jobId ? match : null}
+            loading={scoring}
+            disabled={extracting}
+            error={scoreError}
+            onCalculate={() => void handleCalculateFit()}
+          />
+        </TabsContent>
+        <TabsContent value="evidence" className="mt-4">
+          <EvidencePanel />
+        </TabsContent>
+      </Tabs>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="card p-6">
@@ -473,14 +541,6 @@ export function JobDetailPage() {
           onExtract={() => void handleExtractRequirements()}
         />
       </div>
-
-      <FitScorePanel
-        match={match?.job_id === jobId ? match : null}
-        loading={scoring}
-        disabled={extracting}
-        error={scoreError}
-        onCalculate={() => void handleCalculateFit()}
-      />
 
       <InterviewPrepPanel
         jobId={jobId}
