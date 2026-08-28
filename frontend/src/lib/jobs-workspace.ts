@@ -1,3 +1,4 @@
+import { getActiveSessionUserId } from "./session";
 import type { JobListPage, JobQueryParams, JobsSort, JobsTab, OpportunityFilter } from "./types";
 
 export type JobsWorkspaceState = JobQueryParams & {
@@ -131,18 +132,29 @@ export function keepJobsQueryData(
 }
 
 const NAV_KEY = "careerpilot.jobsNavIds";
+const WORKSPACE_HREF_KEY = "careerpilot.jobsWorkspaceHref";
+
+function scopedSessionKey(base: string): string | null {
+  const userId = getActiveSessionUserId();
+  if (userId == null) return null;
+  return `${base}.u${userId}`;
+}
 
 export function saveJobsNavIds(ids: string[]) {
+  const key = scopedSessionKey(NAV_KEY);
+  if (!key) return;
   try {
-    sessionStorage.setItem(NAV_KEY, JSON.stringify(ids));
+    sessionStorage.setItem(key, JSON.stringify(ids));
   } catch {
     /* ignore quota */
   }
 }
 
 export function getJobsNavIds(): string[] {
+  const key = scopedSessionKey(NAV_KEY);
+  if (!key) return [];
   try {
-    const raw = sessionStorage.getItem(NAV_KEY);
+    const raw = sessionStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
@@ -151,19 +163,21 @@ export function getJobsNavIds(): string[] {
   }
 }
 
-const WORKSPACE_HREF_KEY = "careerpilot.jobsWorkspaceHref";
-
 export function saveJobsWorkspaceHref(search: string) {
+  const key = scopedSessionKey(WORKSPACE_HREF_KEY);
+  if (!key) return;
   try {
-    sessionStorage.setItem(WORKSPACE_HREF_KEY, search);
+    sessionStorage.setItem(key, search);
   } catch {
     /* ignore quota */
   }
 }
 
 export function getJobsWorkspaceHref(): string {
+  const key = scopedSessionKey(WORKSPACE_HREF_KEY);
+  if (!key) return "";
   try {
-    return sessionStorage.getItem(WORKSPACE_HREF_KEY) ?? "";
+    return sessionStorage.getItem(key) ?? "";
   } catch {
     return "";
   }

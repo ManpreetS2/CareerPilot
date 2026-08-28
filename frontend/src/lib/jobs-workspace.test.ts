@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { keepJobsQueryData, readJobsWorkspace, scopeJobsWorkspaceForTab, writeJobsWorkspace } from "./jobs-workspace";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  getJobsNavIds,
+  getJobsWorkspaceHref,
+  jobsListPath,
+  keepJobsQueryData,
+  readJobsWorkspace,
+  saveJobsNavIds,
+  saveJobsWorkspaceHref,
+  scopeJobsWorkspaceForTab,
+  writeJobsWorkspace,
+} from "./jobs-workspace";
+import { bindSessionUser } from "./session";
 import type { JobListPage } from "./types";
 
 describe("jobs workspace URL state", () => {
@@ -87,5 +98,33 @@ describe("jobs workspace URL state", () => {
     expect(
       keepJobsQueryData(savedPage, previousQuery, { tab: "saved", page: 2, page_size: 40 }),
     ).toBe(savedPage);
+  });
+});
+
+describe("jobs workspace session isolation", () => {
+  afterEach(() => {
+    bindSessionUser(null);
+    sessionStorage.clear();
+  });
+
+  it("does not leak User A's search or nav ids to User B after logout", () => {
+    bindSessionUser(11);
+    saveJobsNavIds(["job-alice-1", "job-alice-2"]);
+    saveJobsWorkspaceHref("search=A-query&selected=A-job");
+
+    bindSessionUser(null);
+    expect(getJobsNavIds()).toEqual([]);
+    expect(getJobsWorkspaceHref()).toBe("");
+    expect(jobsListPath()).toBe("/jobs");
+
+    bindSessionUser(22);
+    expect(getJobsNavIds()).toEqual([]);
+    expect(getJobsWorkspaceHref()).toBe("");
+    expect(jobsListPath()).toBe("/jobs");
+
+    bindSessionUser(11);
+    expect(getJobsNavIds()).toEqual(["job-alice-1", "job-alice-2"]);
+    expect(getJobsWorkspaceHref()).toBe("search=A-query&selected=A-job");
+    expect(jobsListPath()).toBe("/jobs?search=A-query&selected=A-job");
   });
 });

@@ -1,5 +1,7 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, ApiClientError } from "./api";
+import { clearAuthenticatedQueryCache } from "./query-client";
 import {
   applyServerProfile,
   bindSessionUser,
@@ -30,6 +32,7 @@ async function hydrateProfile(): Promise<void> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -42,10 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await hydrateProfile();
         if (!cancelled) setUser(current);
       })
-      .catch((err) => {
+      .catch(async (err) => {
         if (cancelled) return;
         const status = err instanceof ApiClientError ? err.status : undefined;
         if (status === 401 || status === 403) {
+          await clearAuthenticatedQueryCache(queryClient);
           bindSessionUser(null);
           setUser(null);
         }
@@ -56,10 +60,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [queryClient]);
 
   async function login(email: string, password: string) {
     const current = await api.login(email, password);
+    await clearAuthenticatedQueryCache(queryClient);
     bindSessionUser(current.id);
     await hydrateProfile();
     setUser(current);
@@ -67,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signup(email: string, password: string) {
     const current = await api.signup(email, password);
+    await clearAuthenticatedQueryCache(queryClient);
     bindSessionUser(current.id);
     await hydrateProfile();
     setUser(current);
@@ -84,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     }
+    await clearAuthenticatedQueryCache(queryClient);
     clearCurrentUserSensitiveCache();
     setUser(null);
     bindSessionUser(null);

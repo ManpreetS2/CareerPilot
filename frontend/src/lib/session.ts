@@ -19,6 +19,10 @@ export function bindSessionUser(userId: number | null) {
   emitSessionChange();
 }
 
+export function getActiveSessionUserId(): number | null {
+  return activeUserId;
+}
+
 function scopedKey(base: string): string {
   return activeUserId == null ? base : `${base}.u${activeUserId}`;
 }
