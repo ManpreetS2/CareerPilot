@@ -278,6 +278,43 @@ describe("JobsPage workspace", () => {
     expect(screen.queryByText("90%")).not.toBeInTheDocument();
   });
 
+  it("does not carry Discover search into Matches while keeping work mode", async () => {
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "matches") return Promise.resolve(pageOf([newJob]));
+      return Promise.resolve(pageOf([existingJob]));
+    });
+    renderJobs(
+      "/jobs?search=Software+engineering+internships+in+the+Bay+Area&q=Software+Engineering&location=San+Francisco+Bay+Area&industry=fintech&work_mode=hybrid",
+    );
+    const input = await screen.findByTestId("jobs-search-input");
+    expect(input).toHaveValue("Software engineering internships in the Bay Area");
+    expect(input).toHaveAttribute("data-has-query", "true");
+    await userEvent.click(screen.getByRole("tab", { name: "Matches" }));
+    expect(await screen.findByText("Platform Engineer")).toBeInTheDocument();
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("data-has-query", "false");
+    expect(input).toHaveAttribute("placeholder", "Search roles, locations, or work setup");
+    await waitFor(() => {
+      const lastQuery = vi.mocked(api.queryJobs).mock.calls.at(-1)?.[0];
+      expect(lastQuery?.tab).toBe("matches");
+      expect(lastQuery?.q).toBeUndefined();
+      expect(lastQuery?.location ?? []).toEqual([]);
+      expect(lastQuery?.industry ?? []).toEqual([]);
+      expect(lastQuery?.work_mode).toEqual(["hybrid"]);
+    });
+  });
+
+  it("clears the search field so placeholder is not an active query", async () => {
+    vi.mocked(api.queryJobs).mockResolvedValue(pageOf([]));
+    renderJobs("/jobs?search=Software+engineering+internships+in+the+Bay+Area&q=Software+Engineering");
+    const input = await screen.findByTestId("jobs-search-input");
+    expect(input).toHaveValue("Software engineering internships in the Bay Area");
+    await userEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("data-has-query", "false");
+    expect((input as HTMLInputElement).placeholder).not.toMatch(/Software engineering internships in the Bay Area/i);
+  });
+
   it("opens the filter panel and applies a work-mode filter", async () => {
     renderJobs();
     await screen.findByText("Backend Engineer");

@@ -53,16 +53,17 @@ export function NaturalSearchBar({
         <span className="sr-only">Search jobs</span>
         <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
         <input
-          className="input pl-10"
-          placeholder="Software engineering internships in the Bay Area, hybrid or onsite"
+          className="input jobs-search-input pl-10"
+          placeholder="Search roles, locations, or work setup"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           aria-describedby="natural-search-help"
           data-testid="jobs-search-input"
+          data-has-query={value.trim() ? "true" : "false"}
         />
       </label>
       <p id="natural-search-help" className="text-xs text-muted-foreground">
-        CareerPilot turns this into structured filters. Chips below are the actual request.
+        Press Enter to search. An empty field is not a query — chips below are the actual request.
       </p>
       <SearchFilterChips chips={chips} />
     </form>

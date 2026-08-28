@@ -718,6 +718,19 @@ body {
     border-color: var(--ring);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 28%, transparent);
   }
+  .input::placeholder,
+  .jobs-search-input::placeholder {
+    color: color-mix(in srgb, var(--muted-foreground) 72%, transparent);
+    font-style: italic;
+    opacity: 1;
+  }
+  .jobs-search-input[data-has-query="false"] {
+    color: var(--muted-foreground);
+  }
+  .jobs-search-input[data-has-query="true"] {
+    color: var(--foreground);
+    font-style: normal;
+  }
   .label {
     @apply mb-1.5 block text-sm font-medium text-[var(--foreground)];
   }

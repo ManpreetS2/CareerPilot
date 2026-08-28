@@ -5,6 +5,23 @@ export type JobsWorkspaceState = JobQueryParams & {
   selected?: string | null;
 };
 
+/**
+ * Discover-only: the search the user just asked sources for (`search`, `q`,
+ * locations, industries). Matches/Saved answer "what should I consider?" and
+ * must not inherit that query. Shared: work mode, opportunity, employment,
+ * experience, verification, eligibility, confidence, date posted, sort.
+ */
+export function scopeJobsWorkspaceForTab(state: JobsWorkspaceState): JobsWorkspaceState {
+  if (state.tab === "discover") return state;
+  return {
+    ...state,
+    search: "",
+    q: undefined,
+    location: [],
+    industry: [],
+  };
+}
+
 function allParams(search: URLSearchParams): URLSearchParams {
   return new URLSearchParams(search);
 }
@@ -13,7 +30,7 @@ export function readJobsWorkspace(search: URLSearchParams): JobsWorkspaceState {
   const tab = search.get("tab");
   const sort = search.get("sort");
   const opportunity = search.get("opportunity");
-  return {
+  return scopeJobsWorkspaceForTab({
     search: search.get("search") ?? "",
     q: search.get("q") ?? undefined,
     tab: tab === "matches" || tab === "saved" || tab === "discover" ? tab : "discover",
@@ -36,7 +53,7 @@ export function readJobsWorkspace(search: URLSearchParams): JobsWorkspaceState {
         : "best_match",
     page: Number(search.get("page") || "1") || 1,
     selected: search.get("selected"),
-  };
+  });
 }
 
 export function writeJobsWorkspace(
@@ -44,16 +61,16 @@ export function writeJobsWorkspace(
   patch: Partial<JobsWorkspaceState>,
 ): URLSearchParams {
   const next = allParams(current);
-  const merged = { ...readJobsWorkspace(current), ...patch };
+  const merged = scopeJobsWorkspaceForTab({ ...readJobsWorkspace(current), ...patch });
   const setList = (key: string, values?: string[]) => {
     next.delete(key);
     for (const value of values ?? []) {
       if (value) next.append(key, value);
     }
   };
-  if (merged.search) next.set("search", merged.search);
+  if (merged.tab === "discover" && merged.search) next.set("search", merged.search);
   else next.delete("search");
-  if (merged.q) next.set("q", merged.q);
+  if (merged.tab === "discover" && merged.q) next.set("q", merged.q);
   else next.delete("q");
   if (merged.tab && merged.tab !== "discover") next.set("tab", merged.tab);
   else next.delete("tab");
@@ -62,8 +79,8 @@ export function writeJobsWorkspace(
   setList("employment_type", merged.employment_type);
   setList("experience_level", merged.experience_level);
   setList("work_mode", merged.work_mode);
-  setList("location", merged.location);
-  setList("industry", merged.industry);
+  setList("location", merged.tab === "discover" ? merged.location : []);
+  setList("industry", merged.tab === "discover" ? merged.industry : []);
   if (merged.verified_state && merged.verified_state !== "all") next.set("verified_state", merged.verified_state);
   else next.delete("verified_state");
   if (merged.eligibility && merged.eligibility !== "all") next.set("eligibility", merged.eligibility);
@@ -82,21 +99,22 @@ export function writeJobsWorkspace(
 }
 
 export function toJobQueryParams(state: JobsWorkspaceState): JobQueryParams {
+  const scoped = scopeJobsWorkspaceForTab(state);
   return {
-    q: state.q,
-    tab: state.tab as JobsTab,
-    opportunity: state.opportunity as OpportunityFilter,
-    employment_type: state.employment_type,
-    experience_level: state.experience_level,
-    work_mode: state.work_mode,
-    location: state.location,
-    industry: state.industry,
-    verified_state: state.verified_state,
-    eligibility: state.eligibility,
-    confidence: state.confidence,
-    date_posted: state.date_posted,
-    sort: state.sort as JobsSort,
-    page: state.page,
+    q: scoped.q,
+    tab: scoped.tab as JobsTab,
+    opportunity: scoped.opportunity as OpportunityFilter,
+    employment_type: scoped.employment_type,
+    experience_level: scoped.experience_level,
+    work_mode: scoped.work_mode,
+    location: scoped.location,
+    industry: scoped.industry,
+    verified_state: scoped.verified_state,
+    eligibility: scoped.eligibility,
+    confidence: scoped.confidence,
+    date_posted: scoped.date_posted,
+    sort: scoped.sort as JobsSort,
+    page: scoped.page,
     page_size: 40,
   };
 }

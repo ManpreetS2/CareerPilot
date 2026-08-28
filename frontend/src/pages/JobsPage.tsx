@@ -478,6 +478,7 @@ export function JobsPage() {
                 className="btn-secondary"
                 onClick={() =>
                   patch({
+                    search: "",
                     q: undefined,
                     opportunity: "both",
                     employment_type: [],
@@ -486,6 +487,8 @@ export function JobsPage() {
                     industry: [],
                     verified_state: "all",
                     eligibility: "all",
+                    confidence: "all",
+                    date_posted: undefined,
                     page: 1,
                   })
                 }
