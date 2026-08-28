@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { IntelligenceField } from "./signature/IntelligenceField";
-import { PointerHalo } from "./signature/PointerHalo";
 import { Glass } from "./ui/glass";
 import { APP_NAME, APP_TAGLINE } from "../lib/config";
 
@@ -14,7 +13,6 @@ export function AuthFrame({
 }) {
   return (
     <div className="cp-atmosphere relative flex min-h-[100dvh] items-center justify-center bg-background px-4 py-8">
-      <PointerHalo />
       <IntelligenceField />
       <div className="relative z-10 w-full max-w-sm space-y-6">
         <div className="text-center">

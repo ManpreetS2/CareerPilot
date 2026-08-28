@@ -413,11 +413,9 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
         )}
       </section>
 
-      {materials ? <ResumeVersionPanel jobId={jobId} materials={materials} /> : null}
-
       {materials ? (
         <>
-          <section className="sticky-action-rail glass-working p-6">
+          <section className="card p-6" data-testid="approval-rail">
             <h2 className="font-display text-2xl font-semibold">Approval</h2>
             <p className="mt-2 text-sm text-muted-foreground">
               Current state:{" "}
@@ -485,6 +483,7 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
               </button>
             </div>
           </section>
+          <ResumeVersionPanel jobId={jobId} materials={materials} />
           <AssistedApplyPanel job={job} materials={materials} />
         </>
       ) : null}
