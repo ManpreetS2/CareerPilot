@@ -17,7 +17,6 @@ from backend.services.job_posting_time import job_posting_datetime
 from backend.services.job_search_parser import JobSearchIntent, JobsTab, SortMode
 from backend.services.job_service import record_to_job
 from backend.services.opportunity_type import (
-    INTERNSHIP_EMPLOYMENT,
     infer_work_mode,
     matches_opportunity_filter,
 )
@@ -68,6 +67,18 @@ _TITLE_JUNIOR = re.compile(
     r"\b(?:junior|jr\.?|entry[\s-]?level|(?:software\s+)?(?:engineer|developer)\s+(?:i|1))\b",
     re.I,
 )
+_OCCUPATION = (
+    r"(?:software\s+)?(?:engineer|developer|scientist|architect|designer|"
+    r"product(?:\s+manager)?|manager|analyst|researcher|consultant|specialist)"
+)
+_EXPERIENCE_TITLE = {
+    "senior": re.compile(rf"\b(?:senior|sr\.?)\s+{_OCCUPATION}", re.I),
+    "staff": re.compile(rf"\bstaff\s+{_OCCUPATION}", re.I),
+    "lead": re.compile(rf"\blead\s+{_OCCUPATION}", re.I),
+    "principal": re.compile(rf"\bprincipal\s+{_OCCUPATION}", re.I),
+    "mid": re.compile(r"\b(?:mid[\s-]?level|mid[\s-]?career)\b", re.I),
+    "manager": re.compile(r"\b(?:engineering\s+)?manager\b", re.I),
+}
 
 
 def _profile_dict(profile_json: object) -> dict:
@@ -133,9 +144,8 @@ def _experience_matches(
     emp = (employment_type or "").lower()
     profile_level = str(_profile_dict(profile_json).get("experience_level") or "").lower()
     for level in levels:
-        needle = level.replace("_", " ")
         if level == "intern":
-            if emp in INTERNSHIP_EMPLOYMENT or profile_level == "intern" or _TITLE_INTERN.search(title):
+            if emp == "internship" or profile_level == "intern" or _TITLE_INTERN.search(title):
                 return True
             continue
         if level == "new_grad":
@@ -146,7 +156,10 @@ def _experience_matches(
             if profile_level in {"entry", "junior"} or _TITLE_JUNIOR.search(title):
                 return True
             continue
-        if profile_level == level or needle in title or level in title:
+        if profile_level == level:
+            return True
+        pattern = _EXPERIENCE_TITLE.get(level)
+        if pattern is not None and pattern.search(job.title or ""):
             return True
     return False
 
@@ -156,7 +169,7 @@ def _work_mode_for(job: JobRecord, profile_json: dict | None) -> str:
         mode = profile_json.get("work_mode")
         if mode in {"remote", "hybrid", "onsite"}:
             return mode
-    return infer_work_mode(job.title, job.description)
+    return infer_work_mode(job.title, job.description, job.location)
 
 
 def _sort_key(item: JobListItem, sort: SortMode, posted_at: datetime | None) -> tuple:

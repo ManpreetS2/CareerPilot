@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -37,6 +38,13 @@ def _wait_for_url(url: str, timeout: float = 30.0) -> None:
         except Exception:
             time.sleep(0.2)
     raise RuntimeError("Local test service did not become ready.")
+
+
+def _npm_bin() -> str:
+    found = shutil.which("npm") or shutil.which("npm.cmd")
+    if not found:
+        raise RuntimeError("npm is not on PATH. Install Node.js 20+ and retry.")
+    return found
 
 
 def _stop_process(process: subprocess.Popen) -> None:
@@ -215,7 +223,7 @@ def main() -> int:
         frontend_env["VITE_API_BASE_URL"] = f"http://127.0.0.1:{backend_port}"
         frontend = subprocess.Popen(
             [
-                "npm",
+                _npm_bin(),
                 "run",
                 "dev",
                 "--",

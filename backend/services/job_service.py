@@ -60,7 +60,7 @@ def record_to_job(record: JobRecord) -> Job:
         verified_at=record.verified_at,
         opportunity_type=infer_opportunity_type(record.title, record.description),
         employment_type=infer_employment_type(record.title, record.description),
-        work_mode=infer_work_mode(record.title, record.description),
+        work_mode=infer_work_mode(record.title, record.description, record.location),
     )
 
 

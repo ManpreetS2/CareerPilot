@@ -128,7 +128,101 @@ export function keepJobsQueryData(
 ): JobListPage | undefined {
   const prev = previousQuery?.queryKey[1] as JobQueryParams | undefined;
   if (!previousData || !prev || prev.tab !== nextParams.tab) return undefined;
+  if (prev.page !== nextParams.page && previousData.items.length === 0) return undefined;
   return previousData;
+}
+
+export type SavedUnsavePatch = {
+  page: JobListPage;
+  nextSelected?: string | null;
+  shouldStepBack: boolean;
+  nextPage: number;
+};
+
+export function applySavedJobUnsave(
+  page: JobListPage,
+  jobId: string,
+  selectedJobId: string | null,
+): SavedUnsavePatch {
+  const index = page.items.findIndex((item) => item.job.id === jobId);
+  const removedItem = index >= 0 ? page.items[index] : undefined;
+  if (!removedItem) {
+    return { page, shouldStepBack: false, nextPage: page.page };
+  }
+  const items = page.items.filter((item) => item.job.id !== jobId);
+  const ids = page.ids.filter((id) => id !== jobId);
+  const total = Math.max(0, page.total - 1);
+  const nextPageData: JobListPage = {
+    ...page,
+    items,
+    ids,
+    total,
+    verified_count:
+      removedItem.match?.score_kind === "verified"
+        ? Math.max(0, page.verified_count - 1)
+        : page.verified_count,
+    potential_count:
+      removedItem.match?.score_kind !== "verified"
+        ? Math.max(0, page.potential_count - 1)
+        : page.potential_count,
+  };
+  let nextSelected: string | null | undefined;
+  if (selectedJobId === jobId) {
+    const neighbor = items[index] ?? items[index - 1] ?? null;
+    nextSelected = neighbor?.job.id ?? null;
+  }
+  const pageSize = Math.max(1, page.page_size || 1);
+  const lastValidPage = Math.max(1, Math.ceil(total / pageSize) || 1);
+  const shouldStepBack = items.length === 0 && total > 0 && page.page > 1;
+  return {
+    page: nextPageData,
+    nextSelected,
+    shouldStepBack,
+    nextPage: shouldStepBack ? lastValidPage : page.page,
+  };
+}
+
+export function patchJobSavedFlag(page: JobListPage, jobId: string, saved: boolean): JobListPage {
+  return {
+    ...page,
+    items: page.items.map((item) =>
+      item.job.id === jobId ? { ...item, saved, job: { ...item.job, saved } } : item,
+    ),
+  };
+}
+
+export function rollbackJobInCachedPage(
+  snapshot: JobListPage,
+  current: JobListPage,
+  jobId: string,
+): JobListPage {
+  const snapItem = snapshot.items.find((item) => item.job.id === jobId);
+  if (!snapItem) return current;
+  const currentIndex = current.items.findIndex((item) => item.job.id === jobId);
+  if (currentIndex >= 0) {
+    return {
+      ...current,
+      items: current.items.map((item) => (item.job.id === jobId ? snapItem : item)),
+    };
+  }
+  const insertAt = snapshot.items.findIndex((item) => item.job.id === jobId);
+  const items = [...current.items];
+  items.splice(Math.min(Math.max(insertAt, 0), items.length), 0, snapItem);
+  const ids = [...current.ids];
+  if (!ids.includes(jobId)) {
+    const idAt = snapshot.ids.indexOf(jobId);
+    ids.splice(Math.min(Math.max(idAt, 0), ids.length), 0, jobId);
+  }
+  return {
+    ...current,
+    items,
+    ids,
+    total: current.total + 1,
+    verified_count:
+      snapItem.match?.score_kind === "verified" ? current.verified_count + 1 : current.verified_count,
+    potential_count:
+      snapItem.match?.score_kind !== "verified" ? current.potential_count + 1 : current.potential_count,
+  };
 }
 
 const NAV_KEY = "careerpilot.jobsNavIds";

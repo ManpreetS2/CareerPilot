@@ -134,21 +134,36 @@ def _replace_unique_job_indexes() -> None:
 def _dedupe_match_scores() -> None:
     """Keep the newest MatchScore per (job_id, candidate_id) before uniqueness.
 
-    Linked MatchEvidence rows on discarded scores are deleted, not reassigned.
+    Newest is created_at, then id. Linked MatchEvidence rows on discarded scores
+    are deleted, not reassigned.
     """
     inspector = inspect(engine)
     if "match_scores" not in inspector.get_table_names():
         return
     evidence_exists = "match_evidence" in inspector.get_table_names()
+    columns = {col["name"] for col in inspector.get_columns("match_scores")}
+    has_created_at = "created_at" in columns
+    keep_sql = (
+        "SELECT id FROM match_scores "
+        "WHERE job_id = :job_id AND candidate_id = :candidate_id "
+        "ORDER BY CASE WHEN created_at IS NULL THEN 0 ELSE 1 END DESC, created_at DESC, id DESC "
+        "LIMIT 1"
+        if has_created_at
+        else "SELECT MAX(id) FROM match_scores WHERE job_id = :job_id AND candidate_id = :candidate_id"
+    )
     with engine.begin() as conn:
         groups = conn.execute(
             text(
-                "SELECT job_id, candidate_id, MAX(id) AS keep_id "
+                "SELECT job_id, candidate_id "
                 "FROM match_scores WHERE candidate_id IS NOT NULL "
                 "GROUP BY job_id, candidate_id HAVING COUNT(*) > 1"
             )
         ).fetchall()
-        for job_id, candidate_id, keep_id in groups:
+        for job_id, candidate_id in groups:
+            keep_id = conn.execute(
+                text(keep_sql),
+                {"job_id": job_id, "candidate_id": candidate_id},
+            ).scalar()
             discarded = conn.execute(
                 text(
                     "SELECT id FROM match_scores "

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { Link2, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -16,9 +16,12 @@ import { api } from "../lib/api";
 import { cn } from "../lib/cn";
 import { jobDiscoveryErrorHeading } from "../lib/job-discovery-error";
 import {
+  applySavedJobUnsave,
   getJobsNavIds,
   keepJobsQueryData,
+  patchJobSavedFlag,
   readJobsWorkspace,
+  rollbackJobInCachedPage,
   saveJobsNavIds,
   saveJobsWorkspaceHref,
   toJobQueryParams,
@@ -27,7 +30,11 @@ import {
 } from "../lib/jobs-workspace";
 import { chipLabel, parseSearchIntent, scoutTermsFromIntent } from "../lib/search-intent";
 import { saveSelectedJobId } from "../lib/session";
-import type { JobListItem, JobListPage, ScoutJobsResponse } from "../lib/types";
+import type { JobListItem, JobListPage, JobQueryParams, ScoutJobsResponse } from "../lib/types";
+
+function isActiveJobsQuery(cached: unknown, active: JobQueryParams): boolean {
+  return JSON.stringify(cached) === JSON.stringify(active);
+}
 
 const TABS = [
   { id: "discover", label: "Discover" },
@@ -54,6 +61,20 @@ export function JobsPage() {
     sourcesUnavailable: number;
     partial: boolean;
   } | null>(null);
+  const pendingSaveIdsRef = useRef(new Set<string>());
+  const [pendingSaveIds, setPendingSaveIds] = useState<Set<string>>(() => new Set());
+
+  function markSavePending(jobId: string, pending: boolean) {
+    if (pending) pendingSaveIdsRef.current.add(jobId);
+    else pendingSaveIdsRef.current.delete(jobId);
+    setPendingSaveIds(new Set(pendingSaveIdsRef.current));
+  }
+
+  function requestSaveToggle(jobId: string, saved: boolean) {
+    if (pendingSaveIdsRef.current.has(jobId)) return;
+    markSavePending(jobId, true);
+    saveMutation.mutate({ jobId, saved });
+  }
 
   useEffect(() => {
     setDraftSearch(state.search);
@@ -152,57 +173,59 @@ export function JobsPage() {
       const snapshots = queryClient.getQueriesData<JobListPage>({ queryKey: ["jobs-workspace"] });
       const previousSelected = state.selected ?? null;
       let nextSelected = previousSelected;
+      let usedActiveSelection = false;
+      let stepBackPage: number | undefined;
+      const jobSnapshots: Array<[QueryKey, JobListPage]> = [];
       for (const [key, current] of snapshots) {
         if (!current) continue;
-        const params = key[1] as { tab?: string } | undefined;
+        const params = key[1] as JobQueryParams | undefined;
         const unsavingFromSaved = saved && params?.tab === "saved";
+        jobSnapshots.push([key, current]);
         if (unsavingFromSaved) {
-          const index = current.items.findIndex((item) => item.job.id === jobId);
-          const removedItem = current.items.find((item) => item.job.id === jobId);
-          const items = current.items.filter((item) => item.job.id !== jobId);
-          const ids = current.ids.filter((id) => id !== jobId);
-          if (previousSelected === jobId) {
-            const neighbor = items[index] ?? items[index - 1] ?? null;
-            nextSelected = neighbor?.job.id ?? null;
+          const result = applySavedJobUnsave(current, jobId, previousSelected);
+          queryClient.setQueryData(key, result.page);
+          const active = isActiveJobsQuery(params, queryParams);
+          if (result.nextSelected !== undefined && (active || !usedActiveSelection)) {
+            nextSelected = result.nextSelected;
+            if (active) usedActiveSelection = true;
           }
-          queryClient.setQueryData<JobListPage>(key, {
-            ...current,
-            items,
-            ids,
-            total: removedItem ? Math.max(0, current.total - 1) : current.total,
-            verified_count:
-              removedItem?.match?.score_kind === "verified"
-                ? Math.max(0, current.verified_count - 1)
-                : current.verified_count,
-            potential_count:
-              removedItem && removedItem.match?.score_kind !== "verified"
-                ? Math.max(0, current.potential_count - 1)
-                : current.potential_count,
-          });
+          if (active && result.shouldStepBack) {
+            stepBackPage = result.nextPage;
+          }
         } else {
-          queryClient.setQueryData<JobListPage>(key, {
-            ...current,
-            items: current.items.map((item) =>
-              item.job.id === jobId ? { ...item, saved: !saved, job: { ...item.job, saved: !saved } } : item,
-            ),
-          });
+          queryClient.setQueryData(key, patchJobSavedFlag(current, jobId, !saved));
         }
       }
-      if (nextSelected !== previousSelected) {
-        patch({ selected: nextSelected });
+      if (nextSelected !== previousSelected || stepBackPage != null) {
+        patch({
+          ...(nextSelected !== previousSelected ? { selected: nextSelected } : {}),
+          ...(stepBackPage != null ? { page: stepBackPage } : {}),
+        });
       }
-      return { snapshots, selected: previousSelected };
+      return {
+        snapshots: jobSnapshots,
+        selected: previousSelected,
+        page: state.page,
+        didChangeSelected: nextSelected !== previousSelected,
+        didStepBack: stepBackPage != null,
+      };
     },
-    onError: (_err, _vars, context) => {
+    onError: (_err, vars, context) => {
       for (const [key, data] of context?.snapshots ?? []) {
-        queryClient.setQueryData(key, data);
+        const current = queryClient.getQueryData<JobListPage>(key);
+        if (!current || !data) continue;
+        queryClient.setQueryData(key, rollbackJobInCachedPage(data, current, vars.jobId));
       }
-      if (context && context.selected !== undefined) {
-        patch({ selected: context.selected });
-      }
+      const restore: Partial<JobsWorkspaceState> = {};
+      if (context?.didChangeSelected) restore.selected = context.selected;
+      if (context?.didStepBack) restore.page = context.page;
+      if (Object.keys(restore).length > 0) patch(restore);
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["jobs-workspace"] });
+    onSettled: (_data, _err, vars) => {
+      markSavePending(vars.jobId, false);
+      if (pendingSaveIdsRef.current.size === 0) {
+        void queryClient.invalidateQueries({ queryKey: ["jobs-workspace"] });
+      }
     },
   });
 
@@ -364,8 +387,8 @@ export function JobsPage() {
           patch({ selected: job.id });
           saveSelectedJobId(job.id);
         }}
-        onToggleSave={() => job.id && saveMutation.mutate({ jobId: job.id, saved: Boolean(job.saved) })}
-        savePending={saveMutation.isPending && saveMutation.variables?.jobId === job.id}
+        onToggleSave={() => job.id && requestSaveToggle(job.id, Boolean(job.saved))}
+        savePending={Boolean(job.id && pendingSaveIds.has(job.id))}
       />
     );
   }
@@ -492,10 +515,9 @@ export function JobsPage() {
             job={selectedItem.job}
             match={selectedItem.match}
             onToggleSave={() =>
-              selectedItem.job.id &&
-              saveMutation.mutate({ jobId: selectedItem.job.id, saved: Boolean(selectedItem.job.saved) })
+              selectedItem.job.id && requestSaveToggle(selectedItem.job.id, Boolean(selectedItem.job.saved))
             }
-            savePending={saveMutation.isPending && saveMutation.variables?.jobId === selectedItem.job.id}
+            savePending={Boolean(selectedItem.job.id && pendingSaveIds.has(selectedItem.job.id))}
           />
         </div>
       ) : listed.length === 0 && !scouting ? (
@@ -573,12 +595,9 @@ export function JobsPage() {
                 match={selectedItem.match}
                 onToggleSave={() =>
                   selectedItem.job.id &&
-                  saveMutation.mutate({
-                    jobId: selectedItem.job.id,
-                    saved: Boolean(selectedItem.job.saved),
-                  })
+                  requestSaveToggle(selectedItem.job.id, Boolean(selectedItem.job.saved))
                 }
-                savePending={saveMutation.isPending && saveMutation.variables?.jobId === selectedItem.job.id}
+                savePending={Boolean(selectedItem.job.id && pendingSaveIds.has(selectedItem.job.id))}
               />
             ) : (
               <p className="text-sm text-muted-foreground">Select a job to preview it here.</p>

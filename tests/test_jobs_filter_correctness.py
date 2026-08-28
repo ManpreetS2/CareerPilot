@@ -248,6 +248,13 @@ def test_role_and_experience_filters_use_canonical_fields(isolated_client) -> No
             location="Austin, TX",
             description="New grad program. Full-time rotation.",
         )
+        _job(
+            db,
+            public_id="coop",
+            title="Software Engineering Co-op",
+            location="Austin, TX",
+            description="Fall co-op rotation.",
+        )
 
     swe = client.get("/api/jobs/query", params={"q": "Software Engineering"})
     assert swe.status_code == 200
@@ -264,6 +271,19 @@ def test_role_and_experience_filters_use_canonical_fields(isolated_client) -> No
     assert "senior-mentions-interns" not in intern_ids
     assert "swe-intern" in intern_ids
     assert "marketing-intern" in intern_ids
+    assert "new-grad" not in intern_ids
+
+    internships = client.get("/api/jobs/query", params={"opportunity": "internship"})
+    internships_ids = set(_ids(internships))
+    assert "swe-intern" in internships_ids
+    assert "coop" in internships_ids
+    assert "new-grad" not in internships_ids
+
+    roles = client.get("/api/jobs/query", params={"opportunity": "role"})
+    roles_ids = set(_ids(roles))
+    assert "new-grad" in roles_ids
+    assert "swe-intern" not in roles_ids
+    assert "coop" not in roles_ids
 
     junior = client.get("/api/jobs/query", params={"experience_level": "junior"})
     junior_ids = set(_ids(junior))
@@ -278,4 +298,194 @@ def test_role_and_experience_filters_use_canonical_fields(isolated_client) -> No
     assert infer_opportunity_type("Senior Software Engineer", "Mentor interns.") != "internship"
     assert infer_employment_type("Software Engineering Intern", "Summer internship.") == "internship"
     assert infer_employment_type("New Grad Software Engineer", "New grad program.") == "new_grad"
+    assert infer_opportunity_type("New Grad Software Engineer", "New grad program.") == "role"
     assert infer_opportunity_type("Staff Platform Engineer", "Full-time. Remote.") == "role"
+
+
+def test_work_mode_and_employment_ignore_description_false_positives(isolated_client) -> None:
+    from backend.services.opportunity_type import infer_work_mode
+
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        _job(
+            db,
+            public_id="onsite-remote-teams",
+            title="Software Engineer",
+            location="Austin, TX",
+            description="This is an onsite role. You will collaborate with remote teams.",
+        )
+        _job(
+            db,
+            public_id="onsite-remote-customers",
+            title="Software Engineer",
+            location="Austin, TX",
+            description="Work onsite five days per week. The company also supports remote customer deployments.",
+        )
+        _job(
+            db,
+            public_id="hybrid-explicit",
+            title="Software Engineer",
+            location="Palo Alto, CA",
+            description="Hybrid role, three days in the Palo Alto office.",
+        )
+        _job(
+            db,
+            public_id="full-time-contractors",
+            title="Software Engineer",
+            location="Austin, TX",
+            description="This is a full-time role. You will work closely with contractors.",
+        )
+        _job(
+            db,
+            public_id="contract-explicit",
+            title="Software Engineer",
+            location="Austin, TX",
+            description="6-month contract position on the platform team.",
+        )
+        _job(
+            db,
+            public_id="benefits-boilerplate",
+            title="Software Engineer",
+            location="Austin, TX",
+            description="Full-time employee benefits are available. Coordinate with contract vendors. Support internship and fellowship programs.",
+        )
+
+    assert infer_work_mode(
+        "Software Engineer",
+        "This is an onsite role. You will collaborate with remote teams.",
+        "Austin, TX",
+    ) == "onsite"
+    assert infer_work_mode(
+        "Software Engineer",
+        "Work onsite five days per week. The company also supports remote customer deployments.",
+        "Austin, TX",
+    ) == "onsite"
+    assert infer_work_mode(
+        "Software Engineer",
+        "Hybrid role, three days in the Palo Alto office.",
+        "Palo Alto, CA",
+    ) == "hybrid"
+
+    remote = client.get("/api/jobs/query", params={"work_mode": "remote"})
+    remote_ids = set(_ids(remote))
+    assert "onsite-remote-teams" not in remote_ids
+    assert "onsite-remote-customers" not in remote_ids
+
+    hybrid = client.get("/api/jobs/query", params={"work_mode": "hybrid"})
+    assert "hybrid-explicit" in set(_ids(hybrid))
+
+    onsite = client.get("/api/jobs/query", params={"work_mode": "onsite"})
+    onsite_ids = set(_ids(onsite))
+    assert "onsite-remote-teams" in onsite_ids
+    assert "onsite-remote-customers" in onsite_ids
+
+    contract = client.get("/api/jobs/query", params={"employment_type": "contract"})
+    contract_ids = set(_ids(contract))
+    assert "full-time-contractors" not in contract_ids
+    assert "benefits-boilerplate" not in contract_ids
+    assert "contract-explicit" in contract_ids
+
+    full_time = client.get("/api/jobs/query", params={"employment_type": "full_time"})
+    full_time_ids = set(_ids(full_time))
+    assert "full-time-contractors" in full_time_ids
+    assert "contract-explicit" not in full_time_ids
+
+    assert infer_employment_type(
+        "Software Engineer",
+        "This is a full-time role. You will work closely with contractors.",
+    ) == "full_time"
+    assert infer_employment_type(
+        "Software Engineer",
+        "Full-time employee benefits are available. Coordinate with contract vendors.",
+    ) == "unknown"
+
+
+def test_experience_level_uses_occupational_title_patterns(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        _job(db, public_id="mid-market", title="Mid-Market Account Executive", location="Austin, TX")
+        _job(db, public_id="lead-gen", title="Lead Generation Intern", location="Austin, TX")
+        _job(db, public_id="staffing", title="Staffing Coordinator", location="Austin, TX")
+        _job(db, public_id="senior-swe", title="Senior Software Engineer", location="Austin, TX")
+        _job(db, public_id="staff-swe", title="Staff Software Engineer", location="Austin, TX")
+        _job(db, public_id="lead-swe", title="Lead Software Engineer", location="Austin, TX")
+        _job(db, public_id="principal", title="Principal Engineer", location="Austin, TX")
+
+    assert "mid-market" not in set(_ids(client.get("/api/jobs/query", params={"experience_level": "mid"})))
+    assert "lead-gen" not in set(_ids(client.get("/api/jobs/query", params={"experience_level": "lead"})))
+    assert "staffing" not in set(_ids(client.get("/api/jobs/query", params={"experience_level": "staff"})))
+    assert "senior-swe" in set(_ids(client.get("/api/jobs/query", params={"experience_level": "senior"})))
+    assert "staff-swe" in set(_ids(client.get("/api/jobs/query", params={"experience_level": "staff"})))
+    assert "lead-swe" in set(_ids(client.get("/api/jobs/query", params={"experience_level": "lead"})))
+    assert "principal" in set(_ids(client.get("/api/jobs/query", params={"experience_level": "principal"})))
+
+
+def test_malformed_and_future_posted_dates_do_not_500_or_rank_newest(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        _job(
+            db,
+            public_id="unix-seconds",
+            title="Software Engineer",
+            date_posted=str(int((now - timedelta(days=1)).timestamp())),
+        )
+        _job(
+            db,
+            public_id="unix-millis",
+            title="Software Engineer II",
+            date_posted=str(int((now - timedelta(days=1)).timestamp() * 1000)),
+        )
+        _job(
+            db,
+            public_id="microseconds",
+            title="Software Engineer III",
+            date_posted="1717000000000000",
+        )
+        _job(
+            db,
+            public_id="overflow",
+            title="Software Engineer IV",
+            date_posted="9999999999999999",
+        )
+        _job(
+            db,
+            public_id="year-2286",
+            title="Software Engineer V",
+            date_posted="9999999999999",
+        )
+        _job(
+            db,
+            public_id="nan-like",
+            title="Software Engineer VI",
+            date_posted="NaN",
+        )
+        _job(
+            db,
+            public_id="inf-like",
+            title="Software Engineer VII",
+            date_posted="Infinity",
+        )
+        _job(
+            db,
+            public_id="recent-iso",
+            title="Software Engineer VIII",
+            date_posted=(now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+
+    catalog = client.get("/api/jobs")
+    query = client.get("/api/jobs/query")
+    newest = client.get("/api/jobs/query", params={"sort": "newest"})
+    assert catalog.status_code == 200
+    assert query.status_code == 200
+    assert newest.status_code == 200
+    newest_ids = _ids(newest)
+    by_id = {job["id"]: job for job in catalog.json()}
+    assert by_id["unix-seconds"]["date_posted"] is not None
+    assert by_id["unix-millis"]["date_posted"] is not None
+    assert by_id["microseconds"]["date_posted"] is None
+    assert by_id["overflow"]["date_posted"] is None
+    assert by_id["year-2286"]["date_posted"] is None
+    assert by_id["nan-like"]["date_posted"] is None
+    assert newest_ids[0] == "recent-iso"
+    assert newest_ids[0] not in {"year-2286", "overflow", "microseconds"}

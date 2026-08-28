@@ -174,6 +174,8 @@ describe("authenticated query cache isolation", () => {
         experience: [],
         education: [],
         certifications: [],
+        strengths: [],
+        evidence_links: [],
       },
       preferences: null,
     });
@@ -218,6 +220,8 @@ describe("authenticated query cache isolation", () => {
         experience: [],
         education: [],
         certifications: [],
+        strengths: [],
+        evidence_links: [],
       },
       preferences: null,
     });
