@@ -108,6 +108,18 @@ def _stop_process(process: subprocess.Popen[Any]) -> None:
         process.wait(timeout=5)
 
 
+def _best_effort_unlink(path: Path) -> None:
+    """SQLite can stay locked on Windows until the backend process fully exits."""
+    for delay in (0.0, 0.2, 0.5, 1.0):
+        if delay:
+            time.sleep(delay)
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            continue
+
+
 def _ensure_frontend_dependencies() -> None:
     vite = ROOT / "frontend" / "node_modules" / "vite"
     if not vite.exists():
@@ -707,7 +719,7 @@ def run_browser_workflow() -> dict[str, int]:
             backend_log_handle.close()
             frontend_log_handle.close()
             engine.dispose()
-            database_path.unlink(missing_ok=True)
+            _best_effort_unlink(database_path)
 
 
 def main() -> int:
