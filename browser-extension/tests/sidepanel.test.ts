@@ -151,7 +151,7 @@ describe("following the active tab", () => {
     fireTabChanged(JOB_URL); // same URL — an unchanged-URL revisit
     await flush();
 
-    expect(panelHtml()).toContain("91% MATCH");
+    expect(panelHtml()).toContain("Potential Match");
     expect(panelHtml()).not.toContain("Not scored yet");
   });
 

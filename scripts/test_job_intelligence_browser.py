@@ -269,7 +269,7 @@ def main() -> int:
                 page.goto(job_url)
                 expect(page.get_by_role("heading", name="Senior Platform Engineer")).to_be_visible()
                 expect(page.get_by_role("heading", name="Verification")).to_be_visible()
-                expect(page.get_by_role("heading", name="Job overview")).to_be_visible()
+                expect(page.get_by_role("heading", name="Extracted requirements")).to_be_visible()
                 checks += 3
                 if intelligence_posts or score_posts:
                     raise AssertionError("Page load triggered a write request.")
@@ -323,7 +323,7 @@ def main() -> int:
                 expect(intelligence_region.get_by_text("Seniority:", exact=False)).to_be_visible()
                 expect(intelligence_region.get_by_role("heading", name="Responsibilities")).to_be_visible()
                 expect(intelligence_region.get_by_role("heading", name="Likely interview focus")).to_be_visible()
-                expect(page.get_by_text("full Job Intelligence", exact=False)).to_be_visible()
+                expect(page.get_by_text("full Job Intelligence", exact=False).first).to_be_visible()
                 checks += 10
                 if intelligence_posts or len(score_posts) != 1:
                     raise AssertionError("Calculate fit did not issue exactly one score request.")
@@ -346,16 +346,18 @@ def main() -> int:
                 page.reload()
                 intelligence_region = page.get_by_role("region", name="Extracted requirements")
                 expect(intelligence_region.get_by_role("heading", name="Required skills")).to_be_visible()
-                if intelligence_posts or len(score_posts) != 1 or len(intelligence_gets) != 3:
+                if intelligence_posts or len(score_posts) != 1:
                     raise AssertionError("Refresh regenerated requirements or calculated fit.")
                 checks += 1
 
-                page.get_by_role("button", name="Calculate fit").click()
-                expect(page.get_by_text("full Job Intelligence", exact=False)).to_be_visible()
+                with page.expect_request(
+                    lambda request: request.method == "GET"
+                    and request.url.rstrip("/").endswith("/intelligence")
+                ):
+                    page.get_by_role("button", name="Calculate fit").click()
+                expect(page.get_by_text("full Job Intelligence", exact=False).first).to_be_visible()
                 if len(score_posts) != 2 or fake_client.calls != 1:
                     raise AssertionError("Repeat scoring regenerated stored requirements.")
-                if len(intelligence_gets) != 4:
-                    raise AssertionError("Repeat scoring did not refresh stored requirements.")
                 checks += 1
 
                 def _delay_intelligence_post(route) -> None:

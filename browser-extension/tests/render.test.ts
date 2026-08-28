@@ -90,14 +90,14 @@ describe("badges", () => {
   it("shows an unscored pill only when there is genuinely no score", () => {
     expect(matchBadge(null)).toContain("Not scored");
     expect(matchBadge(undefined)).toContain("Not scored");
-    // A real zero is a score, not an absence — the falsy-zero trap.
-    expect(matchBadge(0)).toContain("0% MATCH");
+    expect(matchBadge(0)).toContain("Potential Match");
   });
 
-  it("rounds the score and appends the recommendation", () => {
-    expect(matchBadge(87.4, "apply")).toContain("87% MATCH");
-    expect(matchBadge(87.4, "apply")).toContain("apply");
-    expect(matchBadge(87.4)).not.toContain("·");
+  it("hides preliminary percentages and shows verified scores", () => {
+    expect(matchBadge(87.4, "apply")).toContain("Potential Match");
+    expect(matchBadge(87.4, "apply", "verified")).toContain("87% MATCH");
+    expect(matchBadge(87.4, "apply", "verified")).toContain("apply");
+    expect(matchBadge(87.4, undefined, "verified")).not.toContain("·");
   });
 
   it("gives every materials state a distinct label", () => {

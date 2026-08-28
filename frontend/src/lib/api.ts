@@ -12,6 +12,7 @@ import type {
   InterviewPrep,
   Job,
   JobIntelligence,
+  JobRequirementProfile,
   JobVerificationResponse,
   MatchScore,
   ParseResumeResponse,
@@ -132,6 +133,14 @@ export const api = {
 
   extractJobIntelligence: (jobId: string) =>
     request<JobIntelligence>(`/api/jobs/${jobId}/intelligence`, {
+      method: "POST",
+    }),
+
+  getRequirementProfile: (jobId: string, init?: RequestInit) =>
+    request<JobRequirementProfile>(`/api/jobs/${jobId}/requirements`, init),
+
+  extractRequirementProfile: (jobId: string) =>
+    request<JobRequirementProfile>(`/api/jobs/${jobId}/requirements`, {
       method: "POST",
     }),
 

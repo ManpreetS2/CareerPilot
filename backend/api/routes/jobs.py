@@ -23,6 +23,7 @@ from backend.services.analysis_service import (
     list_stored_match_scores,
     score_jobs_batch,
 )
+from backend.services.verified_fit_service import verify_top_ranked_jobs
 from backend.services.job_scout_service import (
     JobScoutError,
     consume_scout_run_stats,
@@ -149,6 +150,8 @@ def trigger_scout(
     stats = consume_scout_run_stats()
     score_started = time.perf_counter()
     auto_scored, auto_skipped = _auto_score_scouted_jobs(db, jobs, user.id)
+    stored_scores = list_stored_match_scores(db, user.id)
+    verify_top_ranked_jobs(db, user.id, [job.id for job in jobs if job.id], stored_scores)
     _log_job_scout(
         "score",
         duration_ms=int((time.perf_counter() - score_started) * 1000),

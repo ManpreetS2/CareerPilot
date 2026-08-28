@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
 from backend.db.models import User
+from backend.schemas.job_requirements import JobRequirementProfile
 from backend.schemas.schemas import JobIntelligence, MatchScore
 from backend.services.analysis_service import (
     CandidateRequiredError,
@@ -18,6 +19,7 @@ from backend.services.analysis_service import (
     ScoringError,
     StoredScoreNotFoundError,
     get_stored_match_score,
+    load_job,
 )
 from backend.services.job_intelligence_service import (
     EmptyGroundedIntelligenceError,
@@ -28,7 +30,9 @@ from backend.services.job_intelligence_service import (
     get_stored_job_intelligence,
 )
 from backend.services.llm_client import LLMConfigurationError, LLMProviderError
+from backend.services.job_requirement_extractor import extract_requirement_profile, load_requirement_profile
 from backend.services.scoring_orchestrator import score_job_with_intelligence
+from backend.services.verified_fit_service import score_job_verified
 
 logger = logging.getLogger(__name__)
 
@@ -129,8 +133,36 @@ def score_job_route(
 ) -> MatchScore:
     """Calculate and persist an explainable fit score using the request session."""
     try:
-        return score_job_with_intelligence(db, job_id, user.id)
+        score_job_with_intelligence(db, job_id, user.id)
+        job = load_job(db, job_id)
+        return score_job_verified(db, job, user.id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         if _is_intelligence_pipeline_error(exc):
             raise _http_for_intelligence_error(exc) from exc
         raise _http_for_scoring_error(exc) from exc
+
+
+@router.get("/jobs/{job_id}/requirements", response_model=JobRequirementProfile)
+def get_requirement_profile_route(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> JobRequirementProfile:
+    job = load_job(db, job_id)
+    profile = load_requirement_profile(db, job)
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job requirements have not been extracted.",
+        )
+    return profile
+
+
+@router.post("/jobs/{job_id}/requirements", response_model=JobRequirementProfile)
+def extract_requirement_profile_route(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> JobRequirementProfile:
+    job = load_job(db, job_id)
+    return extract_requirement_profile(db, job, force=True)

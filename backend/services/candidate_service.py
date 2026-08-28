@@ -72,5 +72,10 @@ def mock_preferences() -> TargetPreferences:
         salary_min=None,
         work_authorization="US Citizen",
         sponsorship_required=False,
+        currently_enrolled_in_program="yes",
+        expected_graduation="2027-05",
         constraints=["Summer 2027 internship preferred"],
+        academic_year="junior",
+        work_mode_preferences=["remote", "hybrid"],
+        relocation_willingness="maybe",
     )

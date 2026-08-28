@@ -68,9 +68,16 @@ export function scoutedTimeAgo(dateScraped?: string | null, now: number = Date.n
   return `Seen ${days} days ago`;
 }
 
-export function matchBadge(score?: number | null, recommendation?: string | null): string {
+export function matchBadge(
+  score?: number | null,
+  recommendation?: string | null,
+  scoreKind?: string | null,
+): string {
   if (score == null) {
     return `<span class="status-pill bg-ink-100 text-ink-600 dark:bg-ink-800 dark:text-ink-200">Not scored</span>`;
+  }
+  if (scoreKind !== "verified") {
+    return `<span class="status-pill bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200">Potential Match</span>`;
   }
   const tone =
     score >= 80

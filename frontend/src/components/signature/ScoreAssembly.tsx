@@ -89,18 +89,24 @@ export function ScoreAssembly({
         { label: "Preferences", value: match.preference_score, suffix: "" },
       ];
 
+  const verified = match.score_kind === "verified";
+
   return (
     <div className="space-y-4" data-testid="score-assembly">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <motion.p
-          className="score-fluid font-display font-semibold tabular leading-none"
-          initial={skip ? false : { opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: motionDuration.emphasis, ease: motionEase.expressive, delay: skip ? 0 : 0.42 }}
-        >
-          {Math.round(match.overall_score)}
-          <span className="ml-1 text-lg text-muted-foreground">%</span>
-        </motion.p>
+        {verified ? (
+          <motion.p
+            className="score-fluid font-display font-semibold tabular leading-none"
+            initial={skip ? false : { opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: motionDuration.emphasis, ease: motionEase.expressive, delay: skip ? 0 : 0.42 }}
+          >
+            {Math.round(match.overall_score)}
+            <span className="ml-1 text-lg text-muted-foreground">%</span>
+          </motion.p>
+        ) : (
+          <p className="font-display text-2xl font-semibold">Potential Match</p>
+        )}
         <motion.div
           initial={skip ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -112,14 +118,16 @@ export function ScoreAssembly({
             matchTier={match.match_tier}
             applyRecommendation={match.apply_recommendation}
             confidenceLevel={match.confidence_level}
+            scoreKind={match.score_kind}
           />
         </motion.div>
       </div>
-      {match.score_kind === "preliminary" ? (
+      {verified ? null : (
         <p className="text-sm text-muted-foreground">
-          Preliminary match from the posting text. Generating Job Intelligence can refine this.
+          CareerPilot has not finished reading the complete posting. This is a discovery rank, not
+          a Verified Fit.
         </p>
-      ) : null}
+      )}
       <div>
         {factors.map((factor, index) => (
           <Factor

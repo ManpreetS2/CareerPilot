@@ -5,14 +5,22 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { FitScorePanel } from "../components/FitScorePanel";
 import { InterviewPrepPanel } from "../components/InterviewPrepPanel";
 import { JobIntelligencePanel } from "../components/JobIntelligencePanel";
+import {
+  EligibilityPanel,
+  JobRequirementSection,
+  RequirementGroupView,
+  VerifiedFitPanel,
+  WorkLocationPanel,
+} from "../components/job-analysis-panels";
 import { LoadingState } from "../components/LoadingState";
+import { MatchBadge } from "../components/MatchBadge";
 import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { ScoreOrb } from "../components/signature/ScoreOrb";
 import { api, ApiClientError } from "../lib/api";
 import { topMatchPercentileLabel } from "../lib/match-percentile";
 import { saveSelectedJobId } from "../lib/session";
-import type { InterviewPrep, Job, JobIntelligence, MatchScore } from "../lib/types";
+import type { InterviewPrep, Job, JobIntelligence, JobRequirementProfile, MatchScore } from "../lib/types";
 
 export function JobDetailPage() {
   const { jobId = "" } = useParams();
@@ -41,12 +49,11 @@ export function JobDetailPage() {
     next: null,
   });
   const [percentile, setPercentile] = useState<string | null>(null);
+  const [profile, setProfile] = useState<JobRequirementProfile | null>(null);
   const storedScoreValues = useRef<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
-    scoringRequest.current += 1;
-    intelligenceRequest.current += 1;
     scoringInFlight.current = false;
     extractionInFlight.current = false;
     async function load() {
@@ -59,6 +66,7 @@ export function JobDetailPage() {
       setIntelligence(null);
       setIntelligenceError(null);
       setMatch(null);
+      setProfile(null);
       setScoreError(null);
       setInterviewPrep(null);
       setInterviewError(null);
@@ -111,11 +119,21 @@ export function JobDetailPage() {
           if (!cancelled) setNeighbors({ prev: null, next: null });
         }
         try {
+          const storedProfile = await api.getRequirementProfile(jobId);
+          if (!cancelled) setProfile(storedProfile);
+        } catch (err) {
+          if (!cancelled && !(err instanceof ApiClientError && err.status === 404)) {
+            setIntelligenceError(err);
+          }
+        }
+        try {
           const storedScore = await api.getStoredScore(jobId);
           if (!cancelled) {
             setMatch(storedScore);
             setPercentile(
-              topMatchPercentileLabel(storedScore.overall_score, Object.values(storedScoreValues.current)),
+              storedScore.score_kind === "verified"
+                ? topMatchPercentileLabel(storedScore.overall_score, Object.values(storedScoreValues.current))
+                : null,
             );
           }
         } catch (err) {
@@ -225,21 +243,30 @@ export function JobDetailPage() {
       const nextMatch = await api.scoreJob(jobId);
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         setMatch(nextMatch);
-        storedScoreValues.current = {
-          ...storedScoreValues.current,
-          [requestJobId]: nextMatch.overall_score,
-        };
-        setPercentile(
-          topMatchPercentileLabel(nextMatch.overall_score, Object.values(storedScoreValues.current)),
-        );
-        await refreshIntelligence();
+        if (nextMatch.score_kind === "verified") {
+          storedScoreValues.current = {
+            ...storedScoreValues.current,
+            [requestJobId]: nextMatch.overall_score,
+          };
+          setPercentile(
+            topMatchPercentileLabel(nextMatch.overall_score, Object.values(storedScoreValues.current)),
+          );
+        } else {
+          setPercentile(null);
+        }
+        try {
+          setProfile(await api.getRequirementProfile(jobId));
+        } catch {
+          /* stored profile is optional */
+        }
       }
+      await refreshIntelligence();
     } catch (err) {
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         setMatch(null);
         setScoreError(err);
-        await refreshIntelligence();
       }
+      await refreshIntelligence();
     } finally {
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         scoringInFlight.current = false;
@@ -288,20 +315,35 @@ export function JobDetailPage() {
       </div>
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-4">
-          <ScoreOrb score={match?.overall_score} />
+          <ScoreOrb score={match?.score_kind === "verified" ? match.overall_score : null} />
           <div className="min-w-0">
             <p className="wrap-anywhere text-sm text-ink-500">{job.company}</p>
             <h1 className="wrap-anywhere font-display text-4xl font-semibold">{job.title}</h1>
             <p className="mt-2 text-ink-600 dark:text-ink-300">
               {job.location || "Location n/a"}
               {job.salary ? ` · ${job.salary}` : ""}
+              {profile?.work_mode ? ` · ${profile.work_mode}` : ""}
+              {profile?.employment_type && profile.employment_type !== "unknown"
+                ? ` · ${profile.employment_type.replaceAll("_", " ")}`
+                : ""}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <StatusBadge status={job.status} />
               <SourceBadge source={job.source} />
+              {job.content_status ? (
+                <span className="text-xs text-ink-500">Posting: {job.content_status}</span>
+              ) : null}
               {scoutedTimeAgo(job.date_scraped) ? (
                 <span className="text-xs text-ink-500">{scoutedTimeAgo(job.date_scraped)}</span>
               ) : null}
+              <MatchBadge
+                score={match?.overall_score}
+                recommendation={match?.recommendation}
+                matchTier={match?.match_tier}
+                applyRecommendation={match?.apply_recommendation}
+                confidenceLevel={match?.confidence_level}
+                scoreKind={match?.score_kind}
+              />
               {percentile ? <span className="text-xs font-medium text-primary">{percentile}</span> : null}
             </div>
           </div>
@@ -318,13 +360,35 @@ export function JobDetailPage() {
               if (job.id) saveSelectedJobId(job.id);
             }}
           >
-            Prepare Application
+            {match?.score_kind === "verified" ? "Prepare Application" : "View Full Analysis"}
           </Link>
         </div>
       </div>
 
+      <VerifiedFitPanel match={match?.job_id === jobId ? match : null} />
+
+      {profile ? (
+        <section className="card space-y-4 p-6">
+          <h2 className="font-display text-2xl font-semibold">What they&apos;re looking for</h2>
+          <JobRequirementSection
+            title="Must have"
+            items={profile.requirements.filter((item) => item.importance !== "preferred")}
+          />
+          <JobRequirementSection
+            title="Preferred"
+            items={profile.requirements.filter((item) => item.importance === "preferred")}
+          />
+          {profile.requirement_groups.map((group) => (
+            <RequirementGroupView key={group.id} group={group} />
+          ))}
+        </section>
+      ) : null}
+
+      <WorkLocationPanel profile={profile} />
+      <EligibilityPanel match={match?.job_id === jobId ? match : null} />
+
       <section className="card p-6">
-        <h2 className="font-display text-2xl font-semibold">Job overview</h2>
+        <h2 className="font-display text-2xl font-semibold">Full original employer posting</h2>
         <p className="mt-3 wrap-anywhere whitespace-pre-wrap text-sm leading-relaxed text-ink-700 dark:text-ink-200">
           {job.description}
         </p>

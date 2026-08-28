@@ -6,6 +6,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { JobDiscoveryProgress } from "../components/JobDiscoveryProgress";
 import { MatchBadge } from "../components/MatchBadge";
 import { LoadingState } from "../components/LoadingState";
+import { NaturalSearchBar } from "../components/NaturalSearchBar";
 import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { ScoreAssembly } from "../components/signature/ScoreAssembly";
@@ -45,6 +46,7 @@ export function JobsPage() {
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [query, setQuery] = useState("");
+  const [naturalQuery, setNaturalQuery] = useState("");
   const [minMatch, setMinMatch] = useState("0");
   const [location, setLocation] = useState("all");
   const [status, setStatus] = useState("all");
@@ -53,6 +55,7 @@ export function JobsPage() {
     "all" | "apply" | "consider" | "skip" | "unscored"
   >("all");
   const [roleType, setRoleType] = useState<RoleTypeFilter>("both");
+  const [jobsPane, setJobsPane] = useState<"discover" | "matches" | "saved">("discover");
   const [manualUrl, setManualUrl] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(() => getSelectedJobId());
   const [scoutSummary, setScoutSummary] = useState<{
@@ -197,21 +200,44 @@ export function JobsPage() {
     return sortJobs(list, scores, sort);
   }, [jobs, scores, query, minMatch, location, status, sort, recommendation, roleType]);
 
+  const paneJobs = useMemo(() => {
+    if (jobsPane === "saved") return [];
+    if (jobsPane === "matches") {
+      return filtered.filter((job) => job.id && scores[job.id]);
+    }
+    return filtered;
+  }, [filtered, jobsPane, scores]);
+
+  const verifiedMatches = useMemo(
+    () => paneJobs.filter((job) => job.id && scores[job.id]?.score_kind === "verified"),
+    [paneJobs, scores],
+  );
+  const potentialMatches = useMemo(
+    () => paneJobs.filter((job) => !(job.id && scores[job.id]?.score_kind === "verified")),
+    [paneJobs, scores],
+  );
+  const listedJobs = useMemo(
+    () => (jobsPane === "matches" ? [...verifiedMatches, ...potentialMatches] : paneJobs),
+    [jobsPane, verifiedMatches, potentialMatches, paneJobs],
+  );
+
   useEffect(() => {
-    if (filtered.length === 0) return;
-    const stillVisible = selectedId && filtered.some((job) => job.id === selectedId);
+    if (listedJobs.length === 0) return;
+    const stillVisible = selectedId && listedJobs.some((job) => job.id === selectedId);
     if (!stillVisible) {
-      const firstId = filtered[0]?.id ?? null;
+      const firstId = listedJobs[0]?.id ?? null;
       setSelectedId(firstId);
       if (firstId) saveSelectedJobId(firstId);
     }
-  }, [filtered, selectedId]);
+  }, [listedJobs, selectedId]);
 
-  const selected = filtered.find((job) => job.id === selectedId) ?? null;
+  const selected = listedJobs.find((job) => job.id === selectedId) ?? null;
   const selectedMatch = selected?.id ? scores[selected.id] : null;
   const storedScoreValues = Object.values(scores).map((score) => score.overall_score);
   const percentile =
-    selectedMatch != null ? topMatchPercentileLabel(selectedMatch.overall_score, storedScoreValues) : null;
+    selectedMatch != null && selectedMatch.score_kind === "verified"
+      ? topMatchPercentileLabel(selectedMatch.overall_score, storedScoreValues)
+      : null;
 
   function selectJob(jobId: string) {
     setSelectedId(jobId);
@@ -222,7 +248,7 @@ export function JobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Jobs"
-        description="Discover and triage roles from Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, and manually added URLs. Find Jobs stores a fit score when a listing is scoreable. Selecting a job never scores or extracts on its own."
+        description="Discover roles, then open a posting for Verified Fit. Find Jobs keeps a fast discovery rank. Authoritative Fit percentages appear only after CareerPilot reads the complete posting."
         actions={
           <div className="flex flex-wrap gap-2">
             <button
@@ -251,6 +277,26 @@ export function JobsPage() {
       <ErrorBanner error={error} heading={jobDiscoveryErrorHeading(error)} />
 
       {scouting ? <JobDiscoveryProgress active /> : null}
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Jobs workspace">
+        {(["discover", "matches", "saved"] as const).map((pane) => (
+          <button
+            key={pane}
+            type="button"
+            role="tab"
+            aria-selected={jobsPane === pane}
+            className={cn("btn-secondary capitalize", jobsPane === pane && "btn-primary")}
+            onClick={() => setJobsPane(pane)}
+          >
+            {pane}
+          </button>
+        ))}
+      </div>
+      {jobsPane === "saved" ? (
+        <p className="text-sm text-muted-foreground">
+          Saving jobs is not available yet. This tab is a workspace placeholder, not a fake bookmark
+          list.
+        </p>
+      ) : null}
       {!scouting && scoutSummary ? (
         <Glass
           variant="atmosphere"
@@ -275,6 +321,9 @@ export function JobsPage() {
       ) : null}
 
       <Glass variant="atmosphere" className="grid min-w-0 grid-cols-1 gap-3 rounded-[var(--radius-lg)] p-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="sm:col-span-2 xl:col-span-4">
+          <NaturalSearchBar value={naturalQuery} onChange={setNaturalQuery} />
+        </div>
         <label className="relative block min-w-0">
           <span className="sr-only">Search jobs</span>
           <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -365,7 +414,7 @@ export function JobsPage() {
 
       {loading ? (
         <LoadingState label="Loading jobs…" />
-      ) : filtered.length === 0 && !scouting ? (
+      ) : paneJobs.length === 0 && !scouting ? (
         <EmptyState
           title="No jobs to show"
           description="Try Find Jobs, clear filters, or wait until Job Scout persists live listings."
@@ -380,10 +429,15 @@ export function JobsPage() {
             </button>
           }
         />
-      ) : filtered.length === 0 && scouting ? null : (
+      ) : paneJobs.length === 0 && scouting ? null : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
           <ul className="space-y-2" aria-label="Job results">
-            {filtered.map((job) => {
+            {jobsPane === "matches" ? (
+              <li className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Verified Matches ({verifiedMatches.length}) · Potential Matches ({potentialMatches.length})
+              </li>
+            ) : null}
+            {listedJobs.map((job) => {
               const match = job.id ? scores[job.id] : null;
               const active = job.id === selectedId;
               return (
@@ -411,13 +465,20 @@ export function JobsPage() {
                           recommendation={match?.recommendation}
                           matchTier={match?.match_tier}
                           confidenceLevel={match?.confidence_level}
+                          scoreKind={match?.score_kind}
                           compact
                         />
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <StatusBadge status={job.status} />
                         <SourceBadge source={job.source} />
+                        {job.location ? (
+                          <span className="text-xs text-muted-foreground">{job.location}</span>
+                        ) : null}
                       </div>
+                      {match?.eligibility_status === "likely_ineligible" ? (
+                        <p className="mt-2 text-xs text-danger-600 dark:text-rose-200">Likely ineligible</p>
+                      ) : null}
                     </button>
                     {job.id ? (
                       <Link
@@ -438,7 +499,7 @@ export function JobsPage() {
             {selected ? (
               <Glass variant="working" refract className="sticky top-6 min-w-0 space-y-4 rounded-[var(--radius-lg)] p-6">
                 <div className="flex min-w-0 items-start gap-4">
-                  <ScoreOrb score={selectedMatch?.overall_score} />
+                  <ScoreOrb score={selectedMatch?.score_kind === "verified" ? selectedMatch.overall_score : null} />
                   <div className="min-w-0">
                     <p className="wrap-anywhere text-sm text-muted-foreground">{selected.company}</p>
                     <h2 className="wrap-anywhere font-display text-2xl font-semibold">{selected.title}</h2>
@@ -458,6 +519,7 @@ export function JobsPage() {
                         matchTier={selectedMatch?.match_tier}
                         applyRecommendation={selectedMatch?.apply_recommendation}
                         confidenceLevel={selectedMatch?.confidence_level}
+                        scoreKind={selectedMatch?.score_kind}
                       />
                     </div>
                     {percentile ? <p className="mt-2 text-xs font-medium text-primary">{percentile}</p> : null}
@@ -470,7 +532,7 @@ export function JobsPage() {
                 {selected.id ? (
                   <div className="flex flex-wrap gap-2">
                     <Link to={`/jobs/${selected.id}`} className="btn-secondary">
-                      Open analysis
+                      View Full Analysis
                     </Link>
                     <Link to={`/jobs/${selected.id}/prepare`} className="btn-primary">
                       Prepare Application

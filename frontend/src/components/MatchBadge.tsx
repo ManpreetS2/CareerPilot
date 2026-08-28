@@ -24,6 +24,7 @@ export function MatchBadge({
   matchTier,
   applyRecommendation,
   confidenceLevel,
+  scoreKind,
   compact = false,
 }: {
   score?: number | null;
@@ -31,12 +32,24 @@ export function MatchBadge({
   matchTier?: string | null;
   applyRecommendation?: string | null;
   confidenceLevel?: string | null;
+  scoreKind?: string | null;
   compact?: boolean;
 }) {
   if (score == null) {
     return (
       <span className="status-pill bg-ink-100 text-ink-600 dark:bg-ink-800 dark:text-ink-200">
         Not scored
+      </span>
+    );
+  }
+
+  const apply = applyRecommendation ? APPLY_LABEL[applyRecommendation] : recommendation;
+  const verified = scoreKind === "verified";
+  if (!verified) {
+    return (
+      <span className="status-pill bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200">
+        Potential Match
+        {!compact && apply ? ` · ${apply}` : ""}
       </span>
     );
   }
@@ -49,12 +62,11 @@ export function MatchBadge({
         : "bg-rose-100 text-danger-600 dark:bg-rose-950/40 dark:text-rose-200";
 
   const tier = matchTier ? TIER_LABEL[matchTier] : null;
-  const apply = applyRecommendation ? APPLY_LABEL[applyRecommendation] : recommendation;
   const confidence = confidenceLevel ? CONFIDENCE_LABEL[confidenceLevel] : null;
 
   return (
     <span className={`status-pill ${tone}`}>
-      {Math.round(score)}%{tier ? ` ${tier}` : " MATCH"}
+      {Math.round(score)}%{tier ? ` ${tier}` : " Verified Fit"}
       {!compact && apply ? ` · ${apply}` : ""}
       {!compact && confidence ? ` · ${confidence} confidence` : ""}
     </span>

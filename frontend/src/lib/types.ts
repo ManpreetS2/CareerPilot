@@ -59,6 +59,9 @@ export type TargetPreferences = {
   currently_enrolled_in_program?: string | null;
   expected_graduation?: string | null;
   degree_pursuing?: string | null;
+  academic_year?: string | null;
+  work_mode_preferences?: string[];
+  relocation_willingness?: string | null;
   gender?: string | null;
   race_ethnicity?: string | null;
   veteran_status?: string | null;
@@ -84,6 +87,9 @@ export type Job = {
   date_posted?: string | null;
   date_scraped?: string | null;
   ats?: string | null;
+  source_job_id?: string | null;
+  content_status?: "full" | "partial" | "unknown" | null;
+  content_hash?: string | null;
   status: JobStatus;
   verification_notes?: string | null;
   verified_at?: string | null;
@@ -129,7 +135,7 @@ export type MatchScore = {
   apply_recommendation?: "strong_apply" | "apply" | "consider" | "probably_skip" | null;
   ranking_score?: number | null;
   scoring_version?: number;
-  score_kind?: "full" | "preliminary" | null;
+  score_kind?: "full" | "preliminary" | "verified" | null;
   match_reasons?: string[];
   gap_reasons?: string[];
   watchouts?: string[];
@@ -309,4 +315,60 @@ export type DashboardSummary = {
 export type HealthResponse = {
   status: string;
   database: string;
+};
+
+export type SearchIntent = {
+  rawQuery?: string;
+  roles: string[];
+  locations: string[];
+  employmentTypes: string[];
+  experienceLevels: string[];
+  workModes: string[];
+  industries: string[];
+  skills: string[];
+  salaryMin?: number | null;
+  startSeason?: string | null;
+  parserReady: boolean;
+};
+
+export type Requirement = {
+  id: string;
+  category: string;
+  text: string;
+  importance: "hard_required" | "required" | "preferred";
+  evidence_text: string;
+  structured_condition?: Record<string, unknown> | null;
+};
+
+export type RequirementGroup = {
+  id: string;
+  operator: "any_of" | "all_of";
+  requirement_ids: string[];
+  text: string;
+  evidence_text: string;
+  importance: "hard_required" | "required" | "preferred";
+};
+
+export type JobRequirementProfile = {
+  job_id?: string | null;
+  role_title?: string | null;
+  role_family?: string | null;
+  experience_level?: string | null;
+  employment_type?: string | null;
+  required_skills: string[];
+  preferred_skills: string[];
+  primary_responsibilities: string[];
+  requirements: Requirement[];
+  requirement_groups: RequirementGroup[];
+  locations: { label: string; evidence_text?: string | null }[];
+  work_mode?: string | null;
+  remote_scope?: string | null;
+  timezone_requirements?: string | null;
+  hybrid_onsite_frequency?: number | null;
+  travel_requirements: Requirement[];
+  relocation_requirements: Requirement[];
+  paid_status?: string | null;
+  extraction_confidence?: number | null;
+  content_status?: "full" | "partial" | "unknown" | null;
+  source_fingerprint: string;
 };

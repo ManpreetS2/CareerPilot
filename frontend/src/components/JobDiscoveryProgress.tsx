@@ -5,15 +5,16 @@ import { Glass } from "./ui/glass";
 import { cn } from "../lib/cn";
 
 export const JOB_DISCOVERY_STAGES = [
-  "Understanding your target roles",
+  "Understanding your search",
   "Searching job sources",
-  "Reviewing new opportunities",
-  "Matching jobs to your profile",
-  "Ranking your strongest matches",
+  "Reviewing opportunities",
+  "Reading top job requirements",
+  "Checking eligibility",
+  "Ranking your matches",
   "Almost ready",
 ] as const;
 
-export const JOB_DISCOVERY_STAGE_THRESHOLDS_MS = [0, 500, 1400, 3200, 5500, 8000] as const;
+export const JOB_DISCOVERY_STAGE_THRESHOLDS_MS = [0, 500, 1400, 2800, 4500, 6500, 8500] as const;
 
 function visualStageIndex(elapsedMs: number): number {
   let index = 0;

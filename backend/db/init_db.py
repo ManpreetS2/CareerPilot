@@ -21,6 +21,7 @@ REQUIRED_TABLES = (
     "target_preferences",
     "jobs",
     "job_intelligence",
+    "job_requirement_profiles",
     "match_scores",
     "application_packages",
     "resume_versions",

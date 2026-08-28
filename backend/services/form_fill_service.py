@@ -819,6 +819,15 @@ def get_extension_panel_data(db: Session, url: str, user_id: int) -> ExtensionPa
         apply_ready, apply_blocked_reason = False, str(exc.detail)
         materials_unverified = False
 
+    review_required = False
+    if score is not None and score.eligibility_status in {"likely_ineligible", "eligibility_uncertain"}:
+        review_required = True
+        apply_ready = False
+        apply_blocked_reason = (
+            "Eligibility is unresolved or the posting's stated requirements are not met. "
+            "Review before autofill."
+        )
+
     return ExtensionPanelData(
         tracked=True,
         job=record_to_job(job),
@@ -828,6 +837,7 @@ def get_extension_panel_data(db: Session, url: str, user_id: int) -> ExtensionPa
         apply_ready=apply_ready,
         apply_blocked_reason=apply_blocked_reason,
         materials_unverified=materials_unverified,
+        review_required=review_required,
     )
 
 
@@ -852,6 +862,17 @@ def run_assisted_apply(db: Session, job_id: str, user_id: int) -> FormFillResult
     fields = _build_candidate_fields(candidate, package, _load_target_preference(db, candidate))
     filled: list[FilledField] = []
     flagged: list[FlaggedField] = list(fields.flagged)
+    try:
+        stored_score = get_stored_match_score(db, job_id, user_id)
+        if stored_score.eligibility_status in {"likely_ineligible", "eligibility_uncertain"}:
+            flagged.append(
+                FlaggedField(
+                    field="eligibility",
+                    reason="Eligibility is unresolved or likely ineligible. Review before sending anything.",
+                )
+            )
+    except (StoredScoreNotFoundError, JobNotFoundError):
+        pass
     error_message: str | None = None
 
     try:

@@ -15,6 +15,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.services.analysis_service import StoredScoreNotFoundError, get_stored_match_score
 from backend.db.models import ApplicationPackageRecord, Candidate, JobRecord
 from backend.schemas.schemas import ApplicationPackage, ApprovalRequest, ApprovalResponse
 from backend.services.application_materials_agent import (
@@ -130,6 +131,22 @@ def get_or_generate_application_package(
     override_grounding: bool = False,
 ) -> ApplicationPackage:
     job = _get_job_record(db, job_id)
+    try:
+        stored_score = get_stored_match_score(db, job_id, user_id)
+    except StoredScoreNotFoundError:
+        stored_score = None
+    if (
+        stored_score is not None
+        and stored_score.eligibility_status == "likely_ineligible"
+        and not override_grounding
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This job is likely ineligible based on stated requirements. "
+                "Review the conflict before generating materials, or explicitly override."
+            ),
+        )
     try:
         generate_grounded_application_materials(
             db, job_id, user_id, generator=generator, override_grounding=override_grounding

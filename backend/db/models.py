@@ -95,6 +95,9 @@ class TargetPreference(Base):
     currently_enrolled_in_program: Mapped[str | None] = mapped_column(String(16), nullable=True)
     expected_graduation: Mapped[str | None] = mapped_column(String(64), nullable=True)
     degree_pursuing: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    academic_year: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    work_mode_preferences: Mapped[list] = mapped_column(JSON, default=list)
+    relocation_willingness: Mapped[str | None] = mapped_column(String(16), nullable=True)
     gender: Mapped[str | None] = mapped_column(String(64), nullable=True)
     race_ethnicity: Mapped[str | None] = mapped_column(String(64), nullable=True)
     veteran_status: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -121,11 +124,17 @@ class JobRecord(Base):
     date_posted: Mapped[str | None] = mapped_column(String(32), nullable=True)
     date_scraped: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ats: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_job_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    content_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(64), default="discovered")
     verification_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     intelligence: Mapped["JobIntelligenceRecord | None"] = relationship(back_populates="job")
+    requirement_profile: Mapped["JobRequirementProfileRecord | None"] = relationship(
+        back_populates="job"
+    )
     match_scores: Mapped[list["MatchScoreRecord"]] = relationship(back_populates="job")
     applications: Mapped[list["ApplicationPackageRecord"]] = relationship(back_populates="job")
     resume_versions: Mapped[list["ResumeVersionRecord"]] = relationship(back_populates="job")
@@ -149,6 +158,26 @@ class JobIntelligenceRecord(Base):
     likely_interview_focus: Mapped[list] = mapped_column(JSON, default=list)
 
     job: Mapped[JobRecord] = relationship(back_populates="intelligence")
+
+
+class JobRequirementProfileRecord(Base):
+    """Grounded employer requirement profile for one job posting snapshot."""
+
+    __tablename__ = "job_requirement_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), unique=True)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    extraction_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    extraction_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    content_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    profile_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    extracted_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    job: Mapped[JobRecord] = relationship(back_populates="requirement_profile")
 
 
 class MatchScoreRecord(Base):
