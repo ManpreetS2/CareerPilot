@@ -1,63 +1,52 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowUpRight, Link2, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link2, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { JobCard } from "../components/JobCard";
 import { JobDiscoveryProgress } from "../components/JobDiscoveryProgress";
-import { MatchBadge } from "../components/MatchBadge";
+import { JobPreviewPanel } from "../components/JobPreviewPanel";
+import { JobsFilterPanel } from "../components/JobsFilterPanel";
 import { LoadingState } from "../components/LoadingState";
-import { NaturalSearchBar } from "../components/NaturalSearchBar";
-import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
-import { StatusBadge } from "../components/StatusBadge";
-import { ScoreAssembly } from "../components/signature/ScoreAssembly";
-import { ScoreOrb } from "../components/signature/ScoreOrb";
+import { NaturalSearchBar, type FilterChip } from "../components/NaturalSearchBar";
 import { Glass } from "../components/ui/glass";
 import { PageHeader } from "../components/ui/page-header";
 import { api } from "../lib/api";
 import { cn } from "../lib/cn";
-import {
-  matchesRoleTypeFilter,
-  type RoleTypeFilter,
-} from "../lib/job-role-type";
-import { topMatchPercentileLabel } from "../lib/match-percentile";
 import { jobDiscoveryErrorHeading } from "../lib/job-discovery-error";
-import { getSelectedJobId, saveSelectedJobId } from "../lib/session";
-import type { Job, MatchScore, ScoutJobsResponse } from "../lib/types";
+import {
+  getJobsNavIds,
+  keepJobsQueryData,
+  readJobsWorkspace,
+  saveJobsNavIds,
+  saveJobsWorkspaceHref,
+  toJobQueryParams,
+  writeJobsWorkspace,
+  type JobsWorkspaceState,
+} from "../lib/jobs-workspace";
+import { chipLabel, parseSearchIntent, scoutTermsFromIntent } from "../lib/search-intent";
+import { saveSelectedJobId } from "../lib/session";
+import type { JobListItem, JobListPage, ScoutJobsResponse } from "../lib/types";
 
-function sortJobs(list: Job[], scores: Record<string, MatchScore>, sort: "match" | "title") {
-  return [...list].sort((a, b) => {
-    if (sort === "title") return a.title.localeCompare(b.title);
-    const rank = (job: Job) => {
-      const score = job.id ? scores[job.id] : undefined;
-      if (!score) return -1;
-      if ((score.scoring_version ?? 1) < 2 && score.ranking_score == null) return -0.5;
-      return score.ranking_score ?? score.overall_score ?? -1;
-    };
-    return rank(b) - rank(a);
-  });
+const TABS = [
+  { id: "discover", label: "Discover" },
+  { id: "matches", label: "Matches" },
+  { id: "saved", label: "Saved" },
+] as const;
+
+function pageFromQuery(data: JobListPage | undefined, previous?: JobListPage): JobListPage | undefined {
+  return data ?? previous;
 }
 
 export function JobsPage() {
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [scores, setScores] = useState<Record<string, MatchScore>>({});
-  const [loading, setLoading] = useState(true);
-  const [scouting, setScouting] = useState(false);
-  const [ingesting, setIngesting] = useState(false);
-  const [verifying, setVerifying] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const [query, setQuery] = useState("");
-  const [naturalQuery, setNaturalQuery] = useState("");
-  const [minMatch, setMinMatch] = useState("0");
-  const [location, setLocation] = useState("all");
-  const [status, setStatus] = useState("all");
-  const [sort, setSort] = useState<"match" | "title">("match");
-  const [recommendation, setRecommendation] = useState<
-    "all" | "apply" | "consider" | "skip" | "unscored"
-  >("all");
-  const [roleType, setRoleType] = useState<RoleTypeFilter>("both");
-  const [jobsPane, setJobsPane] = useState<"discover" | "matches" | "saved">("discover");
+  const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const state = readJobsWorkspace(params);
+  const [draftSearch, setDraftSearch] = useState(state.search);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [manualUrl, setManualUrl] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(() => getSelectedJobId());
+  const [isDesktop, setIsDesktop] = useState(true);
   const [scoutSummary, setScoutSummary] = useState<{
     jobsFound: number;
     matchedCount: number;
@@ -65,196 +54,298 @@ export function JobsPage() {
     sourcesUnavailable: number;
     partial: boolean;
   } | null>(null);
-  const scoutingRef = useRef(false);
-
-  async function loadStoredScores() {
-    const stored = await api.getStoredScores();
-    const nextScores: Record<string, MatchScore> = {};
-    for (const score of stored) {
-      if (score.job_id) nextScores[score.job_id] = score;
-    }
-    setScores(nextScores);
-  }
-
-  async function loadJobs(fromScout = false) {
-    if (fromScout) {
-      if (scoutingRef.current) return;
-      scoutingRef.current = true;
-    }
-    setError(null);
-    if (fromScout) {
-      setScouting(true);
-      setScoutSummary(null);
-    } else {
-      setLoading(true);
-    }
-    try {
-      if (fromScout) {
-        const result: ScoutJobsResponse = await api.scoutJobs();
-        setJobs(result.jobs);
-        const jobsFound = result.jobs_found ?? result.jobs.length;
-        const matchedCount = result.matched_count ?? 0;
-        const sourcesSearched = result.sources_searched ?? 0;
-        const sourcesUnavailable = result.sources_unavailable ?? 0;
-        setScoutSummary({
-          jobsFound,
-          matchedCount,
-          sourcesSearched,
-          sourcesUnavailable,
-          partial: sourcesUnavailable > 0 && jobsFound > 0,
-        });
-      } else {
-        setJobs(await api.getJobs());
-      }
-      await loadStoredScores();
-    } catch (err) {
-      setError(err);
-    } finally {
-      setLoading(false);
-      setScouting(false);
-      if (fromScout) scoutingRef.current = false;
-    }
-  }
 
   useEffect(() => {
-    void loadJobs();
+    setDraftSearch(state.search);
+  }, [state.search]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setIsDesktop(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
   }, []);
 
-  async function handleIngestUrl() {
-    const url = manualUrl.trim();
-    if (!url) {
-      setError(new Error("Paste a job URL first."));
-      return;
-    }
-    setError(null);
-    setIngesting(true);
-    try {
-      const job = await api.ingestJobUrl(url);
-      setJobs((prev) => [job, ...prev.filter((existing) => existing.id !== job.id)]);
-      setManualUrl("");
-      if (job.id) {
-        setSelectedId(job.id);
-        saveSelectedJobId(job.id);
-      }
-    } catch (err) {
-      setError(err);
-    } finally {
-      setIngesting(false);
-    }
+  function patch(next: Partial<JobsWorkspaceState>) {
+    setParams((current) => writeJobsWorkspace(current, next), { replace: true });
   }
 
-  async function handleVerify() {
-    setError(null);
-    setVerifying(true);
-    try {
-      const result = await api.verifyJobs("discovered");
-      setJobs((prev) => {
-        const byId = new Map(result.jobs.map((job) => [job.id, job]));
-        return prev.map((job) => (job.id && byId.has(job.id) ? byId.get(job.id)! : job));
-      });
-    } catch (err) {
-      setError(err);
-    } finally {
-      setVerifying(false);
-    }
-  }
-
-  const locations = useMemo(() => {
-    const values = new Set(
-      jobs.map((job) => job.location).filter((value): value is string => Boolean(value)),
-    );
-    return Array.from(values);
-  }, [jobs]);
-
-  const filtered = useMemo(() => {
-    const min = Number(minMatch) || 0;
-    let list = [...jobs];
-    if (query.trim()) {
-      const q = query.toLowerCase();
-      list = list.filter(
-        (job) =>
-          job.title.toLowerCase().includes(q) ||
-          job.company.toLowerCase().includes(q) ||
-          (job.location || "").toLowerCase().includes(q),
-      );
-    }
-    if (location !== "all") {
-      list = list.filter((job) => job.location === location);
-    }
-    if (status !== "all") {
-      list = list.filter((job) => job.status === status);
-    }
-    list = list.filter((job) => matchesRoleTypeFilter(job.title, roleType));
-    list = list.filter((job) => {
-      const score = job.id ? scores[job.id] : undefined;
-      if (recommendation === "unscored") return score == null;
-      if (recommendation === "apply" || recommendation === "consider" || recommendation === "skip") {
-        return score?.recommendation === recommendation;
-      }
-      return true;
-    });
-    list = list.filter((job) => {
-      const score = job.id ? scores[job.id]?.overall_score : undefined;
-      return score == null ? min === 0 : score >= min;
-    });
-    return sortJobs(list, scores, sort);
-  }, [jobs, scores, query, minMatch, location, status, sort, recommendation, roleType]);
-
-  const paneJobs = useMemo(() => {
-    if (jobsPane === "saved") return [];
-    if (jobsPane === "matches") {
-      return filtered.filter((job) => job.id && scores[job.id]);
-    }
-    return filtered;
-  }, [filtered, jobsPane, scores]);
-
-  const verifiedMatches = useMemo(
-    () => paneJobs.filter((job) => job.id && scores[job.id]?.score_kind === "verified"),
-    [paneJobs, scores],
-  );
-  const potentialMatches = useMemo(
-    () => paneJobs.filter((job) => !(job.id && scores[job.id]?.score_kind === "verified")),
-    [paneJobs, scores],
-  );
-  const listedJobs = useMemo(
-    () => (jobsPane === "matches" ? [...verifiedMatches, ...potentialMatches] : paneJobs),
-    [jobsPane, verifiedMatches, potentialMatches, paneJobs],
-  );
+  const queryParams = toJobQueryParams(state);
+  const jobsQuery = useQuery({
+    queryKey: ["jobs-workspace", queryParams],
+    queryFn: ({ signal }) => api.queryJobs(queryParams, { signal }),
+    placeholderData: (previousData, previousQuery) =>
+      keepJobsQueryData(previousData, previousQuery, queryParams),
+  });
 
   useEffect(() => {
-    if (listedJobs.length === 0) return;
-    const stillVisible = selectedId && listedJobs.some((job) => job.id === selectedId);
-    if (!stillVisible) {
-      const firstId = listedJobs[0]?.id ?? null;
-      setSelectedId(firstId);
-      if (firstId) saveSelectedJobId(firstId);
+    if (jobsQuery.data?.ids) saveJobsNavIds(jobsQuery.data.ids);
+  }, [jobsQuery.data?.ids]);
+
+  useEffect(() => {
+    saveJobsWorkspaceHref(params.toString());
+  }, [params]);
+
+  const items = jobsQuery.data?.items ?? [];
+  const selectedItem =
+    items.find((item) => item.job.id === state.selected) ?? (isDesktop ? items[0] : undefined);
+  const selectedId = selectedItem?.job.id ?? null;
+
+  useEffect(() => {
+    if (!isDesktop || !jobsQuery.data) return;
+    const ids = jobsQuery.data.ids;
+    if (
+      state.selected &&
+      ids.includes(state.selected) &&
+      !items.some((item) => item.job.id === state.selected)
+    ) {
+      const index = ids.indexOf(state.selected);
+      const nextPage = Math.floor(index / jobsQuery.data.page_size) + 1;
+      if (nextPage !== jobsQuery.data.page) {
+        patch({ page: nextPage });
+      }
+      return;
     }
-  }, [listedJobs, selectedId]);
+    if (selectedId && selectedId !== state.selected) {
+      patch({ selected: selectedId });
+      saveSelectedJobId(selectedId);
+    }
+  }, [isDesktop, selectedId, state.selected, jobsQuery.data, items]);
 
-  const selected = listedJobs.find((job) => job.id === selectedId) ?? null;
-  const selectedMatch = selected?.id ? scores[selected.id] : null;
-  const storedScoreValues = Object.values(scores).map((score) => score.overall_score);
-  const percentile =
-    selectedMatch != null && selectedMatch.score_kind === "verified"
-      ? topMatchPercentileLabel(selectedMatch.overall_score, storedScoreValues)
-      : null;
+  const scoutMutation = useMutation({
+    mutationFn: (payload?: { what?: string; where?: string }) => api.scoutJobs(payload),
+    onSuccess: (result: ScoutJobsResponse) => {
+      const jobsFound = result.jobs_found ?? result.jobs.length;
+      setScoutSummary({
+        jobsFound,
+        matchedCount: result.matched_count ?? 0,
+        sourcesSearched: result.sources_searched ?? 0,
+        sourcesUnavailable: result.sources_unavailable ?? 0,
+        partial: (result.sources_unavailable ?? 0) > 0 && jobsFound > 0,
+      });
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["jobs-workspace"] });
+    },
+  });
 
-  function selectJob(jobId: string) {
-    setSelectedId(jobId);
-    saveSelectedJobId(jobId);
+  const ingestMutation = useMutation({
+    mutationFn: (url: string) => api.ingestJobUrl(url),
+    onSuccess: (job) => {
+      setManualUrl("");
+      if (job.id) {
+        patch({ selected: job.id, tab: "discover" });
+        saveSelectedJobId(job.id);
+      }
+      void queryClient.invalidateQueries({ queryKey: ["jobs-workspace"] });
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async ({ jobId, saved }: { jobId: string; saved: boolean }) => {
+      if (saved) await api.unsaveJob(jobId);
+      else await api.saveJob(jobId);
+    },
+    onMutate: async ({ jobId, saved }) => {
+      await queryClient.cancelQueries({ queryKey: ["jobs-workspace"] });
+      const snapshots = queryClient.getQueriesData<JobListPage>({ queryKey: ["jobs-workspace"] });
+      queryClient.setQueriesData<JobListPage>({ queryKey: ["jobs-workspace"] }, (current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          items: current.items.map((item) =>
+            item.job.id === jobId ? { ...item, saved: !saved, job: { ...item.job, saved: !saved } } : item,
+          ),
+        };
+      });
+      return { snapshots };
+    },
+    onError: (_err, _vars, context) => {
+      for (const [key, data] of context?.snapshots ?? []) {
+        queryClient.setQueryData(key, data);
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["jobs-workspace"] });
+    },
+  });
+
+  const chips: FilterChip[] = useMemo(() => {
+    const list: FilterChip[] = [];
+    if (state.opportunity === "internship" || state.opportunity === "role") {
+      list.push({
+        id: `opportunity:${state.opportunity}`,
+        label: state.opportunity === "internship" ? "Internships" : "Roles",
+        onRemove: () => patch({ opportunity: "both", page: 1 }),
+      });
+    }
+    if (state.q) {
+      list.push({
+        id: "q",
+        label: state.q,
+        onRemove: () => patch({ q: undefined, search: "", page: 1 }),
+      });
+    }
+    for (const value of state.employment_type ?? []) {
+      if (state.opportunity === "internship" && value === "internship") continue;
+      list.push({
+        id: `employment:${value}`,
+        label: chipLabel(value),
+        onRemove: () =>
+          patch({ employment_type: (state.employment_type ?? []).filter((item) => item !== value), page: 1 }),
+      });
+    }
+    for (const value of state.work_mode ?? []) {
+      list.push({
+        id: `work:${value}`,
+        label: chipLabel(value),
+        onRemove: () => patch({ work_mode: (state.work_mode ?? []).filter((item) => item !== value), page: 1 }),
+      });
+    }
+    for (const value of state.location ?? []) {
+      list.push({
+        id: `location:${value}`,
+        label: value,
+        onRemove: () => patch({ location: (state.location ?? []).filter((item) => item !== value), page: 1 }),
+      });
+    }
+    for (const value of state.industry ?? []) {
+      list.push({
+        id: `industry:${value}`,
+        label: chipLabel(value),
+        onRemove: () => patch({ industry: (state.industry ?? []).filter((item) => item !== value), page: 1 }),
+      });
+    }
+    for (const value of state.experience_level ?? []) {
+      list.push({
+        id: `experience:${value}`,
+        label: chipLabel(value),
+        onRemove: () =>
+          patch({ experience_level: (state.experience_level ?? []).filter((item) => item !== value), page: 1 }),
+      });
+    }
+    if (state.verified_state && state.verified_state !== "all") {
+      list.push({
+        id: "verified",
+        label: chipLabel(state.verified_state),
+        onRemove: () => patch({ verified_state: "all", page: 1 }),
+      });
+    }
+    if (state.eligibility && state.eligibility !== "all") {
+      list.push({
+        id: "eligibility",
+        label: chipLabel(state.eligibility),
+        onRemove: () => patch({ eligibility: "all", page: 1 }),
+      });
+    }
+    if (state.confidence && state.confidence !== "all") {
+      list.push({
+        id: "confidence",
+        label: chipLabel(state.confidence),
+        onRemove: () => patch({ confidence: "all", page: 1 }),
+      });
+    }
+    if (state.date_posted) {
+      list.push({
+        id: "date",
+        label: chipLabel(state.date_posted),
+        onRemove: () => patch({ date_posted: undefined, page: 1 }),
+      });
+    }
+    return list;
+  }, [state]);
+
+  function submitSearch() {
+    const intent = parseSearchIntent(draftSearch);
+    const terms = scoutTermsFromIntent(intent);
+    patch({
+      search: draftSearch,
+      q: [intent.roles.join(" "), intent.query].filter(Boolean).join(" ").trim() || draftSearch.trim() || undefined,
+      opportunity:
+        intent.opportunity_types[0] === "internship"
+          ? "internship"
+          : intent.opportunity_types[0] === "role"
+            ? "role"
+            : "both",
+      employment_type: intent.employment_types,
+      work_mode: intent.work_modes,
+      location: intent.locations,
+      industry: intent.industries,
+      experience_level: intent.experience_levels,
+      page: 1,
+    });
+    scoutMutation.mutate(terms);
+  }
+
+  const error = jobsQuery.error ?? scoutMutation.error ?? ingestMutation.error ?? saveMutation.error;
+  const scouting = scoutMutation.isPending;
+  const loading = jobsQuery.isPending && !jobsQuery.data;
+  const pageData = pageFromQuery(jobsQuery.data);
+  const verifiedCount = pageData?.verified_count ?? 0;
+  const potentialCount = pageData?.potential_count ?? 0;
+  const showMobileDetail = !isDesktop && Boolean(state.selected && selectedItem);
+
+  function emptyCopy() {
+    if (state.tab === "saved") {
+      return {
+        title: "No saved jobs yet",
+        description: "Save roles you're interested in and they'll appear here.",
+      };
+    }
+    if (state.tab === "matches" && verifiedCount === 0 && potentialCount > 0) {
+      return {
+        title: "We haven't verified enough matches yet",
+        description: "Potential Matches are listed below as CareerPilot finishes reading full postings.",
+      };
+    }
+    if (state.tab === "matches") {
+      return {
+        title: "No matches yet",
+        description: "Find jobs, then CareerPilot will rank Verified and Potential Matches here.",
+      };
+    }
+    return {
+      title: "We couldn't find jobs matching all of those filters.",
+      description: "Clear one filter or search broader. Previously stored jobs are still in your catalog.",
+    };
+  }
+
+  const listed: JobListItem[] = items;
+  const navIds = pageData?.ids ?? getJobsNavIds();
+  const verifiedItems = listed.filter((item) => item.match?.score_kind === "verified");
+  const potentialItems = listed.filter((item) => item.match?.score_kind !== "verified");
+
+  function renderCard(item: JobListItem) {
+    const job = item.job;
+    const active = job.id === selectedId;
+    return (
+      <JobCard
+        job={job}
+        match={item.match}
+        selected={active}
+        onSelect={() => {
+          if (!job.id) return;
+          patch({ selected: job.id });
+          saveSelectedJobId(job.id);
+        }}
+        onToggleSave={() => job.id && saveMutation.mutate({ jobId: job.id, saved: Boolean(job.saved) })}
+        savePending={saveMutation.isPending}
+      />
+    );
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Jobs"
-        description="Discover roles, then open a posting for Verified Fit. Find Jobs keeps a fast discovery rank. Authoritative Fit percentages appear only after CareerPilot reads the complete posting."
+        description="Discover what's available, then open Matches for your personal ranking. Verified Fit appears only after CareerPilot reads the complete posting."
         actions={
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               className="btn-primary btn-stable"
-              onClick={() => void loadJobs(true)}
+              onClick={() => submitSearch()}
               disabled={scouting}
               aria-busy={scouting}
               data-testid="find-jobs-button"
@@ -262,47 +353,29 @@ export function JobsPage() {
               <RefreshCw className={`h-4 w-4 ${scouting ? "animate-pulse" : ""}`} aria-hidden />
               {scouting ? "Searching…" : "Find Jobs"}
             </button>
-            <button type="button" className="btn-secondary" onClick={() => void handleIngestUrl()} disabled={ingesting}>
-              <Link2 className={`h-4 w-4 ${ingesting ? "animate-pulse" : ""}`} aria-hidden />
-              {ingesting ? "Adding…" : "Add Job URL"}
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => void handleVerify()} disabled={verifying}>
-              <ShieldCheck className={`h-4 w-4 ${verifying ? "animate-pulse" : ""}`} aria-hidden />
-              {verifying ? "Verifying…" : "Verify Jobs"}
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                if (manualUrl.trim()) ingestMutation.mutate(manualUrl.trim());
+              }}
+              disabled={ingestMutation.isPending}
+            >
+              <Link2 className={`h-4 w-4 ${ingestMutation.isPending ? "animate-pulse" : ""}`} aria-hidden />
+              {ingestMutation.isPending ? "Adding…" : "Add Job URL"}
             </button>
           </div>
         }
       />
 
       <ErrorBanner error={error} heading={jobDiscoveryErrorHeading(error)} />
+      {saveMutation.isError ? (
+        <ErrorBanner error={saveMutation.error} heading="Couldn't update saved jobs" />
+      ) : null}
 
       {scouting ? <JobDiscoveryProgress active /> : null}
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Jobs workspace">
-        {(["discover", "matches", "saved"] as const).map((pane) => (
-          <button
-            key={pane}
-            type="button"
-            role="tab"
-            aria-selected={jobsPane === pane}
-            className={cn("btn-secondary capitalize", jobsPane === pane && "btn-primary")}
-            onClick={() => setJobsPane(pane)}
-          >
-            {pane}
-          </button>
-        ))}
-      </div>
-      {jobsPane === "saved" ? (
-        <p className="text-sm text-muted-foreground">
-          Saving jobs is not available yet. This tab is a workspace placeholder, not a fake bookmark
-          list.
-        </p>
-      ) : null}
       {!scouting && scoutSummary ? (
-        <Glass
-          variant="atmosphere"
-          className="rounded-[var(--radius-lg)] p-4"
-          data-testid="job-discovery-summary"
-        >
+        <Glass variant="atmosphere" className="rounded-[var(--radius-lg)] p-4" data-testid="job-discovery-summary">
           <p className="font-display text-base font-semibold tracking-tight">
             {scoutSummary.jobsFound} {scoutSummary.jobsFound === 1 ? "opportunity" : "opportunities"} found
           </p>
@@ -320,232 +393,190 @@ export function JobsPage() {
         </Glass>
       ) : null}
 
-      <Glass variant="atmosphere" className="grid min-w-0 grid-cols-1 gap-3 rounded-[var(--radius-lg)] p-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="sm:col-span-2 xl:col-span-4">
-          <NaturalSearchBar value={naturalQuery} onChange={setNaturalQuery} />
-        </div>
-        <label className="relative block min-w-0">
-          <span className="sr-only">Search jobs</span>
-          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-          <input
-            className="input pl-10"
-            placeholder="Search title, company, or location"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
+      {!showMobileDetail ? (
+        <Glass variant="atmosphere" className="space-y-4 rounded-[var(--radius-lg)] p-4">
+          <NaturalSearchBar
+            value={draftSearch}
+            onChange={setDraftSearch}
+            onSubmit={submitSearch}
+            chips={chips}
           />
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Manual job URL</span>
-          <input
-            className="input"
-            placeholder="https://company.com/jobs/…"
-            value={manualUrl}
-            onChange={(event) => setManualUrl(event.target.value)}
-          />
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Minimum match</span>
-          <select className="input" value={minMatch} onChange={(event) => setMinMatch(event.target.value)}>
-            <option value="0">Min match: any</option>
-            <option value="60">Min match: 60%</option>
-            <option value="75">Min match: 75%</option>
-            <option value="85">Min match: 85%</option>
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Location</span>
-          <select className="input" value={location} onChange={(event) => setLocation(event.target.value)}>
-            <option value="all">All locations</option>
-            {locations.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Status</span>
-          <select className="input" value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="all">All statuses</option>
-            <option value="discovered">Discovered</option>
-            <option value="verified">Verified</option>
-            <option value="flagged">Flagged</option>
-            <option value="stale">Stale</option>
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Recommendation</span>
-          <select
-            className="input"
-            data-testid="recommendation-filter"
-            value={recommendation}
-            onChange={(event) =>
-              setRecommendation(event.target.value as "all" | "apply" | "consider" | "skip" | "unscored")
-            }
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="input max-w-md"
+              placeholder="https://company.com/jobs/…"
+              value={manualUrl}
+              onChange={(event) => setManualUrl(event.target.value)}
+              aria-label="Manual job URL"
+            />
+            <button type="button" className="btn-secondary" onClick={() => setFiltersOpen(true)}>
+              <SlidersHorizontal className="h-4 w-4" aria-hidden />
+              Filters
+            </button>
+            <label className="min-w-0">
+              <span className="sr-only">Sort</span>
+              <select
+                className="input"
+                value={state.sort ?? "best_match"}
+                onChange={(event) => patch({ sort: event.target.value as JobsWorkspaceState["sort"], page: 1 })}
+                data-testid="jobs-sort"
+              >
+                <option value="best_match">Best Match</option>
+                <option value="newest">Newest</option>
+                <option value="qualification">Highest Qualification Fit</option>
+                <option value="preference">Highest Preference Fit</option>
+              </select>
+            </label>
+          </div>
+        </Glass>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Jobs workspace">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={state.tab === tab.id}
+            className={cn("btn-secondary", state.tab === tab.id && "btn-primary")}
+            onClick={() => patch({ tab: tab.id, page: 1, selected: isDesktop ? state.selected : null })}
           >
-            <option value="all">All recommendations</option>
-            <option value="apply">Apply</option>
-            <option value="consider">Consider</option>
-            <option value="skip">Skip</option>
-            <option value="unscored">Unscored</option>
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Role type</span>
-          <select
-            className="input"
-            data-testid="role-type-filter"
-            value={roleType}
-            onChange={(event) => setRoleType(event.target.value as RoleTypeFilter)}
-          >
-            <option value="both">Internships and full-time</option>
-            <option value="internships">Internships</option>
-            <option value="full_time">Full-time</option>
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Sort</span>
-          <select className="input" value={sort} onChange={(event) => setSort(event.target.value as "match" | "title")}>
-            <option value="match">Sort by match</option>
-            <option value="title">Sort by title</option>
-          </select>
-        </label>
-      </Glass>
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
       {loading ? (
         <LoadingState label="Loading jobs…" />
-      ) : paneJobs.length === 0 && !scouting ? (
+      ) : showMobileDetail && selectedItem ? (
+        <div className="space-y-3">
+          <button type="button" className="btn-ghost" onClick={() => patch({ selected: null })}>
+            Back to results
+          </button>
+          <JobPreviewPanel
+            job={selectedItem.job}
+            match={selectedItem.match}
+            onToggleSave={() =>
+              selectedItem.job.id &&
+              saveMutation.mutate({ jobId: selectedItem.job.id, saved: Boolean(selectedItem.job.saved) })
+            }
+            savePending={saveMutation.isPending}
+          />
+        </div>
+      ) : listed.length === 0 && !scouting ? (
         <EmptyState
-          title="No jobs to show"
-          description="Try Find Jobs, clear filters, or wait until Job Scout persists live listings."
+          title={emptyCopy().title}
+          description={emptyCopy().description}
           action={
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void loadJobs(true)}
-              disabled={scouting}
-            >
-              Find Jobs
-            </button>
+            state.tab === "saved" ? (
+              <button type="button" className="btn-secondary" onClick={() => patch({ tab: "discover" })}>
+                Browse Discover
+              </button>
+            ) : chips.length > 0 ? (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() =>
+                  patch({
+                    q: undefined,
+                    opportunity: "both",
+                    employment_type: [],
+                    work_mode: [],
+                    location: [],
+                    industry: [],
+                    verified_state: "all",
+                    eligibility: "all",
+                    page: 1,
+                  })
+                }
+              >
+                Clear filters
+              </button>
+            ) : (
+              <button type="button" className="btn-primary" onClick={() => submitSearch()} disabled={scouting}>
+                Search broader
+              </button>
+            )
           }
         />
-      ) : paneJobs.length === 0 && scouting ? null : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-          <ul className="space-y-2" aria-label="Job results">
-            {jobsPane === "matches" ? (
-              <li className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Verified Matches ({verifiedMatches.length}) · Potential Matches ({potentialMatches.length})
+      ) : listed.length === 0 && scouting ? null : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
+          <ul className="max-h-[70vh] space-y-2 overflow-y-auto pr-1" aria-label="Job results">
+            {state.tab === "matches" && verifiedCount === 0 && potentialCount > 0 ? (
+              <li className="rounded-[var(--radius-md)] border border-border/70 bg-surface/80 p-3 text-sm text-muted-foreground">
+                We haven&apos;t verified enough matches yet. Potential Matches are listed below.
               </li>
             ) : null}
-            {listedJobs.map((job) => {
-              const match = job.id ? scores[job.id] : null;
-              const active = job.id === selectedId;
-              return (
-                <li key={job.id || `${job.company}-${job.title}`}>
-                  <article
-                    className={cn(
-                      "card w-full p-3 text-left transition",
-                      active ? "border-primary/50 bg-primary/[0.06]" : "hover:border-accent-400/50",
-                    )}
-                  >
-                    <button
-                      type="button"
-                      className="w-full text-left"
-                      onClick={() => {
-                        if (job.id) selectJob(job.id);
-                      }}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="wrap-anywhere font-semibold">{job.title}</p>
-                          <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
-                        </div>
-                        <MatchBadge
-                          score={match?.overall_score}
-                          recommendation={match?.recommendation}
-                          matchTier={match?.match_tier}
-                          confidenceLevel={match?.confidence_level}
-                          scoreKind={match?.score_kind}
-                          compact
-                        />
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <StatusBadge status={job.status} />
-                        <SourceBadge source={job.source} />
-                        {job.location ? (
-                          <span className="text-xs text-muted-foreground">{job.location}</span>
-                        ) : null}
-                      </div>
-                      {match?.eligibility_status === "likely_ineligible" ? (
-                        <p className="mt-2 text-xs text-danger-600 dark:text-rose-200">Likely ineligible</p>
-                      ) : null}
-                    </button>
-                    {job.id ? (
-                      <Link
-                        to={`/jobs/${job.id}`}
-                        className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary"
-                        onClick={() => selectJob(job.id!)}
-                      >
-                        View Analysis
-                        <ArrowUpRight className="h-4 w-4" aria-hidden />
-                      </Link>
-                    ) : null}
-                  </article>
+            {state.tab === "matches" ? (
+              <>
+                <li className="px-1 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Verified Matches ({verifiedCount})
                 </li>
-              );
-            })}
+                {verifiedItems.map((item) => (
+                  <li key={item.job.id || `${item.job.company}-${item.job.title}`}>{renderCard(item)}</li>
+                ))}
+                <li className="px-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Potential Matches ({potentialCount})
+                </li>
+                {potentialItems.map((item) => (
+                  <li key={item.job.id || `${item.job.company}-${item.job.title}`}>{renderCard(item)}</li>
+                ))}
+              </>
+            ) : (
+              listed.map((item) => (
+                <li key={item.job.id || `${item.job.company}-${item.job.title}`}>{renderCard(item)}</li>
+              ))
+            )}
           </ul>
           <aside className="hidden lg:block">
-            {selected ? (
-              <Glass variant="working" refract className="sticky top-6 min-w-0 space-y-4 rounded-[var(--radius-lg)] p-6">
-                <div className="flex min-w-0 items-start gap-4">
-                  <ScoreOrb score={selectedMatch?.score_kind === "verified" ? selectedMatch.overall_score : null} />
-                  <div className="min-w-0">
-                    <p className="wrap-anywhere text-sm text-muted-foreground">{selected.company}</p>
-                    <h2 className="wrap-anywhere font-display text-2xl font-semibold">{selected.title}</h2>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {selected.location || "Location n/a"}
-                      {selected.salary ? ` · ${selected.salary}` : ""}
-                    </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <StatusBadge status={selected.status} />
-                      <SourceBadge source={selected.source} />
-                      {scoutedTimeAgo(selected.date_scraped) ? (
-                        <span className="text-xs text-muted-foreground">{scoutedTimeAgo(selected.date_scraped)}</span>
-                      ) : null}
-                      <MatchBadge
-                        score={selectedMatch?.overall_score}
-                        recommendation={selectedMatch?.recommendation}
-                        matchTier={selectedMatch?.match_tier}
-                        applyRecommendation={selectedMatch?.apply_recommendation}
-                        confidenceLevel={selectedMatch?.confidence_level}
-                        scoreKind={selectedMatch?.score_kind}
-                      />
-                    </div>
-                    {percentile ? <p className="mt-2 text-xs font-medium text-primary">{percentile}</p> : null}
-                  </div>
-                </div>
-                {selectedMatch ? <ScoreAssembly match={selectedMatch} assembling={false} /> : null}
-                <p className="line-clamp-8 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                  {selected.description}
-                </p>
-                {selected.id ? (
-                  <div className="flex flex-wrap gap-2">
-                    <Link to={`/jobs/${selected.id}`} className="btn-secondary">
-                      View Full Analysis
-                    </Link>
-                    <Link to={`/jobs/${selected.id}/prepare`} className="btn-primary">
-                      Prepare Application
-                    </Link>
-                  </div>
-                ) : null}
-              </Glass>
+            {selectedItem ? (
+              <JobPreviewPanel
+                job={selectedItem.job}
+                match={selectedItem.match}
+                onToggleSave={() =>
+                  selectedItem.job.id &&
+                  saveMutation.mutate({
+                    jobId: selectedItem.job.id,
+                    saved: Boolean(selectedItem.job.saved),
+                  })
+                }
+                savePending={saveMutation.isPending}
+              />
             ) : (
               <p className="text-sm text-muted-foreground">Select a job to preview it here.</p>
             )}
           </aside>
         </div>
       )}
+
+      {pageData && pageData.total > pageData.page_size ? (
+        <div className="flex items-center justify-between text-sm">
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={pageData.page <= 1}
+            onClick={() => patch({ page: Math.max(1, (state.page ?? 1) - 1) })}
+          >
+            Previous page
+          </button>
+          <p className="text-muted-foreground">
+            Page {pageData.page} · {pageData.total} jobs
+          </p>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={pageData.page * pageData.page_size >= pageData.total}
+            onClick={() => patch({ page: (state.page ?? 1) + 1 })}
+          >
+            Next page
+          </button>
+        </div>
+      ) : null}
+
+      <JobsFilterPanel open={filtersOpen} onOpenChange={setFiltersOpen} state={state} onChange={patch} />
+      <p className="sr-only" aria-live="polite">
+        {navIds.length} jobs in the current result set.
+      </p>
     </div>
   );
 }

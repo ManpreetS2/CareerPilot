@@ -12,7 +12,10 @@ import type {
   InterviewPrep,
   Job,
   JobIntelligence,
+  JobListPage,
+  JobQueryParams,
   JobRequirementProfile,
+  JobSearchIntent,
   JobVerificationResponse,
   MatchScore,
   ParseResumeResponse,
@@ -105,10 +108,53 @@ export const api = {
 
   getJobs: (init?: RequestInit) => request<Job[]>("/api/jobs", init),
 
-  scoutJobs: () =>
-    request<ScoutJobsResponse>("/api/scout-jobs", {
+  queryJobs: (params: JobQueryParams = {}, init?: RequestInit) => {
+    const search = new URLSearchParams();
+    if (params.q) search.set("q", params.q);
+    if (params.tab) search.set("tab", params.tab);
+    if (params.opportunity && params.opportunity !== "both") search.set("opportunity", params.opportunity);
+    for (const value of params.employment_type ?? []) search.append("employment_type", value);
+    for (const value of params.experience_level ?? []) search.append("experience_level", value);
+    for (const value of params.work_mode ?? []) search.append("work_mode", value);
+    for (const value of params.location ?? []) search.append("location", value);
+    for (const value of params.industry ?? []) search.append("industry", value);
+    if (params.verified_state && params.verified_state !== "all") search.set("verified_state", params.verified_state);
+    if (params.eligibility && params.eligibility !== "all") search.set("eligibility", params.eligibility);
+    if (params.confidence && params.confidence !== "all") search.set("confidence", params.confidence);
+    if (params.date_posted) search.set("date_posted", params.date_posted);
+    if (params.sort) search.set("sort", params.sort);
+    if (params.page) search.set("page", String(params.page));
+    if (params.page_size) search.set("page_size", String(params.page_size));
+    const suffix = search.toString();
+    return request<JobListPage>(`/api/jobs/query${suffix ? `?${suffix}` : ""}`, init);
+  },
+
+  parseSearchIntent: (query: string, init?: RequestInit) =>
+    request<JobSearchIntent>("/api/jobs/search-intent", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+      signal: init?.signal,
     }),
+
+  getSavedJobs: (init?: RequestInit) => request<Job[]>("/api/jobs/saved", init),
+
+  saveJob: (jobId: string) =>
+    request<Job>(`/api/jobs/${jobId}/save`, { method: "POST" }),
+
+  unsaveJob: (jobId: string) =>
+    request<void>(`/api/jobs/${jobId}/save`, { method: "DELETE" }),
+
+  scoutJobs: (params?: { what?: string; where?: string }, init?: RequestInit) => {
+    const search = new URLSearchParams();
+    if (params?.what) search.set("what", params.what);
+    if (params?.where) search.set("where", params.where);
+    const suffix = search.toString();
+    return request<ScoutJobsResponse>(`/api/scout-jobs${suffix ? `?${suffix}` : ""}`, {
+      method: "POST",
+      signal: init?.signal,
+    });
+  },
 
   ingestJobUrl: (url: string) =>
     request<Job>("/api/jobs/ingest-url", {

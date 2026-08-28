@@ -42,15 +42,17 @@ export function resolveNextAction(input: {
       cta: "Open jobs",
     };
   }
-  const strong = input.scores.filter((score) => score.overall_score >= 70 || score.recommendation === "apply");
-  if (strong.length > 0) {
-    const first = strong[0];
+  const verified = input.scores.filter((score) => score.score_kind === "verified");
+  if (verified.length > 0 || input.scores.length > 0) {
     return {
       id: "matches",
-      title: "Review strongest matches",
-      description: "You have roles with a strong stored fit. Prepare materials only when you choose to.",
-      to: first?.job_id ? `/jobs/${first.job_id}` : "/jobs",
-      cta: "Review matches",
+      title: verified.length > 0 ? "Review verified matches" : "Review your matches",
+      description:
+        verified.length > 0
+          ? "Open Matches to see Verified Fit first. Potential Matches stay clearly labeled until requirements are verified."
+          : "CareerPilot has preliminary rankings. Open Matches — percentages become authoritative only after verification.",
+      to: "/jobs?tab=matches",
+      cta: "Open Matches",
     };
   }
   if (input.resumeVersions.length > 0) {

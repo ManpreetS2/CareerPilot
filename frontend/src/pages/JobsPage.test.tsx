@@ -8,7 +8,7 @@ import { api, ApiClientError } from "../lib/api";
 import { ThemeProvider } from "../lib/theme";
 import { createTestQueryClient } from "../test/render";
 import { JOB_DISCOVERY_STAGES } from "../components/JobDiscoveryProgress";
-import type { Job, ScoutJobsResponse } from "../lib/types";
+import type { Job, JobListPage, ScoutJobsResponse } from "../lib/types";
 
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
@@ -17,10 +17,13 @@ vi.mock("../lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       getJobs: vi.fn(),
+      queryJobs: vi.fn(),
       scoutJobs: vi.fn(),
       getStoredScores: vi.fn(),
       ingestJobUrl: vi.fn(),
       verifyJobs: vi.fn(),
+      saveJob: vi.fn(),
+      unsaveJob: vi.fn(),
     },
   };
 });
@@ -45,11 +48,24 @@ const newJob: Job = {
   status: "discovered",
 };
 
-function renderJobs() {
+function pageOf(jobs: Job[], extra?: Partial<JobListPage>): JobListPage {
+  return {
+    items: jobs.map((job) => ({ job, match: null, saved: Boolean(job.saved) })),
+    total: jobs.length,
+    page: 1,
+    page_size: 40,
+    verified_count: 0,
+    potential_count: jobs.length,
+    ids: jobs.map((job) => job.id!).filter(Boolean),
+    ...extra,
+  };
+}
+
+function renderJobs(route = "/jobs") {
   return render(
     <QueryClientProvider client={createTestQueryClient()}>
       <ThemeProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[route]}>
           <JobsPage />
         </MemoryRouter>
       </ThemeProvider>
@@ -57,23 +73,13 @@ function renderJobs() {
   );
 }
 
-describe("JobsPage discovery progress", () => {
+describe("JobsPage workspace", () => {
   beforeEach(() => {
-    vi.mocked(api.getJobs).mockResolvedValue([existingJob]);
-    vi.mocked(api.getStoredScores).mockResolvedValue([
-      {
-        job_id: "jobicy-existing",
-        overall_score: 40,
-        scoring_version: 2,
-        ranking_score: 40,
-        recommendation: "consider",
-        matched_skills: [],
-        partial_matches: [],
-        missing_skills: [],
-        rationale: "stored",
-      },
-    ]);
+    vi.mocked(api.queryJobs).mockResolvedValue(pageOf([existingJob]));
+    vi.mocked(api.getStoredScores).mockResolvedValue([]);
     vi.mocked(api.scoutJobs).mockReset();
+    vi.mocked(api.saveJob).mockReset();
+    vi.mocked(api.unsaveJob).mockReset();
   });
 
   it("shows discovery progress while scoutJobs is unresolved and keeps existing jobs", async () => {
@@ -96,6 +102,7 @@ describe("JobsPage discovery progress", () => {
     expect(screen.getByTestId("find-jobs-button")).toHaveTextContent("Searching…");
     await userEvent.click(screen.getByTestId("find-jobs-button"));
     expect(api.scoutJobs).toHaveBeenCalledTimes(1);
+    vi.mocked(api.queryJobs).mockResolvedValue(pageOf([newJob, existingJob]));
     resolveScout({
       jobs: [newJob, existingJob],
       jobs_found: 2,
@@ -109,44 +116,11 @@ describe("JobsPage discovery progress", () => {
     expect(screen.getByText(/6 sources searched/)).toBeInTheDocument();
     expect(screen.queryByTestId("job-discovery-progress")).not.toBeInTheDocument();
     expect(await screen.findByText("Platform Engineer")).toBeInTheDocument();
-    await waitFor(() => expect(api.getStoredScores).toHaveBeenCalled());
   });
 
-  it("sorts by ranking_score even when overall_score would reverse the order", async () => {
-    vi.mocked(api.scoutJobs).mockResolvedValue({
-      jobs: [existingJob, newJob],
-      jobs_found: 2,
-      matched_count: 2,
-      sources_searched: 6,
-      sources_unavailable: 0,
-    });
-    vi.mocked(api.getStoredScores).mockResolvedValue([
-      {
-        job_id: "jobicy-existing",
-        overall_score: 91,
-        scoring_version: 2,
-        ranking_score: 52,
-        recommendation: "consider",
-        matched_skills: [],
-        partial_matches: [],
-        missing_skills: [],
-        rationale: "stored",
-      },
-      {
-        job_id: "himalayas-new",
-        overall_score: 74,
-        scoring_version: 2,
-        ranking_score: 71,
-        recommendation: "consider",
-        matched_skills: [],
-        partial_matches: [],
-        missing_skills: [],
-        rationale: "stored",
-      },
-    ]);
+  it("sorts using the backend Best Match order", async () => {
+    vi.mocked(api.queryJobs).mockResolvedValue(pageOf([newJob, existingJob]));
     renderJobs();
-    await screen.findByText("Backend Engineer");
-    await userEvent.click(screen.getByTestId("find-jobs-button"));
     const list = await screen.findByLabelText("Job results");
     await waitFor(() => {
       const titles = [...list.querySelectorAll("p.font-semibold")].map((node) => node.textContent);
@@ -163,5 +137,156 @@ describe("JobsPage discovery progress", () => {
     expect(screen.queryByTestId("job-discovery-progress")).not.toBeInTheDocument();
     expect(screen.getByTestId("find-jobs-button")).toBeEnabled();
     expect(screen.getAllByText("Backend Engineer").length).toBeGreaterThan(0);
+  });
+
+  it("parses natural language into chips and scouts with structured terms", async () => {
+    vi.mocked(api.scoutJobs).mockResolvedValue({
+      jobs: [existingJob],
+      jobs_found: 1,
+      matched_count: 1,
+      sources_searched: 3,
+      sources_unavailable: 0,
+    });
+    renderJobs();
+    await screen.findByText("Backend Engineer");
+    const input = screen.getByTestId("jobs-search-input");
+    await userEvent.clear(input);
+    await userEvent.type(
+      input,
+      "Software engineering internships in the Bay Area at fintech companies, hybrid or onsite",
+    );
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(api.scoutJobs).toHaveBeenCalled());
+    const payload = vi.mocked(api.scoutJobs).mock.calls[0]?.[0];
+    expect(payload?.what?.toLowerCase()).toContain("software");
+    expect(payload?.where).toMatch(/Bay Area/i);
+    expect(await screen.findByLabelText("Remove Internships")).toBeInTheDocument();
+    expect(screen.getByLabelText("Remove Hybrid")).toBeInTheDocument();
+    expect(screen.getByLabelText("Remove On-site")).toBeInTheDocument();
+    expect(screen.getByLabelText("Remove Fintech")).toBeInTheDocument();
+    await waitFor(() => {
+      const lastQuery = vi.mocked(api.queryJobs).mock.calls.at(-1)?.[0];
+      expect(lastQuery?.opportunity).toBe("internship");
+      expect(lastQuery?.work_mode).toEqual(expect.arrayContaining(["hybrid", "onsite"]));
+    });
+  });
+
+  it("switches Discover / Matches / Saved without a top-level Applications tab", async () => {
+    renderJobs();
+    await screen.findByText("Backend Engineer");
+    expect(screen.getByRole("tab", { name: "Discover" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Matches" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Saved" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /applications/i })).not.toBeInTheDocument();
+    vi.mocked(api.queryJobs).mockResolvedValue(pageOf([]));
+    await userEvent.click(screen.getByRole("tab", { name: "Saved" }));
+    expect(await screen.findByText(/Save roles you're interested in/i)).toBeInTheDocument();
+  });
+
+  it("saves and unsaves from the card control", async () => {
+    vi.mocked(api.saveJob).mockResolvedValue({ ...existingJob, saved: true });
+    vi.mocked(api.unsaveJob).mockResolvedValue(undefined as never);
+    renderJobs();
+    await screen.findByText("Backend Engineer");
+    await userEvent.click(screen.getByTestId("save-job-jobicy-existing"));
+    await waitFor(() => expect(api.saveJob).toHaveBeenCalledWith("jobicy-existing"));
+  });
+
+  it("does not keep Saved results visible while Matches is loading", async () => {
+    const savedJob: Job = { ...existingJob, id: "saved-only", title: "Saved Only Role", saved: true };
+    let resolveMatches: ((value: JobListPage) => void) | undefined;
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "saved") return Promise.resolve(pageOf([savedJob]));
+      if (params.tab === "matches") {
+        return new Promise<JobListPage>((resolve) => {
+          resolveMatches = resolve;
+        });
+      }
+      return Promise.resolve(pageOf([existingJob]));
+    });
+    renderJobs("/jobs?tab=saved");
+    expect(await screen.findByText("Saved Only Role")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Matches" }));
+    expect(await screen.findByText("Loading jobs…")).toBeInTheDocument();
+    expect(screen.queryByText("Saved Only Role")).not.toBeInTheDocument();
+    resolveMatches?.(pageOf([newJob]));
+    expect(await screen.findByText("Platform Engineer")).toBeInTheDocument();
+  });
+
+  it("does not let an older query overwrite a newer tab", async () => {
+    let resolveFirst: ((value: JobListPage) => void) | undefined;
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "matches") {
+        return Promise.resolve(pageOf([newJob]));
+      }
+      return new Promise<JobListPage>((resolve) => {
+        resolveFirst = resolve;
+      });
+    });
+    renderJobs();
+    await userEvent.click(screen.getByRole("tab", { name: "Matches" }));
+    expect(await screen.findByText("Platform Engineer")).toBeInTheDocument();
+    resolveFirst?.(pageOf([existingJob]));
+    await waitFor(() => {
+      expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
+  });
+
+  it("separates verified and potential matches", async () => {
+    vi.mocked(api.queryJobs).mockResolvedValue(
+      pageOf([newJob, existingJob], {
+        verified_count: 1,
+        potential_count: 1,
+        items: [
+          {
+            job: newJob,
+            match: {
+              job_id: newJob.id!,
+              overall_score: 86,
+              matched_skills: [],
+              partial_matches: [],
+              missing_skills: [],
+              recommendation: "apply",
+              rationale: "verified",
+              score_kind: "verified",
+            },
+            saved: false,
+          },
+          {
+            job: existingJob,
+            match: {
+              job_id: existingJob.id!,
+              overall_score: 90,
+              matched_skills: [],
+              partial_matches: [],
+              missing_skills: [],
+              recommendation: "consider",
+              rationale: "preliminary",
+              score_kind: "preliminary",
+            },
+            saved: false,
+          },
+        ],
+      }),
+    );
+    renderJobs("/jobs?tab=matches");
+    expect(await screen.findByText("Verified Matches (1)")).toBeInTheDocument();
+    expect(screen.getByText("Potential Matches (1)")).toBeInTheDocument();
+    expect(screen.getByText(/86% Verified Fit/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Potential Match/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("90%")).not.toBeInTheDocument();
+  });
+
+  it("opens the filter panel and applies a work-mode filter", async () => {
+    renderJobs();
+    await screen.findByText("Backend Engineer");
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
+    expect(await screen.findByText("Work setup")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Hybrid" }));
+    await waitFor(() => {
+      const lastQuery = vi.mocked(api.queryJobs).mock.calls.at(-1)?.[0];
+      expect(lastQuery?.work_mode).toEqual(expect.arrayContaining(["hybrid"]));
+    });
   });
 });
