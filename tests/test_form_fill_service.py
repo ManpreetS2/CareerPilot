@@ -822,6 +822,27 @@ def test_fill_greenhouse_never_touches_the_privacy_policy_checkbox(page) -> None
     assert any(f.field == "job_application[answers][7][boolean_value]" for f in flagged)
 
 
+def test_fill_greenhouse_never_auto_answers_eeo_questions(page) -> None:
+    """Gender/race/veteran/disability answers are protected-class questions:
+    a wrong or unconfirmed auto-fill carries real consequences, so these must
+    always be flagged for the candidate to answer themselves, never guessed
+    from a loose label-text match — regardless of whether a value is on
+    file."""
+    page.goto(_fixture_url("greenhouse_standard.html"))
+    fields = _fields(
+        name="Jordan Quill",
+        gender="Female",
+        race_ethnicity="No",
+        veteran_status="I am not a protected veteran",
+        disability_status="No, I do not have a disability and have not had one in the past",
+    )
+    filled, flagged = _fill_greenhouse(page, fields)
+
+    assert not any(f.field == "gender" for f in filled)
+    assert page.locator("#question_8").input_value() == ""
+    assert any(f.field == "gender" for f in flagged)
+
+
 def test_fill_lever_standard_fills_mappable_fields(page) -> None:
     page.goto(_fixture_url("lever_standard.html"))
     fields = _fields(
