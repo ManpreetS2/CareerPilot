@@ -98,6 +98,17 @@ describe("OnboardingPage", () => {
     expect(await screen.findByTestId("onboarding-step-7")).toBeInTheDocument();
   });
 
+  it("shows a human-readable role type on the review step, not the raw value", async () => {
+    const user = userEvent.setup();
+    renderOnboarding();
+    for (let step = 1; step < 7; step += 1) {
+      await user.click(screen.getByTestId("onboarding-continue"));
+    }
+    expect(await screen.findByTestId("onboarding-step-7")).toBeInTheDocument();
+    expect(screen.getByText("Both internships and full-time")).toBeInTheDocument();
+    expect(screen.queryByText("both")).not.toBeInTheDocument();
+  });
+
   it("lets Skip / End setup enter the app without blocking", async () => {
     const user = userEvent.setup();
     renderOnboarding();
