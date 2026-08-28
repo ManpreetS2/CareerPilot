@@ -269,7 +269,7 @@ def main() -> int:
                 page.goto(job_url)
                 expect(page.get_by_role("heading", name="Senior Platform Engineer")).to_be_visible()
                 expect(page.get_by_role("heading", name="Verification")).to_be_visible()
-                expect(page.get_by_role("heading", name="Job overview")).to_be_visible()
+                expect(page.get_by_role("heading", name="Extracted requirements")).to_be_visible()
                 checks += 3
                 if intelligence_posts or score_posts:
                     raise AssertionError("Page load triggered a write request.")
