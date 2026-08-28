@@ -6,12 +6,14 @@ Never compiles LLM/output into SQL. Catalog size is hundreds of rows, not millio
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import re
 
 from sqlalchemy.orm import Session
 
 from backend.db.models import JobRecord, JobRequirementProfileRecord
 from backend.schemas.schemas import JobListItem, JobListPage, MatchScore
 from backend.services.analysis_service import list_stored_match_scores
+from backend.services.job_posting_time import job_posting_datetime
 from backend.services.job_search_parser import JobSearchIntent, JobsTab, SortMode
 from backend.services.job_service import record_to_job
 from backend.services.opportunity_type import (
@@ -41,18 +43,7 @@ def _posted_cutoff(window: str | None) -> datetime | None:
 
 
 def _job_datetime(job: JobRecord) -> datetime | None:
-    if job.date_scraped is not None:
-        value = job.date_scraped
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
-    if job.date_posted:
-        try:
-            parsed = datetime.fromisoformat(job.date_posted[:10])
-            return parsed.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
-    return None
+    return job_posting_datetime(job.date_posted, job.date_scraped)
 
 
 def _text_blob(job: JobRecord) -> str:
@@ -71,17 +62,49 @@ _BAY_CITIES = (
     "bay area",
 )
 
+_TITLE_INTERN = re.compile(r"\bintern(?:s|ship)?\b", re.I)
+_TITLE_NEW_GRAD = re.compile(r"\bnew[\s-]?grad(?:uate)?s?\b", re.I)
+_TITLE_JUNIOR = re.compile(
+    r"\b(?:junior|jr\.?|entry[\s-]?level|(?:software\s+)?(?:engineer|developer)\s+(?:i|1))\b",
+    re.I,
+)
 
-def _location_matches(job: JobRecord, wanted: list[str]) -> bool:
-    loc = (job.location or "").lower()
-    blob = _text_blob(job)
+
+def _profile_dict(profile_json: object) -> dict:
+    return profile_json if isinstance(profile_json, dict) else {}
+
+
+def _canonical_location_text(job: JobRecord, profile_json: object) -> str:
+    parts = [job.location or ""]
+    profile = _profile_dict(profile_json)
+    remote_scope = profile.get("remote_scope")
+    if remote_scope:
+        parts.append(str(remote_scope))
+    for loc in profile.get("locations") or []:
+        if isinstance(loc, dict):
+            parts.append(str(loc.get("label") or ""))
+        elif isinstance(loc, str):
+            parts.append(loc)
+    return " ".join(parts).lower()
+
+
+def _canonical_role_text(job: JobRecord, profile_json: object) -> str:
+    parts = [job.title or ""]
+    profile = _profile_dict(profile_json)
+    parts.append(str(profile.get("role_title") or ""))
+    parts.append(str(profile.get("role_family") or ""))
+    return " ".join(parts).lower()
+
+
+def _location_matches(job: JobRecord, wanted: list[str], profile_json: object = None) -> bool:
+    loc = _canonical_location_text(job, profile_json)
     for label in wanted:
         key = label.lower()
-        if key in loc or key in blob:
+        if key in loc:
             return True
-        if "bay area" in key and any(city in loc or city in blob for city in _BAY_CITIES):
+        if "bay area" in key and any(city in loc for city in _BAY_CITIES):
             return True
-        if key in {"new york"} and any(token in loc or token in blob for token in ("new york", "nyc", "manhattan", "brooklyn")):
+        if key in {"new york"} and any(token in loc for token in ("new york", "nyc", "manhattan", "brooklyn")):
             return True
     return False
 
@@ -100,16 +123,30 @@ def _role_match_tokens(bits: list[str]) -> list[str]:
     return tokens
 
 
-def _experience_matches(job: JobRecord, employment_type: str | None, levels: list[str]) -> bool:
-    blob = _text_blob(job)
+def _experience_matches(
+    job: JobRecord,
+    employment_type: str | None,
+    levels: list[str],
+    profile_json: object = None,
+) -> bool:
+    title = (job.title or "").lower()
     emp = (employment_type or "").lower()
+    profile_level = str(_profile_dict(profile_json).get("experience_level") or "").lower()
     for level in levels:
         needle = level.replace("_", " ")
-        if level == "intern" and (emp in INTERNSHIP_EMPLOYMENT or "intern" in blob):
-            return True
-        if level == "new_grad" and (emp == "new_grad" or "new grad" in blob or "new-grad" in blob):
-            return True
-        if needle in blob or level in blob:
+        if level == "intern":
+            if emp in INTERNSHIP_EMPLOYMENT or profile_level == "intern" or _TITLE_INTERN.search(title):
+                return True
+            continue
+        if level == "new_grad":
+            if emp == "new_grad" or profile_level == "new_grad" or _TITLE_NEW_GRAD.search(title):
+                return True
+            continue
+        if level in {"entry", "junior"}:
+            if profile_level in {"entry", "junior"} or _TITLE_JUNIOR.search(title):
+                return True
+            continue
+        if profile_level == level or needle in title or level in title:
             return True
     return False
 
@@ -122,11 +159,10 @@ def _work_mode_for(job: JobRecord, profile_json: dict | None) -> str:
     return infer_work_mode(job.title, job.description)
 
 
-def _sort_key(item: JobListItem, sort: SortMode) -> tuple:
+def _sort_key(item: JobListItem, sort: SortMode, posted_at: datetime | None) -> tuple:
     match = item.match
-    job = item.job
     if sort == "newest":
-        stamp = job.date_scraped.timestamp() if job.date_scraped else 0.0
+        stamp = posted_at.timestamp() if posted_at is not None else 0.0
         return (stamp,)
     if sort == "qualification":
         value = match.qualification_score if match and match.qualification_score is not None else -1
@@ -162,7 +198,7 @@ def query_jobs(
     }
     wanted_opportunity = opportunity or (intent.opportunity_types[0] if len(intent.opportunity_types) == 1 else None)
     cutoff = _posted_cutoff(intent.date_posted)
-    items: list[JobListItem] = []
+    items: list[tuple[JobListItem, datetime | None]] = []
 
     for record in records:
         job = record_to_job(record)
@@ -182,7 +218,7 @@ def query_jobs(
             continue
         if intent.work_modes and mode not in intent.work_modes:
             continue
-        if intent.locations and not _location_matches(record, intent.locations):
+        if intent.locations and not _location_matches(record, intent.locations, profiles.get(record.id)):
             continue
         if intent.industries:
             blob = _text_blob(record)
@@ -191,10 +227,12 @@ def query_jobs(
         search_bits = [*(intent.roles or []), intent.query or ""]
         tokens = _role_match_tokens(search_bits)
         if tokens:
-            blob = _text_blob(record)
-            if not any(token in blob for token in tokens):
+            role_text = _canonical_role_text(record, profiles.get(record.id))
+            if not any(token in role_text for token in tokens):
                 continue
-        if intent.experience_levels and not _experience_matches(record, job.employment_type, intent.experience_levels):
+        if intent.experience_levels and not _experience_matches(
+            record, job.employment_type, intent.experience_levels, profiles.get(record.id)
+        ):
             continue
         if cutoff:
             when = _job_datetime(record)
@@ -211,21 +249,22 @@ def query_jobs(
             if match is None or match.confidence_level != intent.confidence_state:
                 continue
 
-        items.append(JobListItem(job=job, match=match, saved=job.saved))
+        items.append((JobListItem(job=job, match=match, saved=job.saved), _job_datetime(record)))
 
-    items.sort(key=lambda item: _sort_key(item, sort), reverse=True)
-    verified_count = sum(1 for item in items if item.match and item.match.score_kind == "verified")
-    potential_count = sum(1 for item in items if item.match is None or item.match.score_kind != "verified")
+    items.sort(key=lambda pair: _sort_key(pair[0], sort, pair[1]), reverse=True)
+    ranked = [pair[0] for pair in items]
+    verified_count = sum(1 for item in ranked if item.match and item.match.score_kind == "verified")
+    potential_count = sum(1 for item in ranked if item.match is None or item.match.score_kind != "verified")
     if tab == "matches":
-        verified = [item for item in items if item.match and item.match.score_kind == "verified"]
-        potential = [item for item in items if not item.match or item.match.score_kind != "verified"]
-        items = [*verified, *potential]
+        verified = [item for item in ranked if item.match and item.match.score_kind == "verified"]
+        potential = [item for item in ranked if not item.match or item.match.score_kind != "verified"]
+        ranked = [*verified, *potential]
         potential_count = len(potential)
         verified_count = len(verified)
 
-    total = len(items)
+    total = len(ranked)
     start = (page - 1) * size
-    page_items = items[start : start + size]
+    page_items = ranked[start : start + size]
     return JobListPage(
         items=page_items,
         total=total,
@@ -233,5 +272,5 @@ def query_jobs(
         page_size=size,
         verified_count=verified_count,
         potential_count=potential_count,
-        ids=[item.job.id for item in items if item.job.id],
+        ids=[item.job.id for item in ranked if item.job.id],
     )

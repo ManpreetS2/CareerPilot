@@ -28,13 +28,14 @@ _ONSITE = re.compile(r"\b(?:on-?site|in[\s-]?office)\b", re.I)
 
 
 def infer_employment_type(title: str | None, description: str | None = None) -> EmploymentType:
-    blob = f"{title or ''}\n{(description or '')[:2500]}"
-    if _INTERN.search(blob):
+    title_text = title or ""
+    if _INTERN.search(title_text):
         return "internship"
-    if _CO_OP.search(blob):
+    if _CO_OP.search(title_text):
         return "co_op"
-    if _NEW_GRAD.search(blob):
+    if _NEW_GRAD.search(title_text):
         return "new_grad"
+    blob = f"{title_text}\n{(description or '')[:2500]}"
     if _PART_TIME.search(blob):
         return "part_time"
     if _CONTRACT.search(blob):

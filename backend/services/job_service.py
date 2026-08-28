@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date
 
 from fastapi import HTTPException, status
 
@@ -13,6 +12,7 @@ from backend.db.database import SessionLocal
 from backend.db.models import Candidate, JobRecord
 from backend.schemas.schemas import Job, JobIntelligence
 from backend.services.analysis_service import _candidate_work_modes, _city_state
+from backend.services.job_posting_time import posted_date_for_display
 from backend.services.opportunity_type import (
     infer_employment_type,
     infer_opportunity_type,
@@ -49,7 +49,7 @@ def record_to_job(record: JobRecord) -> Job:
         url=record.url,
         description=record.description,
         source=record.source,
-        date_posted=date.fromisoformat(record.date_posted) if record.date_posted else None,
+        date_posted=posted_date_for_display(record.date_posted),
         date_scraped=record.date_scraped,
         ats=record.ats,
         source_job_id=getattr(record, "source_job_id", None),
