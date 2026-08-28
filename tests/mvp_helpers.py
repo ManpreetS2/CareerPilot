@@ -144,22 +144,31 @@ def insert_score(
     matched_skills: list[str] | None = None,
     missing_skills: list[str] | None = None,
 ) -> MatchScoreRecord:
-    record = MatchScoreRecord(
-        job_id=job.id,
-        candidate_id=candidate.id,
-        overall_score=overall_score,
-        skill_score=80.0,
-        experience_score=70.0,
-        education_score=100.0,
-        location_score=None,
-        preference_score=None,
-        matched_skills=list(matched_skills or ["Python", "SQL"]),
-        partial_matches=[],
-        missing_skills=list(missing_skills or ["Docker"]),
-        recommendation=recommendation,
-        rationale="Matched Python and SQL from stored evidence.",
+    payload = {
+        "overall_score": overall_score,
+        "skill_score": 80.0,
+        "experience_score": 70.0,
+        "education_score": 100.0,
+        "location_score": None,
+        "preference_score": None,
+        "matched_skills": list(matched_skills or ["Python", "SQL"]),
+        "partial_matches": [],
+        "missing_skills": list(missing_skills or ["Docker"]),
+        "recommendation": recommendation,
+        "rationale": "Matched Python and SQL from stored evidence.",
+    }
+    record = (
+        session.query(MatchScoreRecord)
+        .filter(MatchScoreRecord.job_id == job.id, MatchScoreRecord.candidate_id == candidate.id)
+        .order_by(MatchScoreRecord.id.desc())
+        .first()
     )
-    session.add(record)
+    if record is None:
+        record = MatchScoreRecord(job_id=job.id, candidate_id=candidate.id, **payload)
+        session.add(record)
+    else:
+        for key, value in payload.items():
+            setattr(record, key, value)
     session.commit()
     session.refresh(record)
     return record
