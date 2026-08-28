@@ -423,3 +423,78 @@ export type JobRequirementProfile = {
   content_status?: "full" | "partial" | "unknown" | null;
   source_fingerprint: string;
 };
+
+export type FactorStatus = "satisfied" | "partially_satisfied" | "not_satisfied" | "unknown" | "not_applicable";
+
+export type EvidenceRef = {
+  id: string;
+  source_type: string;
+  source_entity_id?: string | null;
+  field?: string | null;
+  exact_text: string;
+  locator?: string | null;
+};
+
+export type MatchFactor = {
+  id: string;
+  job_id: string;
+  category: string;
+  section: "required_skills" | "preferred_skills" | "qualifications" | "eligibility" | "work_location" | "preferences";
+  label: string;
+  importance?: string | null;
+  status: FactorStatus;
+  score_contribution?: number | null;
+  max_contribution?: number | null;
+  rule_id: string;
+  rule_version: string;
+  explanation: string;
+  job_evidence_refs: string[];
+  candidate_evidence_refs: string[];
+  requirement_id?: string | null;
+  group_id?: string | null;
+  hard_blocker?: boolean;
+  scoring_effect?: string | null;
+};
+
+export type RequirementEvaluation = {
+  requirement_id: string;
+  result: FactorStatus;
+  candidate_evidence_refs: string[];
+  job_evidence_refs: string[];
+  explanation: string;
+  rule_id: string;
+  group_id?: string | null;
+};
+
+export type GroupEvaluation = {
+  group_id: string;
+  operator: "any_of" | "all_of";
+  text: string;
+  status: FactorStatus;
+  importance?: string | null;
+  job_evidence_refs: string[];
+  branch_ids: string[];
+  explanation: string;
+  hard_blocker?: boolean;
+};
+
+export type MatchEvidence = {
+  job_id: string;
+  score?: MatchScore | null;
+  full_evidence: boolean;
+  notice?: string | null;
+  provenance: {
+    scoring_version: number;
+    evidence_version: number;
+    score_kind?: string | null;
+    candidate_fingerprint?: string | null;
+    preference_fingerprint?: string | null;
+    requirement_fingerprint?: string | null;
+    stale: boolean;
+    stale_reasons: string[];
+  };
+  factors: MatchFactor[];
+  evaluations: RequirementEvaluation[];
+  groups: GroupEvaluation[];
+  evidence: Record<string, EvidenceRef>;
+};

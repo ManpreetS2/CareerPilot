@@ -2,14 +2,11 @@
 
 CareerPilot's application package is one mutable row per job/user. This
 service snapshots approved tailored bullets into append-only resume versions
-so later export can target a stable opaque identifier.
+so export can target a stable opaque identifier.
 
-Future boundary (not implemented here):
-- A later Developer A PR will render one immutable resume version to PDF/DOCX
-  and return an authenticated download plus an opaque artifact identifier.
-- Developer B may later consume that artifact from the extension only after
-  the user explicitly selects and approves a version. The extension must never
-  auto-choose or auto-upload a resume version.
+PDF/DOCX bytes are rendered from the stored snapshot and returned only through
+ownership-checked download routes. The extension may download a user-selected
+version; it must never auto-choose or auto-upload a resume version.
 """
 
 from __future__ import annotations

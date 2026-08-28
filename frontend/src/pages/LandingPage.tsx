@@ -4,7 +4,6 @@ import { motion, useReducedMotion } from "motion/react";
 import { CheckCircle2 } from "lucide-react";
 import { IntelligenceField } from "../components/signature/IntelligenceField";
 import { MagneticLink } from "../components/signature/MagneticLink";
-import { PointerHalo } from "../components/signature/PointerHalo";
 import { ScoreOrb } from "../components/signature/ScoreOrb";
 import { WorkflowPath } from "../components/signature/WorkflowPath";
 import { Glass } from "../components/ui/glass";
@@ -127,7 +126,6 @@ export function LandingPage() {
 
   return (
     <div className="cp-atmosphere relative min-h-screen bg-background">
-      <PointerHalo />
       <IntelligenceField />
       <header className="safe-pad relative z-10 mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-5 sm:px-6">
         <span className="font-display text-lg font-semibold tracking-tight">{APP_NAME}</span>

@@ -171,6 +171,8 @@ class SkillMatchResult:
     missing: list[str]
     required_ratio: float | None
     preferred_ratio: float | None
+    required_labels: list[str] = field(default_factory=list)
+    preferred_labels: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -201,6 +203,10 @@ class ScoreBreakdown:
     covered_responsibilities: list[str] = field(default_factory=list)
     partial_responsibilities: list[str] = field(default_factory=list)
     uncovered_responsibilities: list[str] = field(default_factory=list)
+    skill_required_ratio: float | None = None
+    skill_preferred_ratio: float | None = None
+    required_skill_labels: list[str] = field(default_factory=list)
+    preferred_skill_labels: list[str] = field(default_factory=list)
 
 
 def _skill_key(value: str) -> str:
@@ -212,8 +218,32 @@ def canonicalize_skill(label: str) -> str | None:
     return _ALIAS_TO_CANONICAL.get(key)
 
 
+def skill_concepts_in_label(label: str) -> list[str]:
+    """Conservative known-skill tokens in a phrase. Java ≠ JavaScript."""
+    direct = canonicalize_skill(label)
+    if direct:
+        return [direct]
+    found: list[str] = []
+    seen: set[str] = set()
+    for alias in sorted(_ALIAS_TO_CANONICAL, key=len, reverse=True):
+        canonical = _ALIAS_TO_CANONICAL[alias]
+        if canonical in seen:
+            continue
+        if _alias_pattern(alias).search(label):
+            seen.add(canonical)
+            found.append(canonical)
+    return found
+
+
 def _canonical_skill_key(label: str) -> str:
-    return canonicalize_skill(label) or _skill_key(label)
+    concepts = skill_concepts_in_label(label)
+    if len(concepts) == 1:
+        return concepts[0]
+    return _skill_key(label)
+
+
+def candidate_covers_skill(candidate: Candidate, label: str) -> bool:
+    return _match_label_against_evidence(label, _candidate_skill_evidence(candidate)) == FULL_MATCH
 
 
 @lru_cache(maxsize=None)
@@ -673,8 +703,30 @@ def _candidate_skill_evidence(candidate: Candidate) -> set[str]:
             labels.extend(extract_explicit_skills_from_description(cert).tech_stack)
     evidence: set[str] = set()
     for label in labels:
-        evidence.add(_canonical_skill_key(label))
+        concepts = skill_concepts_in_label(label)
+        if concepts:
+            evidence.update(concepts)
+        else:
+            evidence.add(_canonical_skill_key(label))
     return evidence
+
+
+def _match_label_against_evidence(label: str, evidence: set[str]) -> float:
+    concepts = skill_concepts_in_label(label)
+    if len(concepts) >= 2:
+        present = sum(1 for item in concepts if item in evidence)
+        if present == len(concepts):
+            return FULL_MATCH
+        if present:
+            return PARTIAL_MATCH
+        return MISSING_MATCH
+    canonical = _canonical_skill_key(label)
+    if canonical in evidence:
+        return FULL_MATCH
+    related = _PARTIAL_CANDIDATE_FOR_JOB.get(canonical, frozenset())
+    if evidence & related:
+        return PARTIAL_MATCH
+    return MISSING_MATCH
 
 
 def _match_skills(requirements: GroundedRequirements, evidence: set[str]) -> SkillMatchResult:
@@ -686,18 +738,14 @@ def _match_skills(requirements: GroundedRequirements, evidence: set[str]) -> Ski
         missing: list[str] = []
         scores: list[float] = []
         for label in job_labels:
-            canonical = _canonical_skill_key(label)
-            if canonical in evidence:
+            score = _match_label_against_evidence(label, evidence)
+            scores.append(score)
+            if score == FULL_MATCH:
                 matched.append(label)
-                scores.append(FULL_MATCH)
-                continue
-            related = _PARTIAL_CANDIDATE_FOR_JOB.get(canonical, frozenset())
-            if evidence & related:
+            elif score == PARTIAL_MATCH:
                 partial.append(label)
-                scores.append(PARTIAL_MATCH)
             else:
                 missing.append(label)
-                scores.append(MISSING_MATCH)
         ratio = sum(scores) / len(scores)
         return matched, partial, missing, ratio
 
@@ -719,6 +767,8 @@ def _match_skills(requirements: GroundedRequirements, evidence: set[str]) -> Ski
         missing=missing,
         required_ratio=req_ratio,
         preferred_ratio=pref_ratio,
+        required_labels=list(requirements.required),
+        preferred_labels=pref_labels,
     )
 
 
@@ -1226,6 +1276,10 @@ def compute_breakdown(
         covered_responsibilities=v2.covered_responsibilities,
         partial_responsibilities=v2.partial_responsibilities,
         uncovered_responsibilities=v2.uncovered_responsibilities,
+        skill_required_ratio=skill_match.required_ratio,
+        skill_preferred_ratio=skill_match.preferred_ratio,
+        required_skill_labels=list(skill_match.required_labels),
+        preferred_skill_labels=list(skill_match.preferred_labels),
     )
 
 

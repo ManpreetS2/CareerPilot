@@ -108,13 +108,16 @@ describe("PrepareApplicationWorkspace", () => {
     expect(api.generateMaterials).not.toHaveBeenCalled();
   });
 
-  it("keeps the approval rail sticky so actions stay reachable", async () => {
+  it("places Resume Versions after Approval without a sticky overlay rail", async () => {
     vi.mocked(api.getStoredMaterials).mockResolvedValue(pendingPackage());
     renderPrepare();
-    expect(await screen.findByTestId("approval-status")).toHaveTextContent("pending review");
-    const rail = screen.getByRole("button", { name: "Approve" }).closest("section");
-    expect(rail).toHaveClass("sticky-action-rail");
-    expect(getComputedStyle(rail as HTMLElement).position).toBe("sticky");
+    const rail = await screen.findByTestId("approval-rail");
+    const panel = await screen.findByTestId("resume-version-panel");
+    expect(rail.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(rail).not.toHaveClass("sticky-action-rail");
+    expect(getComputedStyle(rail).position).not.toBe("sticky");
+    expect(getComputedStyle(rail).position).not.toBe("fixed");
+    expect(Number.parseInt(getComputedStyle(rail).zIndex, 10) || 0).toBeLessThan(20);
   });
 
   it("passes false for a normal generate", async () => {

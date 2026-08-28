@@ -108,6 +108,18 @@ def _stop_process(process: subprocess.Popen[Any]) -> None:
         process.wait(timeout=5)
 
 
+def _best_effort_unlink(path: Path) -> None:
+    """SQLite can stay locked on Windows until the backend process fully exits."""
+    for delay in (0.0, 0.2, 0.5, 1.0):
+        if delay:
+            time.sleep(delay)
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            continue
+
+
 def _ensure_frontend_dependencies() -> None:
     vite = ROOT / "frontend" / "node_modules" / "vite"
     if not vite.exists():
@@ -203,6 +215,7 @@ def _seed_shared_job(session: Session) -> JobRecord:
         description="Required: Python.",
         source="manual",
         status="verified",
+        content_status="full",
         verification_notes="Synthetic posting passed verification.",
         verified_at=datetime.now(timezone.utc),
     )
@@ -468,7 +481,7 @@ def run_browser_workflow() -> dict[str, int]:
                     raise AssertionError("Jobs page load issued a materials POST.")
                 checks += 1
 
-                page.get_by_role("link", name="View Analysis").first.click()
+                page.get_by_role("link", name="View Full Analysis").first.click()
                 expect(page).to_have_url(re.compile(rf"/jobs/{JOB_PUBLIC_ID}"))
                 expect(page.get_by_role("heading", name=JOB_TITLE)).to_be_visible()
                 checks += 1
@@ -707,7 +720,7 @@ def run_browser_workflow() -> dict[str, int]:
             backend_log_handle.close()
             frontend_log_handle.close()
             engine.dispose()
-            database_path.unlink(missing_ok=True)
+            _best_effort_unlink(database_path)
 
 
 def main() -> int:

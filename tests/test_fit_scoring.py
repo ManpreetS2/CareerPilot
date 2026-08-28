@@ -1197,6 +1197,102 @@ def test_exact_normal_weighting_and_component_rounding() -> None:
     )
 
 
+def _skill_requirements(*, required: list[str] | None = None, preferred: list[str] | None = None) -> analysis_service.GroundedRequirements:
+    return analysis_service.GroundedRequirements(
+        required=required or [],
+        preferred=preferred or [],
+        tech_stack=[],
+        years_experience=None,
+        education_requirements=[],
+        seniority=None,
+        source="intelligence",
+    )
+
+
+def test_compound_employer_label_matches_separate_candidate_concepts() -> None:
+    requirements = _skill_requirements(preferred=["JavaScript/React"])
+    full = analysis_service._match_skills(requirements, {"JavaScript", "React"})
+    assert full.matched == ["JavaScript/React"]
+    assert full.partial == []
+    assert full.missing == []
+    assert full.preferred_ratio == 1.0
+
+    partial = analysis_service._match_skills(requirements, {"JavaScript"})
+    assert partial.matched == []
+    assert partial.partial == ["JavaScript/React"]
+    assert partial.missing == []
+    assert partial.preferred_ratio == analysis_service.PARTIAL_MATCH
+
+    missing = analysis_service._match_skills(requirements, {"Python"})
+    assert missing.matched == []
+    assert missing.partial == []
+    assert missing.missing == ["JavaScript/React"]
+    assert missing.preferred_ratio == 0.0
+
+
+def test_react_native_does_not_satisfy_react() -> None:
+    candidate = Candidate(
+        skills=["React Native"],
+        projects=[],
+        experience=[],
+        certifications=[],
+    )
+    evidence = analysis_service._candidate_skill_evidence(candidate)
+    assert "React" not in evidence
+    result = analysis_service._match_skills(_skill_requirements(required=["React"]), evidence)
+    assert result.matched == []
+    assert result.missing == ["React"]
+    assert result.required_ratio == 0.0
+
+
+def test_compound_candidate_labels_expand_into_concepts() -> None:
+    candidate = Candidate(
+        skills=["JavaScript/React"],
+        projects=[],
+        experience=[],
+        certifications=[],
+    )
+    evidence = analysis_service._candidate_skill_evidence(candidate)
+    assert "JavaScript" in evidence
+    assert "React" in evidence
+    result = analysis_service._match_skills(_skill_requirements(preferred=["JavaScript/React"]), evidence)
+    assert result.matched == ["JavaScript/React"]
+    assert result.preferred_ratio == 1.0
+
+
+def test_java_does_not_equal_javascript_for_compound_or_single_labels() -> None:
+    java_only = analysis_service._match_skills(
+        _skill_requirements(required=["JavaScript"]),
+        {"Java"},
+    )
+    assert java_only.missing == ["JavaScript"]
+    compound = analysis_service._match_skills(
+        _skill_requirements(preferred=["JavaScript/React"]),
+        {"Java", "React"},
+    )
+    assert compound.partial == ["JavaScript/React"]
+    assert compound.preferred_ratio == analysis_service.PARTIAL_MATCH
+
+
+def test_unknown_phrase_keeps_normalized_fallback() -> None:
+    key = analysis_service._canonical_skill_key("ObscureToolX")
+    assert key == analysis_service._skill_key("ObscureToolX")
+    matched = analysis_service._match_skills(_skill_requirements(required=["ObscureToolX"]), {key})
+    assert matched.matched == ["ObscureToolX"]
+    missed = analysis_service._match_skills(_skill_requirements(required=["ObscureToolX"]), {"Python"})
+    assert missed.missing == ["ObscureToolX"]
+
+
+def test_python_a_plus_still_canonicalizes_to_python() -> None:
+    assert analysis_service._canonical_skill_key("Python a plus") == "Python"
+    result = analysis_service._match_skills(
+        _skill_requirements(preferred=["Python a plus"]),
+        {"Python"},
+    )
+    assert result.matched == ["Python a plus"]
+    assert result.preferred_ratio == 1.0
+
+
 def test_empty_skill_groups_are_renormalized() -> None:
     required_only = analysis_service.GroundedRequirements(
         required=["Python"],

@@ -69,7 +69,29 @@ def score_job_verified(
     breakdown = compute_breakdown(job, candidate, preferences, requirements, as_of=as_of)
     report = evaluate_eligibility(profile, candidate, preferences, as_of=as_of)
     apply_verified_overlay(breakdown, report, content_status=profile.content_status)
-    return persist_score(db, job, candidate, breakdown)
+    score = persist_score(db, job, candidate, breakdown, commit=False)
+    try:
+        from backend.services.match_evidence_service import persist_match_evidence
+
+        persist_match_evidence(
+            db,
+            user_id=user_id,
+            job=job,
+            candidate=candidate,
+            preferences=preferences,
+            profile=profile,
+            report=report,
+            breakdown=breakdown,
+            score=score,
+        )
+    except Exception:
+        logger.warning(
+            "match evidence persist failed job_pk=%s error_type=unexpected",
+            job.id,
+            exc_info=True,
+        )
+    db.commit()
+    return score
 
 
 def verify_top_ranked_jobs(

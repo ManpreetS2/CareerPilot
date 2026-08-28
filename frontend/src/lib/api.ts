@@ -17,6 +17,7 @@ import type {
   JobRequirementProfile,
   JobSearchIntent,
   JobVerificationResponse,
+  MatchEvidence,
   MatchScore,
   ParseResumeResponse,
   CurrentProfile,
@@ -65,6 +66,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiClientError(response.status, message, detail);
   }
   return payload as T;
+}
+
+export function resumeVersionFileUrl(versionId: string, format: "pdf" | "docx"): string {
+  return `${API_BASE_URL}/api/resume-versions/${encodeURIComponent(versionId)}/file?format=${encodeURIComponent(format)}`;
 }
 
 export const api = {
@@ -190,6 +195,9 @@ export const api = {
       method: "POST",
     }),
 
+  getMatchEvidence: (jobId: string, init?: RequestInit) =>
+    request<MatchEvidence>(`/api/jobs/${jobId}/match-evidence`, init),
+
   getStoredScore: (jobId: string, init?: RequestInit) =>
     request<MatchScore>(`/api/jobs/${jobId}/score`, init),
 
@@ -229,6 +237,8 @@ export const api = {
 
   getResumeVersionDetail: (versionId: string, init?: RequestInit) =>
     request<ResumeVersionDetail>(`/api/resume-versions/${versionId}`, init),
+
+  resumeVersionFileUrl,
 
   createResumeVersion: (jobId: string) =>
     request<ResumeVersion>(`/api/jobs/${jobId}/resume-versions`, {
