@@ -30,6 +30,10 @@ def isolated_engine():
         poolclass=StaticPool,
         future=True,
     )
+    # Deliberately not FK-enforced: most tests here seed rows with arbitrary
+    # placeholder ids (e.g. user_id=1) to unit-test scoring/business logic in
+    # isolation, not full referential integrity. Enforcement is proven
+    # separately in tests/test_database.py against a real parent/child pair.
     Base.metadata.create_all(bind=engine)
     try:
         yield engine
