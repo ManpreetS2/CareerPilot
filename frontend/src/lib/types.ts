@@ -93,6 +93,10 @@ export type Job = {
   status: JobStatus;
   verification_notes?: string | null;
   verified_at?: string | null;
+  opportunity_type?: "internship" | "role" | "unknown" | null;
+  employment_type?: string | null;
+  work_mode?: "remote" | "hybrid" | "onsite" | "unknown" | null;
+  saved?: boolean;
 };
 
 export type JobVerificationResponse = {
@@ -317,18 +321,65 @@ export type HealthResponse = {
   database: string;
 };
 
-export type SearchIntent = {
-  rawQuery?: string;
+export type JobsTab = "discover" | "matches" | "saved";
+export type JobsSort = "best_match" | "newest" | "qualification" | "preference";
+export type OpportunityFilter = "both" | "internship" | "role";
+
+export type JobSearchIntent = {
+  raw_query?: string | null;
+  query?: string | null;
   roles: string[];
   locations: string[];
-  employmentTypes: string[];
-  experienceLevels: string[];
-  workModes: string[];
+  opportunity_types: Array<"internship" | "role" | "unknown">;
+  employment_types: string[];
+  experience_levels: string[];
+  work_modes: string[];
+  remote_scopes: string[];
   industries: string[];
   skills: string[];
-  salaryMin?: number | null;
-  startSeason?: string | null;
-  parserReady: boolean;
+  salary_min?: number | null;
+  date_posted?: string | null;
+  verified_state: "all" | "verified" | "potential";
+  eligibility_state: "all" | "likely_eligible" | "eligibility_uncertain" | "likely_ineligible";
+  confidence_state: "all" | "high" | "medium" | "low";
+  parser_ready: boolean;
+  parser_source?: "deterministic" | "gemini" | "empty";
+};
+
+export type SearchIntent = JobSearchIntent;
+
+export type JobListItem = {
+  job: Job;
+  match?: MatchScore | null;
+  saved?: boolean;
+};
+
+export type JobListPage = {
+  items: JobListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  verified_count: number;
+  potential_count: number;
+  ids: string[];
+};
+
+export type JobQueryParams = {
+  q?: string;
+  tab?: JobsTab;
+  opportunity?: OpportunityFilter | string;
+  employment_type?: string[];
+  experience_level?: string[];
+  work_mode?: string[];
+  location?: string[];
+  industry?: string[];
+  verified_state?: string;
+  eligibility?: string;
+  confidence?: string;
+  date_posted?: string;
+  sort?: JobsSort | string;
+  page?: number;
+  page_size?: number;
 };
 
 export type Requirement = {

@@ -5,17 +5,19 @@ from __future__ import annotations
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
-from backend.db.models import User
+from backend.db.models import JobRecord, User
 from backend.schemas.schemas import (
     IngestJobUrlRequest,
     Job,
+    JobListPage,
     JobVerificationResponse,
     MatchScore,
+    ParseSearchRequest,
     ScoutJobsResponse,
 )
 from backend.services.analysis_service import (
@@ -35,10 +37,18 @@ from backend.services.job_service import (
     clean_search_term,
     derive_scout_criteria,
     get_job,
-    list_jobs,
+    record_to_job,
     scout_jobs,
 )
 from backend.services.job_verification_service import verify_all, verify_and_store
+from backend.services.job_search_parser import (
+    JobSearchIntent,
+    parse_job_search_intent,
+    scout_terms_from_intent,
+)
+from backend.services.job_search_llm import enrich_search_intent
+from backend.services.job_query_service import query_jobs
+from backend.services.saved_job_service import list_saved_jobs, save_job, unsave_job
 from backend.services.url_safety import UnsafeURLError
 
 logger = logging.getLogger(__name__)
@@ -99,8 +109,100 @@ def _auto_score_scouted_jobs(db: Session, jobs: list[Job], user_id: int) -> tupl
 
 
 @router.get("/jobs", response_model=list[Job])
-def get_jobs(user: User = Depends(get_current_user)) -> list[Job]:
-    return list_jobs()
+def get_jobs(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Job]:
+    records = db.query(JobRecord).order_by(JobRecord.date_scraped.desc()).all()
+    return [record_to_job(record) for record in records]
+
+
+@router.get("/jobs/query", response_model=JobListPage)
+def query_jobs_route(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    q: str | None = None,
+    tab: str = Query("discover"),
+    opportunity: str | None = None,
+    employment_type: list[str] | None = Query(None),
+    experience_level: list[str] | None = Query(None),
+    work_mode: list[str] | None = Query(None),
+    location: list[str] | None = Query(None),
+    industry: list[str] | None = Query(None),
+    verified_state: str = "all",
+    eligibility: str = "all",
+    confidence: str = "all",
+    date_posted: str | None = None,
+    sort: str = "best_match",
+    page: int = 1,
+    page_size: int = 40,
+) -> JobListPage:
+    """Filter the canonical stored catalog. Never replaces persisted jobs."""
+    parsed = parse_job_search_intent(q)
+    allowed_employment = {
+        "internship",
+        "new_grad",
+        "full_time",
+        "part_time",
+        "contract",
+        "temporary",
+        "co_op",
+        "fellowship",
+    }
+    allowed_work = {"remote", "hybrid", "onsite"}
+    allowed_experience = {
+        "intern",
+        "new_grad",
+        "entry",
+        "junior",
+        "mid",
+        "senior",
+        "staff",
+        "principal",
+        "lead",
+        "manager",
+        "director",
+    }
+    if employment_type:
+        parsed.employment_types = [item for item in employment_type if item in allowed_employment]
+    if experience_level:
+        parsed.experience_levels = [item for item in experience_level if item in allowed_experience]
+    if work_mode:
+        parsed.work_modes = [item for item in work_mode if item in allowed_work]
+    if location:
+        parsed.locations = [item[:80] for item in location if item and item.strip()][:8]
+    if industry:
+        parsed.industries = [item.lower()[:40] for item in industry if item and item.strip()][:8]
+    if verified_state in {"all", "verified", "potential"}:
+        parsed.verified_state = verified_state  # type: ignore[assignment]
+    if eligibility in {"all", "likely_eligible", "eligibility_uncertain", "likely_ineligible"}:
+        parsed.eligibility_state = eligibility  # type: ignore[assignment]
+    if confidence in {"all", "high", "medium", "low"}:
+        parsed.confidence_state = confidence  # type: ignore[assignment]
+    if date_posted in {"past_24h", "past_3d", "past_7d", "past_14d", "past_30d"}:
+        parsed.date_posted = date_posted  # type: ignore[assignment]
+    tab_value = tab if tab in {"discover", "matches", "saved"} else "discover"
+    sort_value = sort if sort in {"best_match", "newest", "qualification", "preference"} else "best_match"
+    return query_jobs(
+        db,
+        user.id,
+        parsed,
+        tab=tab_value,  # type: ignore[arg-type]
+        opportunity=opportunity,
+        sort=sort_value,  # type: ignore[arg-type]
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/jobs/search-intent", response_model=JobSearchIntent)
+def parse_search_intent_route(payload: ParseSearchRequest, user: User = Depends(get_current_user)) -> JobSearchIntent:
+    deterministic = parse_job_search_intent(payload.query)
+    return enrich_search_intent(payload.query, deterministic)
+
+
+@router.get("/jobs/saved", response_model=list[Job])
+def list_saved_jobs_route(
+    db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> list[Job]:
+    return list_saved_jobs(db, user.id)
 
 
 @router.get("/jobs/scores", response_model=list[MatchScore])
@@ -138,8 +240,25 @@ def trigger_scout(
     # collapsing and length bound.
     explicit_query = clean_search_term(what) if what else ""
     explicit_location = clean_search_term(where) if where else ""
-    queries = [explicit_query] if explicit_query else criteria.queries
-    location = explicit_location or criteria.location
+    if explicit_query:
+        intent = parse_job_search_intent(explicit_query)
+        structured = bool(
+            intent.locations or intent.work_modes or intent.industries or intent.opportunity_types
+        )
+        if structured:
+            scout_queries, scout_location = scout_terms_from_intent(intent)
+            queries = [clean_search_term(term) for term in scout_queries if term] or [explicit_query]
+            location = (
+                explicit_location
+                or (clean_search_term(scout_location) if scout_location else "")
+                or criteria.location
+            )
+        else:
+            queries = [explicit_query]
+            location = explicit_location or criteria.location
+    else:
+        queries = criteria.queries
+        location = explicit_location or criteria.location
     _log_job_scout(
         "criteria",
         duration_ms=int((time.perf_counter() - criteria_started) * 1000),
@@ -211,6 +330,21 @@ def ingest_job_url_route(payload: IngestJobUrlRequest, user: User = Depends(get_
     job = normalize_job(raw, "manual")
     stored = persist_jobs([job])
     return stored[0]
+
+
+@router.post("/jobs/{job_id}/save", response_model=Job)
+def save_job_route(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> Job:
+    return save_job(db, user.id, job_id).job
+
+
+@router.delete("/jobs/{job_id}/save", status_code=status.HTTP_204_NO_CONTENT)
+def unsave_job_route(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> Response:
+    unsave_job(db, user.id, job_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/jobs/{job_id}", response_model=Job)

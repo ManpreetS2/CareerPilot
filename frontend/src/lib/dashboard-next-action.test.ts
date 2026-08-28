@@ -77,8 +77,8 @@ describe("resolveNextAction", () => {
         jobs: [job],
         scores: [score],
         resumeVersions: [],
-      }).id,
-    ).toBe("matches");
+      }).to,
+    ).toBe("/jobs?tab=matches");
   });
 
   it("points at the latest resume version when no strong matches exist", () => {

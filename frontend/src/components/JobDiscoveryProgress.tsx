@@ -8,7 +8,7 @@ export const JOB_DISCOVERY_STAGES = [
   "Understanding your search",
   "Searching job sources",
   "Reviewing opportunities",
-  "Reading top job requirements",
+  "Reading top requirements",
   "Checking eligibility",
   "Ranking your matches",
   "Almost ready",

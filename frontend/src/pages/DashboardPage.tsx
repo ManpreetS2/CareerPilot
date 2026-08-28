@@ -78,7 +78,7 @@ export function DashboardPage() {
     scores,
     resumeVersions: versions,
   });
-  const strong = scores.filter((score) => score.overall_score >= 70 || score.recommendation === "apply");
+  const strong = scores.filter((score) => score.score_kind === "verified");
   const readinessFlags = [
     Boolean(liveCandidate?.name),
     Boolean(liveCandidate?.skills.length),
@@ -147,9 +147,16 @@ export function DashboardPage() {
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
             <Glass variant="working" className="rounded-[var(--radius-lg)] p-5">
+              <div className="flex items-center justify-between gap-3">
               <h2 className="font-display text-lg font-semibold">Strongest matches</h2>
+              <Link to="/jobs?tab=matches" className="text-sm font-medium text-primary">
+                Open Matches
+              </Link>
+              </div>
               {strong.length === 0 ? (
-                <p className="mt-2 text-sm text-muted-foreground">No stored high-fit scores yet.</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  No verified matches yet. Open Matches to review Potential Match rankings.
+                </p>
               ) : (
                 <ul className="mt-3 space-y-3">
                   {strong.slice(0, 4).map((score) => {

@@ -110,6 +110,10 @@ class Job(BaseModel):
     status: Literal["discovered", "verified", "flagged", "stale"] = "discovered"
     verification_notes: str | None = None
     verified_at: datetime | None = None
+    opportunity_type: Literal["internship", "role", "unknown"] | None = None
+    employment_type: str | None = None
+    work_mode: Literal["remote", "hybrid", "onsite", "unknown"] | None = None
+    saved: bool = False
 
 
 class JobIntelligence(BaseModel):
@@ -300,6 +304,26 @@ class ApprovalResponse(BaseModel):
 class JobWithScore(BaseModel):
     job: Job
     match: MatchScore | None = None
+
+
+class JobListItem(BaseModel):
+    job: Job
+    match: MatchScore | None = None
+    saved: bool = False
+
+
+class JobListPage(BaseModel):
+    items: list[JobListItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 40
+    verified_count: int = 0
+    potential_count: int = 0
+    ids: list[str] = Field(default_factory=list)
+
+
+class ParseSearchRequest(BaseModel):
+    query: str = ""
 
 
 class FlaggedField(BaseModel):

@@ -480,7 +480,7 @@ def run_browser_workflow() -> dict[str, int]:
                     raise AssertionError("Jobs page load issued a materials POST.")
                 checks += 1
 
-                page.get_by_role("link", name="View Analysis").first.click()
+                page.get_by_role("link", name="View Full Analysis").first.click()
                 expect(page).to_have_url(re.compile(rf"/jobs/{JOB_PUBLIC_ID}"))
                 expect(page.get_by_role("heading", name=JOB_TITLE)).to_be_visible()
                 checks += 1
