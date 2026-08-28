@@ -25,6 +25,12 @@ const STEPS = [
   { id: 7, title: "Review and complete" },
 ] as const;
 
+const ROLE_TYPE_OPTIONS = [
+  ["internships", "Internships"],
+  ["full_time", "Full-time roles"],
+  ["both", "Both internships and full-time"],
+] as const;
+
 const MAX_CLIENT_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 export function OnboardingPage() {
@@ -269,13 +275,7 @@ export function OnboardingPage() {
                   does not invent a backend role-type field.
                 </p>
                 <div className="grid gap-2">
-                  {(
-                    [
-                      ["internships", "Internships"],
-                      ["full_time", "Full-time roles"],
-                      ["both", "Both internships and full-time"],
-                    ] as const
-                  ).map(([value, label]) => (
+                  {ROLE_TYPE_OPTIONS.map(([value, label]) => (
                     <label key={value} className="flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-2">
                       <input
                         type="radio"
@@ -325,7 +325,7 @@ export function OnboardingPage() {
                   </div>
                   <div>
                     <dt className="text-muted-foreground">Role type</dt>
-                    <dd>{roleType.replace("_", " ")}</dd>
+                    <dd>{ROLE_TYPE_OPTIONS.find(([value]) => value === roleType)?.[1] ?? roleType}</dd>
                   </div>
                   <div>
                     <dt className="text-muted-foreground">Location</dt>
