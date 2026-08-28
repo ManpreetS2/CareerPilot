@@ -219,16 +219,30 @@ export async function fillFormInPage(data: {
         filled.push({ name: "sponsorship required", value: answer });
       }
     }
-    const eeoFields: [string, string[]][] = [
-      ["gender", ["^gender$"]],
-      ["race_ethnicity", ["hispanic", "latino"]],
-      ["veteran_status", ["veteran"]],
-      ["disability_status", ["disability"]],
+    // Gender, race/ethnicity, veteran, and disability status are never
+    // auto-answered, regardless of whether a value is on file: label-text
+    // matching here is a loose heuristic (e.g. "veteran" or "hispanic" as a
+    // bare substring), not a verified mapping to this posting's exact
+    // options, and these are protected-class questions where a wrong or
+    // unconfirmed answer carries real consequences. Always flag for the
+    // candidate to answer themselves rather than infer or guess.
+    const eeoFields: [string, string, string[]][] = [
+      ["gender", "Gender", ["^gender$"]],
+      ["race_ethnicity", "Race/ethnicity", ["hispanic", "latino"]],
+      ["veteran_status", "Veteran status", ["veteran"]],
+      ["disability_status", "Disability status", ["disability"]],
     ];
-    for (const [key, patterns] of eeoFields) {
-      const value = fields[key] as string | undefined;
-      if (value && (await trySelectOrReactSelectByLabel(patterns, value))) {
-        filled.push({ name: key.replace(/_/g, " "), value });
+    const labelTexts = [...document.querySelectorAll("label")].map((l) => l.textContent || "");
+    for (const [key, label, patterns] of eeoFields) {
+      const present = patterns.some((pattern) => {
+        const re = new RegExp(pattern, "i");
+        return labelTexts.some((text) => re.test(text));
+      });
+      if (present) {
+        flagged.push({
+          name: key.replace(/_/g, " "),
+          reason: `${label} is a sensitive question — answer it yourself rather than have it auto-filled.`,
+        });
       }
     }
   }

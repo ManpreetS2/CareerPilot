@@ -300,6 +300,21 @@ def _try_select_by_label(page: Page, label_patterns: list[str], value: str) -> b
     return False
 
 
+def _select_exists_by_label(page: Page, label_patterns: list[str]) -> bool:
+    """Detect-only counterpart to _try_select_by_label: true if a <select>
+    matching one of the label patterns is present, without selecting
+    anything. Used for fields that must never be auto-answered (see the EEO
+    loop below) but still need a manual-review flag when the ATS asks."""
+    for pattern in label_patterns:
+        try:
+            select: Locator = page.get_by_label(re.compile(pattern, re.IGNORECASE)).first
+            if select.count() > 0:
+                return True
+        except PlaywrightError:
+            continue
+    return False
+
+
 def _fill_common_fields(
     page: Page,
     fields: _CandidateFields,
@@ -399,15 +414,26 @@ def _fill_shared_reusable_fields(
         if _try_select_by_label(page, [r"sponsorship"], answer):
             filled.append(FilledField(field="sponsorship_required", value=answer))
 
-    for attr, patterns in (
-        ("gender", [r"^gender$"]),
-        ("race_ethnicity", [r"hispanic", r"latino"]),
-        ("veteran_status", [r"veteran"]),
-        ("disability_status", [r"disability"]),
+    # Gender, race/ethnicity, veteran, and disability status are never
+    # auto-answered, regardless of whether a value is on file: label-text
+    # matching here is a loose heuristic (e.g. "veteran" or "hispanic" as a
+    # bare substring), not a verified mapping to this posting's exact
+    # options, and these are protected-class questions where a wrong or
+    # unconfirmed answer carries real consequences. Always flag for the
+    # candidate to answer themselves rather than infer or guess.
+    for attr, label, patterns in (
+        ("gender", "Gender", [r"^gender$"]),
+        ("race_ethnicity", "Race/ethnicity", [r"hispanic", r"latino"]),
+        ("veteran_status", "Veteran status", [r"veteran"]),
+        ("disability_status", "Disability status", [r"disability"]),
     ):
-        value = getattr(fields, attr)
-        if value and _try_select_by_label(page, patterns, value):
-            filled.append(FilledField(field=attr, value=value))
+        if _select_exists_by_label(page, patterns):
+            flagged.append(
+                FlaggedField(
+                    field=attr,
+                    reason=f"{label} is a sensitive question — answer it yourself rather than have it auto-filled.",
+                )
+            )
 
 
 def _fill_greenhouse(page: Page, fields: _CandidateFields) -> tuple[list[FilledField], list[FlaggedField]]:

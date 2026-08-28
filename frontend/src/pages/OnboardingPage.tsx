@@ -1,6 +1,5 @@
 import { useState, type DragEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { CandidateSummary } from "../components/CandidateSummary";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { ResumeParsingProgress } from "../components/ResumeParsingProgress";
@@ -26,12 +25,17 @@ const STEPS = [
   { id: 7, title: "Review and complete" },
 ] as const;
 
+const ROLE_TYPE_OPTIONS = [
+  ["internships", "Internships"],
+  ["full_time", "Full-time roles"],
+  ["both", "Both internships and full-time"],
+] as const;
+
 const MAX_CLIENT_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 export function OnboardingPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const reduce = useReducedMotion();
   const { candidate, preferences, setCandidateProfile, setJobPreferences } = useCandidateSession();
   const initial = user ? readOnboardingProgress(user.id) : { step: 1, skipped: false, completed: false };
   const [step, setStep] = useState(Math.min(Math.max(initial.step, 1), STEPS.length));
@@ -89,9 +93,11 @@ export function OnboardingPage() {
         navigate("/dashboard", { replace: true });
         return;
       }
-      const next = Math.min(step + 1, STEPS.length);
-      setStep(next);
-      persist(next);
+      setStep((current) => {
+        const next = Math.min(current + 1, STEPS.length);
+        persist(next);
+        return next;
+      });
     } catch (err) {
       setError(err);
     } finally {
@@ -100,9 +106,16 @@ export function OnboardingPage() {
   }
 
   function onBack() {
-    const next = Math.max(step - 1, 1);
-    setStep(next);
-    persist(next);
+    // Functional update, not `Math.max(step - 1, 1)` against the closed-over
+    // `step`: onBack is synchronous with no gap for React to re-render in
+    // between, so two Back clicks in the same tick — an ordinary double-click,
+    // not an edge case — would both read the same stale `step` and compute
+    // the same `next`, silently turning "back twice" into "back once".
+    setStep((current) => {
+      const next = Math.max(current - 1, 1);
+      persist(next);
+      return next;
+    });
   }
 
   function selectFile(next: File | null) {
@@ -161,16 +174,18 @@ export function OnboardingPage() {
 
         <ErrorBanner error={error} heading={resumeParseErrorHeading(error)} />
 
-        <AnimatePresence mode="wait">
-          <motion.section
-            key={step}
-            className="p-0"
-            data-testid={`onboarding-step-${step}`}
-            initial={{ opacity: reduce ? 1 : 0, y: reduce ? 0 : 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: reduce ? 1 : 0, y: reduce ? 0 : -8 }}
-            transition={{ duration: reduce ? 0 : 0.18 }}
-          >
+        {/* Deliberately not animated. This originally used AnimatePresence +
+            motion.section keyed on `step`, and under a real, ordinary
+            double-click on Back or Continue — not a contrived edge case —
+            it reliably left the exiting and entering cards both stuck at
+            opacity 0, forever, with no error and no way to recover short of
+            a reload. That happened with and without AnimatePresence's
+            mode="wait", so the fault is the animated exit/enter lifecycle
+            itself under back-to-back key changes, not that one option.
+            Confirmed live in Chrome. The step transition here is a content
+            swap on every click of a setup wizard, not a place where a
+            fade is worth risking the wizard becoming unusable. */}
+        <div className="p-0" data-testid={`onboarding-step-${step}`}>
             <Glass variant="working" refract className="rounded-[var(--radius-lg)] p-6">
             {step === 1 ? (
               <p className="text-sm leading-relaxed text-muted-foreground">
@@ -260,13 +275,7 @@ export function OnboardingPage() {
                   does not invent a backend role-type field.
                 </p>
                 <div className="grid gap-2">
-                  {(
-                    [
-                      ["internships", "Internships"],
-                      ["full_time", "Full-time roles"],
-                      ["both", "Both internships and full-time"],
-                    ] as const
-                  ).map(([value, label]) => (
+                  {ROLE_TYPE_OPTIONS.map(([value, label]) => (
                     <label key={value} className="flex items-center gap-2 rounded-[var(--radius-md)] border border-border px-3 py-2">
                       <input
                         type="radio"
@@ -316,7 +325,7 @@ export function OnboardingPage() {
                   </div>
                   <div>
                     <dt className="text-muted-foreground">Role type</dt>
-                    <dd>{roleType.replace("_", " ")}</dd>
+                    <dd>{ROLE_TYPE_OPTIONS.find(([value]) => value === roleType)?.[1] ?? roleType}</dd>
                   </div>
                   <div>
                     <dt className="text-muted-foreground">Location</dt>
@@ -326,8 +335,7 @@ export function OnboardingPage() {
               </div>
             ) : null}
             </Glass>
-          </motion.section>
-        </AnimatePresence>
+        </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button type="button" className="btn-ghost" data-testid="onboarding-back" onClick={onBack} disabled={step === 1 || busy}>
