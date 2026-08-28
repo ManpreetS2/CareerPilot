@@ -57,12 +57,9 @@ export function JobDetailPage() {
   const [percentile, setPercentile] = useState<string | null>(null);
   const [profile, setProfile] = useState<JobRequirementProfile | null>(null);
   const storedScoreValues = useRef<Record<string, number>>({});
-  const deepAnalyzeJobId = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    scoringRequest.current += 1;
-    intelligenceRequest.current += 1;
     scoringInFlight.current = false;
     extractionInFlight.current = false;
     async function load() {
@@ -180,42 +177,6 @@ export function JobDetailPage() {
     };
   }, [jobId]);
 
-  useEffect(() => {
-    if (!jobId || loading) return;
-    if (match?.score_kind === "verified") return;
-    if (match?.score_kind !== "preliminary" && match?.score_kind !== "full") return;
-    if (deepAnalyzeJobId.current === jobId) return;
-    deepAnalyzeJobId.current = jobId;
-    let cancelled = false;
-    void (async () => {
-      setScoring(true);
-      try {
-        const nextProfile = await api.extractRequirementProfile(jobId);
-        if (!cancelled) setProfile(nextProfile);
-        const nextMatch = await api.scoreJob(jobId);
-        if (!cancelled) {
-          setMatch(nextMatch);
-          if (nextMatch.score_kind === "verified") {
-            storedScoreValues.current = {
-              ...storedScoreValues.current,
-              [jobId]: nextMatch.overall_score,
-            };
-            setPercentile(
-              topMatchPercentileLabel(nextMatch.overall_score, Object.values(storedScoreValues.current)),
-            );
-          }
-        }
-      } catch (err) {
-        if (!cancelled) setScoreError(err);
-      } finally {
-        if (!cancelled) setScoring(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [jobId, loading, match?.score_kind]);
-
   async function handleExtractRequirements() {
     if (!jobId || extractionInFlight.current || scoringInFlight.current) return;
     extractionInFlight.current = true;
@@ -300,14 +261,14 @@ export function JobDetailPage() {
         } catch {
           /* stored profile is optional */
         }
-        await refreshIntelligence();
       }
+      await refreshIntelligence();
     } catch (err) {
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         setMatch(null);
         setScoreError(err);
-        await refreshIntelligence();
       }
+      await refreshIntelligence();
     } finally {
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         scoringInFlight.current = false;

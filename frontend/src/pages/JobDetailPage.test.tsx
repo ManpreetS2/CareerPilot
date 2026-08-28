@@ -75,6 +75,8 @@ describe("JobDetailPage", () => {
     vi.mocked(api.extractJobIntelligence).mockReset();
     vi.mocked(api.scoreJob).mockReset();
     vi.mocked(api.prepareInterview).mockReset();
+    vi.mocked(api.getRequirementProfile).mockRejectedValue(new ApiClientError(404, "None"));
+    vi.mocked(api.extractRequirementProfile).mockReset();
   });
 
   it("loads stored job evidence without extracting, scoring, or generating interview prep", async () => {
@@ -86,6 +88,7 @@ describe("JobDetailPage", () => {
       expect(api.getStoredScore).toHaveBeenCalled();
     });
     expect(api.extractJobIntelligence).not.toHaveBeenCalled();
+    expect(api.extractRequirementProfile).not.toHaveBeenCalled();
     expect(api.scoreJob).not.toHaveBeenCalled();
     expect(api.prepareInterview).not.toHaveBeenCalled();
   });
@@ -119,6 +122,8 @@ describe("JobDetailPage", () => {
     renderJob();
     expect((await screen.findAllByText(/Potential Match/)).length).toBeGreaterThan(0);
     expect(screen.queryByText("91%")).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /Retry verification/i })).toBeInTheDocument();
+    expect(api.scoreJob).not.toHaveBeenCalled();
+    expect(api.extractRequirementProfile).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Retry verification/i })).not.toBeInTheDocument();
   });
 });
