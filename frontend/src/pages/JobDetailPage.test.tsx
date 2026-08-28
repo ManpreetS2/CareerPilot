@@ -122,6 +122,8 @@ describe("JobDetailPage", () => {
     renderJob();
     expect((await screen.findAllByText(/Potential Match/)).length).toBeGreaterThan(0);
     expect(screen.queryByText("91%")).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /Retry verification/i })).toBeInTheDocument();
+    expect(api.scoreJob).not.toHaveBeenCalled();
+    expect(api.extractRequirementProfile).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Retry verification/i })).not.toBeInTheDocument();
   });
 });
