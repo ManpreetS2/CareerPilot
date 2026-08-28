@@ -75,6 +75,8 @@ describe("JobDetailPage", () => {
     vi.mocked(api.extractJobIntelligence).mockReset();
     vi.mocked(api.scoreJob).mockReset();
     vi.mocked(api.prepareInterview).mockReset();
+    vi.mocked(api.getRequirementProfile).mockRejectedValue(new ApiClientError(404, "None"));
+    vi.mocked(api.extractRequirementProfile).mockReset();
   });
 
   it("loads stored job evidence without extracting, scoring, or generating interview prep", async () => {
@@ -86,6 +88,7 @@ describe("JobDetailPage", () => {
       expect(api.getStoredScore).toHaveBeenCalled();
     });
     expect(api.extractJobIntelligence).not.toHaveBeenCalled();
+    expect(api.extractRequirementProfile).not.toHaveBeenCalled();
     expect(api.scoreJob).not.toHaveBeenCalled();
     expect(api.prepareInterview).not.toHaveBeenCalled();
   });
