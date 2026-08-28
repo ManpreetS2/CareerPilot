@@ -150,20 +150,55 @@ export function JobsPage() {
     onMutate: async ({ jobId, saved }) => {
       await queryClient.cancelQueries({ queryKey: ["jobs-workspace"] });
       const snapshots = queryClient.getQueriesData<JobListPage>({ queryKey: ["jobs-workspace"] });
-      queryClient.setQueriesData<JobListPage>({ queryKey: ["jobs-workspace"] }, (current) => {
-        if (!current) return current;
-        return {
-          ...current,
-          items: current.items.map((item) =>
-            item.job.id === jobId ? { ...item, saved: !saved, job: { ...item.job, saved: !saved } } : item,
-          ),
-        };
-      });
-      return { snapshots };
+      const previousSelected = state.selected ?? null;
+      let nextSelected = previousSelected;
+      for (const [key, current] of snapshots) {
+        if (!current) continue;
+        const params = key[1] as { tab?: string } | undefined;
+        const unsavingFromSaved = saved && params?.tab === "saved";
+        if (unsavingFromSaved) {
+          const index = current.items.findIndex((item) => item.job.id === jobId);
+          const removedItem = current.items.find((item) => item.job.id === jobId);
+          const items = current.items.filter((item) => item.job.id !== jobId);
+          const ids = current.ids.filter((id) => id !== jobId);
+          if (previousSelected === jobId) {
+            const neighbor = items[index] ?? items[index - 1] ?? null;
+            nextSelected = neighbor?.job.id ?? null;
+          }
+          queryClient.setQueryData<JobListPage>(key, {
+            ...current,
+            items,
+            ids,
+            total: removedItem ? Math.max(0, current.total - 1) : current.total,
+            verified_count:
+              removedItem?.match?.score_kind === "verified"
+                ? Math.max(0, current.verified_count - 1)
+                : current.verified_count,
+            potential_count:
+              removedItem && removedItem.match?.score_kind !== "verified"
+                ? Math.max(0, current.potential_count - 1)
+                : current.potential_count,
+          });
+        } else {
+          queryClient.setQueryData<JobListPage>(key, {
+            ...current,
+            items: current.items.map((item) =>
+              item.job.id === jobId ? { ...item, saved: !saved, job: { ...item.job, saved: !saved } } : item,
+            ),
+          });
+        }
+      }
+      if (nextSelected !== previousSelected) {
+        patch({ selected: nextSelected });
+      }
+      return { snapshots, selected: previousSelected };
     },
     onError: (_err, _vars, context) => {
       for (const [key, data] of context?.snapshots ?? []) {
         queryClient.setQueryData(key, data);
+      }
+      if (context && context.selected !== undefined) {
+        patch({ selected: context.selected });
       }
     },
     onSettled: () => {
@@ -330,7 +365,7 @@ export function JobsPage() {
           saveSelectedJobId(job.id);
         }}
         onToggleSave={() => job.id && saveMutation.mutate({ jobId: job.id, saved: Boolean(job.saved) })}
-        savePending={saveMutation.isPending}
+        savePending={saveMutation.isPending && saveMutation.variables?.jobId === job.id}
       />
     );
   }
@@ -460,7 +495,7 @@ export function JobsPage() {
               selectedItem.job.id &&
               saveMutation.mutate({ jobId: selectedItem.job.id, saved: Boolean(selectedItem.job.saved) })
             }
-            savePending={saveMutation.isPending}
+            savePending={saveMutation.isPending && saveMutation.variables?.jobId === selectedItem.job.id}
           />
         </div>
       ) : listed.length === 0 && !scouting ? (
@@ -543,7 +578,7 @@ export function JobsPage() {
                     saved: Boolean(selectedItem.job.saved),
                   })
                 }
-                savePending={saveMutation.isPending}
+                savePending={saveMutation.isPending && saveMutation.variables?.jobId === selectedItem.job.id}
               />
             ) : (
               <p className="text-sm text-muted-foreground">Select a job to preview it here.</p>
