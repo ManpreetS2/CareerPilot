@@ -259,14 +259,14 @@ export function JobDetailPage() {
         } catch {
           /* stored profile is optional */
         }
-        await refreshIntelligence();
       }
+      await refreshIntelligence();
     } catch (err) {
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         setMatch(null);
         setScoreError(err);
-        await refreshIntelligence();
       }
+      await refreshIntelligence();
     } finally {
       if (requestId === scoringRequest.current && requestJobId === jobId) {
         scoringInFlight.current = false;
