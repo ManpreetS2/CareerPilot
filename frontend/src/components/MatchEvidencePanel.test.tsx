@@ -23,17 +23,50 @@ function evidence(overrides: Partial<MatchEvidence> = {}): MatchEvidence {
     },
     factors: [
       {
+        id: "factor_required_skills",
+        job_id: "job-1",
+        category: "skill",
+        section: "required_skills",
+        label: "Required skills",
+        importance: "required",
+        status: "not_applicable",
+        rule_id: "required_skills_v2",
+        rule_version: "v2",
+        explanation:
+          "No required technical skills were structured for Fit V2. Preferred and plus skills do not count toward the Required Skills component.",
+        scoring_effect: "This posting has no required-skill dimension. Preferred skills do not contribute to Required Skills.",
+        job_evidence_refs: [],
+        candidate_evidence_refs: [],
+      },
+      {
+        id: "factor_preferred_skills",
+        job_id: "job-1",
+        category: "skill",
+        section: "preferred_skills",
+        label: "Preferred skills",
+        importance: "preferred",
+        status: "satisfied",
+        score_contribution: 10,
+        max_contribution: 10,
+        rule_id: "preferred_skills_v2",
+        rule_version: "v2",
+        explanation: "Preferred skills matched. These do not count toward the Required Skills component.",
+        scoring_effect: "Contributes to the Fit V2 preferred-skill dimension, not Required Skills.",
+        job_evidence_refs: [],
+        candidate_evidence_refs: [],
+      },
+      {
         id: "factor_skill_python",
         job_id: "job-1",
         category: "skill",
-        section: "qualifications",
+        section: "preferred_skills",
         label: "Python",
+        importance: "preferred",
         status: "satisfied",
-        score_contribution: 18,
-        max_contribution: 25,
-        rule_id: "required_skills_v2",
+        rule_id: "preferred_skills_v2",
         rule_version: "v2",
-        explanation: "Exact skill match against stored candidate evidence.",
+        explanation: "Exact skill match against stored candidate evidence. Employer wording: Python a plus.",
+        scoring_effect: "Does not contribute to the Required Skills component. Contributes to Preferred qualifications when Fit V2 scores preferred skills.",
         job_evidence_refs: ["ev_job"],
         candidate_evidence_refs: ["ev_cand"],
       },
@@ -41,12 +74,14 @@ function evidence(overrides: Partial<MatchEvidence> = {}): MatchEvidence {
         id: "factor_skill_docker",
         job_id: "job-1",
         category: "skill",
-        section: "qualifications",
+        section: "required_skills",
         label: "Docker",
+        importance: "required",
         status: "not_satisfied",
         rule_id: "required_skills_v2",
         rule_version: "v2",
         explanation: "No supporting candidate evidence found.",
+        scoring_effect: "Contributes to the Required Skills component. Individual skills are not assigned separate point values.",
         job_evidence_refs: ["ev_docker"],
         candidate_evidence_refs: [],
       },
@@ -101,7 +136,7 @@ function evidence(overrides: Partial<MatchEvidence> = {}): MatchEvidence {
       ev_job: {
         id: "ev_job",
         source_type: "job_requirement",
-        exact_text: "Experience with Python required",
+        exact_text: "Python a plus",
       },
       ev_cand: {
         id: "ev_cand",
@@ -135,18 +170,71 @@ function evidence(overrides: Partial<MatchEvidence> = {}): MatchEvidence {
 }
 
 describe("MatchEvidencePanel", () => {
-  it("groups factors and opens the evidence drawer", async () => {
+  it("groups required and preferred factors and opens the evidence drawer", async () => {
     const user = userEvent.setup();
     wrap(<MatchEvidencePanel data={evidence()} loading={false} error={null} onRetry={() => undefined} />);
     expect(screen.getByText("Why CareerPilot gave this match")).toBeInTheDocument();
-    expect(screen.getByText("Qualifications")).toBeInTheDocument();
+    expect(screen.getByTestId("evidence-section-required_skills")).toBeInTheDocument();
+    expect(screen.getByTestId("evidence-section-preferred_skills")).toBeInTheDocument();
     expect(screen.getByText("Eligibility")).toBeInTheDocument();
     expect(screen.getByText(/Probably Skip/)).toBeInTheDocument();
-    const evidenceButtons = screen.getAllByRole("button", { name: "View evidence" });
-    await user.click(evidenceButtons[1]!);
+    const python = screen.getByTestId("factor-factor_skill_python");
+    await user.click(python.querySelector("button")!);
     expect(await screen.findByTestId("evidence-drawer")).toBeInTheDocument();
     expect(screen.getByText("Built PagePulse backend using Python")).toBeInTheDocument();
-    expect(screen.getByText("Experience with Python required")).toBeInTheDocument();
+    expect(screen.getByText("Python a plus")).toBeInTheDocument();
+    expect(screen.getByText(/Employer importance:\s*Preferred/)).toBeInTheDocument();
+    expect(screen.getByTestId("evidence-scoring-effect")).toHaveTextContent(
+      "Does not contribute to the Required Skills component",
+    );
+  });
+
+  it("explains N/A required skills next to satisfied preferred skills", () => {
+    wrap(<MatchEvidencePanel data={evidence()} loading={false} error={null} onRetry={() => undefined} />);
+    const required = screen.getByTestId("factor-factor_required_skills");
+    expect(required).toHaveTextContent("Not applicable");
+    expect(required).toHaveTextContent("Preferred");
+    expect(required).not.toHaveTextContent("0 / 25");
+    const python = screen.getByTestId("factor-factor_skill_python");
+    expect(python).toHaveTextContent("Satisfied");
+    expect(python).toHaveTextContent("Preferred");
+    expect(python).not.toHaveTextContent("18 / 25");
+    expect(screen.getAllByText("Python")).toHaveLength(1);
+  });
+
+  it("does not render duplicate contradictory Python rows", () => {
+    wrap(<MatchEvidencePanel data={evidence()} loading={false} error={null} onRetry={() => undefined} />);
+    const pythonRows = screen.getAllByText("Python");
+    expect(pythonRows).toHaveLength(1);
+    expect(screen.queryByText("Python a plus")).not.toBeInTheDocument();
+  });
+
+  it("shows 0/25 required skills without implying preferred skills earned those points", () => {
+    wrap(
+      <MatchEvidencePanel
+        data={evidence({
+          factors: evidence().factors.map((factor) =>
+            factor.id === "factor_required_skills"
+              ? {
+                  ...factor,
+                  status: "not_satisfied",
+                  score_contribution: 0,
+                  max_contribution: 25,
+                  explanation: "0 / 4 required skills matched. Preferred skills do not count toward this component.",
+                }
+              : factor,
+          ),
+        })}
+        loading={false}
+        error={null}
+        onRetry={() => undefined}
+      />,
+    );
+    const required = screen.getByTestId("factor-factor_required_skills");
+    expect(required).toHaveTextContent("0 / 25");
+    expect(required).toHaveTextContent("Preferred skills do not count toward this component");
+    expect(screen.getByTestId("factor-factor_skill_python")).toHaveTextContent("Preferred");
+    expect(screen.getByTestId("factor-factor_skill_python")).not.toHaveTextContent("0 / 25");
   });
 
   it("shows missing candidate evidence without claiming the candidate lacks the skill", async () => {

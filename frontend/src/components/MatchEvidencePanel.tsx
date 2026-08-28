@@ -9,10 +9,18 @@ import type {
 import { cn } from "../lib/cn";
 
 const SECTION_TITLE: Record<MatchFactor["section"], string> = {
+  required_skills: "Required skills",
+  preferred_skills: "Preferred skills",
   qualifications: "Qualifications",
   eligibility: "Eligibility",
   work_location: "Work & location",
   preferences: "Preferences",
+};
+
+const IMPORTANCE_LABEL: Record<string, string> = {
+  required: "Required",
+  hard_required: "Hard required",
+  preferred: "Preferred",
 };
 
 const RESULT_LABEL: Record<FactorStatus, string> = {
@@ -44,6 +52,8 @@ function factorDetail(
     factor: factor.label,
     result: RESULT_LABEL[factor.status],
     resultKind: factor.status,
+    importance: factor.importance ? IMPORTANCE_LABEL[factor.importance] || factor.importance : null,
+    scoringEffect: factor.scoring_effect,
     jobEvidence: texts(factor.job_evidence_refs, evidence),
     candidateEvidence: candidate,
     rule: `${factor.rule_id} ${factor.rule_version}`,
@@ -80,10 +90,14 @@ function FactorRow({
           {factor.label}
         </p>
         <p className="text-xs text-muted-foreground">
+          {factor.importance ? `${IMPORTANCE_LABEL[factor.importance] || factor.importance} · ` : ""}
           {RESULT_LABEL[factor.status]}
           {contribution ? ` · ${contribution}` : ""}
           {factor.hard_blocker ? " · Hard requirement" : ""}
         </p>
+        {factor.id === "factor_required_skills" || factor.id === "factor_preferred_skills" ? (
+          <p className="mt-1 text-xs text-muted-foreground">{factor.explanation}</p>
+        ) : null}
       </div>
       <EvidencePathButton
         claim={factor.label}
@@ -201,7 +215,14 @@ export function MatchEvidencePanel({
     );
   }
 
-  const sections: MatchFactor["section"][] = ["qualifications", "eligibility", "work_location", "preferences"];
+  const sections: MatchFactor["section"][] = [
+    "required_skills",
+    "preferred_skills",
+    "qualifications",
+    "eligibility",
+    "work_location",
+    "preferences",
+  ];
   const groupedIds = new Set(data.groups.flatMap((group) => group.branch_ids));
 
   return (
@@ -229,7 +250,7 @@ export function MatchEvidencePanel({
         });
         if (rows.length === 0) return null;
         return (
-          <div key={section}>
+          <div key={section} data-testid={`evidence-section-${section}`}>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{SECTION_TITLE[section]}</h3>
             <div className="mt-2 space-y-2">
               {rows.map((factor) => (

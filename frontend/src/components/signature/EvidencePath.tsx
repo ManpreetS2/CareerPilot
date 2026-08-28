@@ -8,6 +8,8 @@ export type EvidenceDrawerModel = {
   factor: string;
   result: string;
   resultKind?: FactorStatus;
+  importance?: string | null;
+  scoringEffect?: string | null;
   jobEvidence: string[];
   candidateEvidence: string[];
   rule: string;
@@ -94,6 +96,11 @@ export function EvidencePathButton({
                 <li>
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Job claim</p>
                   <p className="mt-1 font-medium">{detail.factor}</p>
+                  {detail.importance ? (
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Employer importance: {detail.importance}
+                    </p>
+                  ) : null}
                 </li>
                 <li className="border-l border-border/80 pl-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rule</p>
@@ -124,6 +131,14 @@ export function EvidencePathButton({
                   <StatusLabel kind={detail.resultKind} label={detail.result} />
                   <p className="mt-1 text-muted-foreground">{detail.explanation}</p>
                 </li>
+                {detail.scoringEffect ? (
+                  <li>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scoring effect</p>
+                    <p className="mt-1" data-testid="evidence-scoring-effect">
+                      {detail.scoringEffect}
+                    </p>
+                  </li>
+                ) : null}
               </ol>
             ) : (
               <>

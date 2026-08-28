@@ -45,9 +45,10 @@ from backend.services.analysis_service import (
     _record_to_match_score,
     load_job,
     load_preferences,
+    skill_concepts_in_label,
 )
 from backend.services.candidate_provenance import fingerprint_for_candidate, hash_canonical
-from backend.services.fit_v2 import QUAL_REQUIRED_SKILLS
+from backend.services.fit_v2 import QUAL_PREFERRED, QUAL_REQUIRED_SKILLS
 from backend.services.job_requirement_extractor import load_requirement_profile
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ STALE_NOTICE = "This evidence is stale. Calculate Fit again to refresh it."
 UNSTORED_NOTICE = "Evidence for this score is not stored yet. Calculate Fit to generate it."
 
 _CATEGORY_SECTION: dict[str, FactorSection] = {
-    "skill": "qualifications",
+    "skill": "required_skills",
     "experience": "qualifications",
     "responsibility": "qualifications",
     "education": "qualifications",
@@ -191,6 +192,23 @@ def _stringify_item(item: Any) -> str:
     return str(item)
 
 
+def _blob_covers_skill(blob: str, skill: str) -> bool:
+    if not blob.strip() or not skill.strip():
+        return False
+    want = set(skill_concepts_in_label(skill))
+    if want:
+        return bool(want & set(skill_concepts_in_label(blob)))
+    return skill.strip().lower() in blob.lower()
+
+
+def _snippet_for_skill(blob: str, skill: str) -> str | None:
+    if not _blob_covers_skill(blob, skill):
+        return None
+    concepts = skill_concepts_in_label(skill)
+    needle = concepts[0] if len(concepts) == 1 else skill
+    return _line_with(blob, needle) or blob.strip()[:280]
+
+
 def _find_candidate_skill_refs(store: MatchEvidenceStore, candidate: Candidate, skill: str) -> list[str]:
     needle = skill.strip()
     if not needle:
@@ -198,7 +216,7 @@ def _find_candidate_skill_refs(store: MatchEvidenceStore, candidate: Candidate, 
     refs: list[str] = []
     for index, project in enumerate(candidate.projects or []):
         blob = _stringify_item(project)
-        line = _line_with(blob, needle)
+        line = _snippet_for_skill(blob, needle)
         if not line:
             continue
         name = project.get("name") if isinstance(project, dict) else None
@@ -214,7 +232,7 @@ def _find_candidate_skill_refs(store: MatchEvidenceStore, candidate: Candidate, 
         return refs
     for index, role in enumerate(candidate.experience or []):
         blob = _stringify_item(role)
-        line = _line_with(blob, needle)
+        line = _snippet_for_skill(blob, needle)
         if not line:
             continue
         title = role.get("title") if isinstance(role, dict) else None
@@ -228,8 +246,38 @@ def _find_candidate_skill_refs(store: MatchEvidenceStore, candidate: Candidate, 
             )
         )
         return refs
+    for index, item in enumerate(candidate.education or []):
+        blob = _stringify_item(item)
+        line = _snippet_for_skill(blob, needle)
+        if not line:
+            continue
+        refs.append(
+            store.add(
+                source_type="candidate_education",
+                exact_text=line,
+                source_entity_id=str(index),
+                field="education",
+                locator=f"education[{index}]",
+            )
+        )
+        return refs
+    for index, cert in enumerate(candidate.certifications or []):
+        blob = _stringify_item(cert)
+        line = _snippet_for_skill(blob, needle)
+        if not line:
+            continue
+        refs.append(
+            store.add(
+                source_type="candidate_profile",
+                exact_text=line,
+                source_entity_id=str(index),
+                field="certifications",
+                locator=f"certifications[{index}]",
+            )
+        )
+        return refs
     for index, listed in enumerate(candidate.skills or []):
-        if needle.lower() not in str(listed).lower() and str(listed).lower() not in needle.lower():
+        if not _blob_covers_skill(str(listed), needle):
             continue
         refs.append(
             store.add(
@@ -300,6 +348,268 @@ def _job_posting_ref(store: MatchEvidenceStore, job: JobRecord, needle: str, ent
     )
 
 
+def _skill_group_key(label: str) -> tuple[str, str]:
+    concepts = skill_concepts_in_label(label)
+    if len(concepts) == 1:
+        return ("skill", concepts[0].lower())
+    if len(concepts) >= 2:
+        return ("skills", "|".join(sorted(item.lower() for item in concepts)))
+    return ("phrase", re.sub(r"\s+", " ", label.strip().lower()))
+
+
+def _combine_skill_status(statuses: list[RequirementStatus]) -> RequirementStatus:
+    if any(item == "satisfied" for item in statuses):
+        return "satisfied"
+    if any(item == "partially_satisfied" for item in statuses):
+        return "partially_satisfied"
+    if statuses and all(item == "not_satisfied" for item in statuses):
+        return "not_satisfied"
+    return "unknown"
+
+
+def _display_skill_label(kind: str, labels: list[str]) -> str:
+    if kind == "skill":
+        concepts = skill_concepts_in_label(labels[0])
+        return concepts[0] if concepts else labels[0]
+    if kind == "skills":
+        return min(labels, key=len)
+    return labels[0]
+
+
+def _importance_bucket(value: str | None) -> str:
+    if value in ("required", "hard_required"):
+        return "required"
+    return "preferred"
+
+
+def _count_by_status(labels: list[str], matched: list[str], partial: list[str], missing: list[str]) -> tuple[int, int, int]:
+    sat = part = miss = 0
+    for label in labels:
+        status = _status_from_membership(label, matched, partial, missing)
+        if status == "satisfied":
+            sat += 1
+        elif status == "partially_satisfied":
+            part += 1
+        elif status == "not_satisfied":
+            miss += 1
+    return sat, part, miss
+
+
+def _component_status(ratio: float | None, labels: list[str], matched: list[str], partial: list[str], missing: list[str]) -> RequirementStatus:
+    if ratio is None:
+        return "not_applicable"
+    sat, part, miss = _count_by_status(labels, matched, partial, missing)
+    if sat == len(labels) and miss == 0 and part == 0:
+        return "satisfied"
+    if sat == 0 and part == 0:
+        return "not_satisfied"
+    return "partially_satisfied"
+
+
+def _find_skill_requirement(
+    profile: JobRequirementProfile | None,
+    labels: list[str],
+    importance: str,
+) -> Requirement | None:
+    if profile is None:
+        return None
+    target = {_skill_group_key(item) for item in labels}
+    want = _importance_bucket(importance)
+    for requirement in profile.requirements:
+        kind = (requirement.structured_condition or {}).get("kind")
+        if kind != "skill":
+            continue
+        if _importance_bucket(requirement.importance) != want:
+            continue
+        name = str((requirement.structured_condition or {}).get("name") or requirement.text)
+        if _skill_group_key(name) in target:
+            return requirement
+    return None
+
+
+def _append_fit_skill_factors(
+    *,
+    store: MatchEvidenceStore,
+    factors: list[MatchFactor],
+    job: JobRecord,
+    candidate: Candidate,
+    profile: JobRequirementProfile | None,
+    breakdown: ScoreBreakdown,
+    matched: list[str],
+    partial: list[str],
+    missing: list[str],
+) -> set[tuple[str, tuple[str, str]]]:
+    public_id = job.public_id
+    required_labels = list(breakdown.required_skill_labels or [])
+    preferred_labels = list(breakdown.preferred_skill_labels or [])
+    required_ratio = breakdown.skill_required_ratio
+    preferred_ratio = breakdown.skill_preferred_ratio
+    max_required = round(QUAL_REQUIRED_SKILLS * 100, 1)
+    max_preferred = round(QUAL_PREFERRED * 100, 1)
+    represented: set[tuple[str, tuple[str, str]]] = set()
+
+    if required_ratio is None:
+        factors.append(
+            MatchFactor(
+                id="factor_required_skills",
+                job_id=public_id,
+                category="skill",
+                section="required_skills",
+                label="Required skills",
+                importance="required",
+                status="not_applicable",
+                score_contribution=None,
+                max_contribution=None,
+                rule_id="required_skills_v2",
+                rule_version="v2",
+                explanation=(
+                    "No required technical skills were structured for Fit V2. "
+                    "Preferred and plus skills do not count toward the Required Skills component."
+                ),
+                scoring_effect=(
+                    "This posting has no required-skill dimension. Preferred skills do not "
+                    "contribute to Required Skills."
+                ),
+            )
+        )
+    else:
+        sat, _part, _miss = _count_by_status(required_labels, matched, partial, missing)
+        factors.append(
+            MatchFactor(
+                id="factor_required_skills",
+                job_id=public_id,
+                category="skill",
+                section="required_skills",
+                label="Required skills",
+                importance="required",
+                status=_component_status(required_ratio, required_labels, matched, partial, missing),
+                score_contribution=round(max_required * required_ratio, 1),
+                max_contribution=max_required,
+                rule_id="required_skills_v2",
+                rule_version="v2",
+                explanation=(
+                    f"{sat} / {len(required_labels)} required skills matched."
+                    if required_labels
+                    else "Required skills were scored by Fit V2."
+                ),
+                scoring_effect="This is the Fit V2 Required Skills component.",
+            )
+        )
+
+    if preferred_ratio is None:
+        if preferred_labels:
+            factors.append(
+                MatchFactor(
+                    id="factor_preferred_skills",
+                    job_id=public_id,
+                    category="skill",
+                    section="preferred_skills",
+                    label="Preferred skills",
+                    importance="preferred",
+                    status="not_applicable",
+                    rule_id="preferred_skills_v2",
+                    rule_version="v2",
+                    explanation="Preferred skills were listed but Fit V2 did not score a preferred-skill dimension.",
+                    scoring_effect="Does not contribute to the Required Skills component.",
+                )
+            )
+    else:
+        sat, _part, _miss = _count_by_status(preferred_labels, matched, partial, missing)
+        factors.append(
+            MatchFactor(
+                id="factor_preferred_skills",
+                job_id=public_id,
+                category="skill",
+                section="preferred_skills",
+                label="Preferred skills",
+                importance="preferred",
+                status=_component_status(preferred_ratio, preferred_labels, matched, partial, missing),
+                score_contribution=round(max_preferred * preferred_ratio, 1),
+                max_contribution=max_preferred,
+                rule_id="preferred_skills_v2",
+                rule_version="v2",
+                explanation=(
+                    f"{sat} / {len(preferred_labels)} preferred or stack skills matched. "
+                    "These do not count toward the Required Skills component."
+                ),
+                scoring_effect="Contributes to the Fit V2 preferred-skill dimension, not Required Skills.",
+            )
+        )
+
+    def _emit_rows(labels: list[str], *, importance: str, section: FactorSection, scoring_effect: str, rule_id: str) -> None:
+        buckets: dict[tuple[str, str], list[str]] = {}
+        for label in labels:
+            buckets.setdefault(_skill_group_key(label), []).append(label)
+        for key, group_labels in buckets.items():
+            represented.add((_importance_bucket(importance), key))
+            status = _combine_skill_status(
+                [_status_from_membership(item, matched, partial, missing) for item in group_labels]
+            )
+            display = _display_skill_label(key[0], group_labels)
+            requirement = _find_skill_requirement(profile, group_labels, importance)
+            job_refs: list[str] = []
+            if requirement:
+                ref = _job_requirement_ref(store, requirement)
+                if ref:
+                    job_refs.append(ref)
+            for label in group_labels:
+                job_refs.append(_job_posting_ref(store, job, label, f"skill:{label}"))
+            job_refs = list(dict.fromkeys(job_refs))
+            cand_refs = _find_candidate_skill_refs(store, candidate, display)
+            if not cand_refs:
+                for label in group_labels:
+                    cand_refs = _find_candidate_skill_refs(store, candidate, label)
+                    if cand_refs:
+                        break
+            if status == "not_satisfied":
+                explanation = MISSING_CANDIDATE_EVIDENCE
+                cand_refs = []
+            elif not cand_refs:
+                explanation = MISSING_CANDIDATE_EVIDENCE
+            else:
+                extra = ""
+                if any(item.strip().lower() != display.strip().lower() for item in group_labels):
+                    extra = " Employer wording: " + "; ".join(dict.fromkeys(group_labels)) + "."
+                explanation = f"Exact skill match against stored candidate evidence.{extra}"
+            if status == "unknown":
+                explanation = MISSING_CANDIDATE_EVIDENCE
+            identity = display.lower()
+            factors.append(
+                MatchFactor(
+                    id=f"factor_skill_{importance}_{hashlib.sha256(identity.encode()).hexdigest()[:10]}",
+                    job_id=public_id,
+                    category="skill",
+                    section=section,
+                    label=display,
+                    importance=importance,
+                    status=status,
+                    rule_id=rule_id,
+                    rule_version="v2",
+                    explanation=explanation,
+                    job_evidence_refs=job_refs,
+                    candidate_evidence_refs=cand_refs,
+                    requirement_id=requirement.id if requirement else None,
+                    scoring_effect=scoring_effect,
+                )
+            )
+
+    _emit_rows(
+        required_labels,
+        importance="required",
+        section="required_skills",
+        scoring_effect="Contributes to the Required Skills component. Individual skills are not assigned separate point values.",
+        rule_id="required_skills_v2",
+    )
+    _emit_rows(
+        preferred_labels,
+        importance="preferred",
+        section="preferred_skills",
+        scoring_effect="Does not contribute to the Required Skills component. Contributes to Preferred qualifications when Fit V2 scores preferred skills.",
+        rule_id="preferred_skills_v2",
+    )
+    return represented
+
+
 def _status_from_membership(label: str, matched: list[str], partial: list[str], missing: list[str]) -> RequirementStatus:
     key = label.strip().lower()
     if any(key == item.strip().lower() for item in matched):
@@ -366,78 +676,17 @@ def build_match_evidence_payload(
     partial = list(breakdown.partial or score.partial_matches)
     missing = list(breakdown.missing or score.missing_skills)
 
-    required_n = len((profile.required_skills if profile else []) or [])
-    if required_n == 0:
-        required_n = len(matched) + len(missing)
-    matched_n = max(required_n - len(missing), 0) if required_n else len(matched)
-    max_skills = round(QUAL_REQUIRED_SKILLS * 100, 1)
-    skill_contribution = None
-    if required_n:
-        skill_contribution = round(max_skills * (matched_n / required_n), 1)
-
-    factors.append(
-        MatchFactor(
-            id="factor_required_skills",
-            job_id=public_id,
-            category="skill",
-            section="qualifications",
-            label="Required skills",
-            importance="required",
-            status="satisfied" if required_n and matched_n == required_n else (
-                "not_satisfied" if missing else "partially_satisfied" if matched else "unknown"
-            ),
-            score_contribution=skill_contribution,
-            max_contribution=max_skills if required_n else None,
-            rule_id="required_skills_v2",
-            rule_version="v2",
-            explanation=(
-                f"{matched_n} / {required_n} required skills matched."
-                if required_n
-                else "No required skills were structured for this posting."
-            ),
-        )
+    represented_skills = _append_fit_skill_factors(
+        store=store,
+        factors=factors,
+        job=job,
+        candidate=candidate,
+        profile=profile,
+        breakdown=breakdown,
+        matched=matched,
+        partial=partial,
+        missing=missing,
     )
-
-    labels = list(dict.fromkeys([*matched, *partial, *missing]))
-    for label in labels:
-        status = _status_from_membership(label, matched, partial, missing)
-        job_refs: list[str] = []
-        cand_refs = _find_candidate_skill_refs(store, candidate, label)
-        if profile:
-            for requirement in profile.requirements:
-                kind = (requirement.structured_condition or {}).get("kind")
-                name = str((requirement.structured_condition or {}).get("name") or requirement.text)
-                if kind == "skill" and label.lower() in name.lower():
-                    ref = _job_requirement_ref(store, requirement)
-                    if ref:
-                        job_refs.append(ref)
-            if not job_refs and label.lower() in " ".join(profile.required_skills).lower():
-                job_refs.append(_job_posting_ref(store, job, label, f"skill:{label}"))
-        if not job_refs:
-            job_refs.append(_job_posting_ref(store, job, label, f"skill:{label}"))
-        if status == "not_satisfied":
-            explanation = MISSING_CANDIDATE_EVIDENCE
-            cand_refs = []
-        elif not cand_refs:
-            explanation = MISSING_CANDIDATE_EVIDENCE
-        else:
-            explanation = "Exact skill match against stored candidate evidence."
-        factors.append(
-            MatchFactor(
-                id=f"factor_skill_{hashlib.sha256(label.lower().encode()).hexdigest()[:10]}",
-                job_id=public_id,
-                category="skill",
-                section="qualifications",
-                label=label,
-                importance="required" if label in missing or label in matched else "preferred",
-                status=status,
-                rule_id="required_skills_v2",
-                rule_version="v2",
-                explanation=explanation,
-                job_evidence_refs=job_refs,
-                candidate_evidence_refs=cand_refs,
-            )
-        )
 
     if profile and profile.work_mode and profile.work_mode != "unknown":
         loc_text = profile.locations[0].evidence_text if profile.locations and profile.locations[0].evidence_text else None
@@ -526,13 +775,28 @@ def build_match_evidence_payload(
         )
         if requirement.id in grouped_ids:
             continue
+        if str(kind) == "skill":
+            name = str((requirement.structured_condition or {}).get("name") or requirement.text)
+            key = _skill_group_key(name)
+            if (_importance_bucket(requirement.importance), key) in represented_skills:
+                continue
         hard = requirement.importance == "hard_required" and comparison.status == "not_satisfied"
+        section: FactorSection = _CATEGORY_SECTION.get(category, "qualifications")
+        if str(kind) == "skill":
+            section = "required_skills" if _importance_bucket(requirement.importance) == "required" else "preferred_skills"
+        scoring_effect = None
+        if str(kind) == "skill":
+            scoring_effect = (
+                "Contributes to the Required Skills component. Individual skills are not assigned separate point values."
+                if _importance_bucket(requirement.importance) == "required"
+                else "Does not contribute to the Required Skills component. Contributes to Preferred qualifications when Fit V2 scores preferred skills."
+            )
         factors.append(
             MatchFactor(
                 id=f"factor_req_{requirement.id}",
                 job_id=public_id,
                 category=category,
-                section=_CATEGORY_SECTION.get(category, "qualifications"),
+                section=section,
                 label=requirement.text,
                 importance=requirement.importance,
                 status=comparison.status,
@@ -543,6 +807,7 @@ def build_match_evidence_payload(
                 candidate_evidence_refs=cand_refs if comparison.status != "unknown" or cand_refs else cand_refs,
                 requirement_id=requirement.id,
                 hard_blocker=hard,
+                scoring_effect=scoring_effect,
             )
         )
 
@@ -601,6 +866,68 @@ def build_match_evidence_payload(
     }
 
 
+class MatchEvidenceConsistencyError(Exception):
+    def __init__(self, reasons: list[str]) -> None:
+        self.reasons = reasons
+        super().__init__("match evidence consistency failed")
+
+
+def validate_match_evidence_payload(
+    payload: dict[str, Any],
+    *,
+    profile: JobRequirementProfile | None = None,
+) -> None:
+    reasons: list[str] = []
+    factors = [MatchFactor.model_validate(item) for item in payload.get("factors") or []]
+    evidence = payload.get("evidence") or {}
+    req_ids = {item.id for item in profile.requirements} if profile else set()
+    req_importance = {item.id: item.importance for item in profile.requirements} if profile else {}
+    seen_requirement: dict[str, str] = {}
+    component_totals: dict[str, float] = {"required_skills": 0.0, "preferred_skills": 0.0}
+    skill_rows: dict[tuple[str, tuple[str, str], str], list[MatchFactor]] = {}
+
+    for factor in factors:
+        for ref in [*factor.job_evidence_refs, *factor.candidate_evidence_refs]:
+            if ref not in evidence:
+                reasons.append("missing_evidence_ref")
+        if factor.score_contribution is not None and factor.max_contribution is not None:
+            if factor.score_contribution > factor.max_contribution + 0.05:
+                reasons.append("contribution_exceeds_max")
+        if factor.section in component_totals and factor.score_contribution is not None:
+            component_totals[factor.section] += factor.score_contribution
+        if factor.requirement_id:
+            previous = seen_requirement.get(factor.requirement_id)
+            if previous and previous != factor.id:
+                reasons.append("duplicate_requirement")
+            seen_requirement[factor.requirement_id] = factor.id
+            if profile is not None and factor.requirement_id not in req_ids:
+                reasons.append("stale_requirement")
+            if factor.requirement_id in req_importance:
+                if _importance_bucket(factor.importance) != _importance_bucket(req_importance[factor.requirement_id]):
+                    reasons.append("importance_mismatch")
+        if (
+            factor.category == "skill"
+            and factor.id not in {"factor_required_skills", "factor_preferred_skills"}
+        ):
+            key = (factor.section, _skill_group_key(factor.label), _importance_bucket(factor.importance))
+            skill_rows.setdefault(key, []).append(factor)
+
+    if component_totals["required_skills"] > round(QUAL_REQUIRED_SKILLS * 100, 1) + 0.05:
+        reasons.append("required_component_exceeds_max")
+    if component_totals["preferred_skills"] > round(QUAL_PREFERRED * 100, 1) + 0.05:
+        reasons.append("preferred_component_exceeds_max")
+    for group in skill_rows.values():
+        statuses = {item.status for item in group}
+        if "satisfied" in statuses and "not_satisfied" in statuses:
+            reasons.append("contradictory_skill")
+        if len(group) > 1:
+            reasons.append("duplicate_skill_row")
+
+    unique = list(dict.fromkeys(reasons))
+    if unique:
+        raise MatchEvidenceConsistencyError(unique)
+
+
 def persist_match_evidence(
     db: Session,
     *,
@@ -612,7 +939,7 @@ def persist_match_evidence(
     report: EligibilityReport | None,
     breakdown: ScoreBreakdown,
     score: MatchScore,
-) -> MatchEvidenceRecord:
+) -> MatchEvidenceRecord | None:
     score_row = (
         db.query(MatchScoreRecord)
         .filter(MatchScoreRecord.job_id == job.id, MatchScoreRecord.candidate_id == candidate.id)
@@ -632,6 +959,19 @@ def persist_match_evidence(
         score=score,
         full=full,
     )
+    try:
+        validate_match_evidence_payload(payload, profile=profile)
+    except MatchEvidenceConsistencyError as exc:
+        logger.warning(
+            "match evidence skipped job_pk=%s reasons=%s",
+            job.id,
+            ",".join(exc.reasons),
+        )
+        return (
+            db.query(MatchEvidenceRecord)
+            .filter(MatchEvidenceRecord.match_score_id == score_row.id)
+            .first()
+        )
     cand_fp = fingerprint_for_candidate(db, candidate, user_id)
     pref_fp = preference_fingerprint(preferences)
     req_fp = profile.source_fingerprint if profile else None
@@ -793,5 +1133,7 @@ __all__ = [
     "StoredScoreNotFoundError",
     "get_match_evidence",
     "persist_match_evidence",
+    "validate_match_evidence_payload",
+    "MatchEvidenceConsistencyError",
     "preference_fingerprint",
 ]

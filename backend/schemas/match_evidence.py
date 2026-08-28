@@ -35,7 +35,14 @@ FactorCategory = Literal[
     "other_requirement",
 ]
 
-FactorSection = Literal["qualifications", "eligibility", "work_location", "preferences"]
+FactorSection = Literal[
+    "required_skills",
+    "preferred_skills",
+    "qualifications",
+    "eligibility",
+    "work_location",
+    "preferences",
+]
 
 EvidenceSourceType = Literal[
     "candidate_resume",
@@ -76,6 +83,7 @@ class MatchFactor(BaseModel):
     requirement_id: str | None = None
     group_id: str | None = None
     hard_blocker: bool = False
+    scoring_effect: str | None = None
 
 
 class RequirementEvaluation(BaseModel):

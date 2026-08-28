@@ -439,7 +439,7 @@ export type MatchFactor = {
   id: string;
   job_id: string;
   category: string;
-  section: "qualifications" | "eligibility" | "work_location" | "preferences";
+  section: "required_skills" | "preferred_skills" | "qualifications" | "eligibility" | "work_location" | "preferences";
   label: string;
   importance?: string | null;
   status: FactorStatus;
@@ -453,6 +453,7 @@ export type MatchFactor = {
   requirement_id?: string | null;
   group_id?: string | null;
   hard_blocker?: boolean;
+  scoring_effect?: string | null;
 };
 
 export type RequirementEvaluation = {

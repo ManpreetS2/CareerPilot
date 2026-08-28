@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from datetime import date
 
-from backend.db.models import Candidate, JobRecord, MatchEvidenceRecord, TargetPreference, User
+import pytest
+
+from backend.db.models import Candidate, JobIntelligenceRecord, JobRecord, MatchEvidenceRecord, TargetPreference, User
+from backend.services.analysis_service import _canonical_skill_key, skill_concepts_in_label
 from backend.services.candidate_provenance import fingerprint_for_candidate
-from backend.services.match_evidence_service import get_match_evidence
+from backend.services.match_evidence_service import (
+    MatchEvidenceConsistencyError,
+    get_match_evidence,
+    validate_match_evidence_payload,
+)
 from backend.services.verified_fit_service import score_job_verified
 from tests.test_job_requirement_profile import LONG_POSTING, AS_OF
 
@@ -136,7 +143,9 @@ def test_missing_skill_does_not_fabricate_absence(isolated_session) -> None:
     missing_skills = [
         item
         for item in payload.factors
-        if item.category == "skill" and item.status == "not_satisfied" and item.id != "factor_required_skills"
+        if item.category == "skill"
+        and item.status == "not_satisfied"
+        and item.id not in {"factor_required_skills", "factor_preferred_skills"}
     ]
     assert missing_skills
     target = missing_skills[0]
@@ -237,3 +246,217 @@ def test_score_contribution_is_numeric_not_ai_prose(isolated_session) -> None:
     assert skills.score_contribution is not None
     assert "AI thinks" not in skills.explanation
     assert fingerprint_for_candidate(isolated_session, candidate, 1)
+
+
+AVAILITY_POSTING = """
+Software Engineering Intern — Availity inspired
+
+The team works on healthcare interoperability services.
+
+Nice to have
+Python a plus
+SQL preferred
+
+You will learn our stack on the job. Python and SQL are not hard requirements.
+"""
+
+
+def test_canonical_skill_identity_is_conservative() -> None:
+    assert _canonical_skill_key("Python a plus") == "Python"
+    assert _canonical_skill_key("python programming") == "Python"
+    assert _canonical_skill_key("SQL preferred") == "SQL"
+    assert _canonical_skill_key("Java") == "Java"
+    assert _canonical_skill_key("JavaScript") == "JavaScript"
+    assert _canonical_skill_key("Java") != _canonical_skill_key("JavaScript")
+    assert skill_concepts_in_label("React") == ["React"]
+    assert "React" not in skill_concepts_in_label("React Native")
+    from backend.services.match_evidence_service import _skill_group_key
+
+    assert _skill_group_key("JavaScript/React") == _skill_group_key(
+        "JavaScript/React experience a plus (the tool will have a web UI)"
+    )
+    assert _skill_group_key("Java") != _skill_group_key("JavaScript")
+
+
+def test_availity_preferred_skills_do_not_count_as_required(isolated_session) -> None:
+    _user(isolated_session)
+    job = JobRecord(
+        public_id="availity-python-plus",
+        title="Software Engineering Intern",
+        company="Availity",
+        location="Remote",
+        url="https://example.com/availity-python-plus",
+        description=AVAILITY_POSTING,
+        source="himalayas",
+        status="verified",
+        content_status="full",
+    )
+    isolated_session.add(job)
+    isolated_session.commit()
+    isolated_session.refresh(job)
+    isolated_session.add(
+        JobIntelligenceRecord(
+            job_id=job.id,
+            required_skills=[],
+            preferred_skills=["Python a plus", "SQL preferred"],
+            years_experience=None,
+            education_requirements=[],
+            tech_stack=["SQL"],
+            seniority="intern",
+            responsibilities=["Learn the healthcare stack"],
+            likely_interview_focus=[],
+        )
+    )
+    isolated_session.commit()
+    candidate = _candidate(isolated_session, 1, skills=["Python", "SQL"], projects=[], graduation_year="2027")
+    _prefs(isolated_session, candidate, academic_year="final_year", expected_graduation="2027-05")
+    score = score_job_verified(isolated_session, job, 1, as_of=AS_OF)
+    payload = get_match_evidence(isolated_session, job.public_id, 1)
+
+    required = next(item for item in payload.factors if item.id == "factor_required_skills")
+    assert required.status == "not_applicable"
+    assert required.score_contribution is None
+    assert required.max_contribution is None
+    assert "preferred" in required.explanation.lower()
+
+    python_rows = [item for item in payload.factors if item.label.lower() == "python"]
+    assert len(python_rows) == 1
+    python = python_rows[0]
+    assert python.importance == "preferred"
+    assert python.status == "satisfied"
+    assert python.section == "preferred_skills"
+    assert python.score_contribution is None
+    assert python.scoring_effect
+    assert "does not contribute to the required skills" in python.scoring_effect.lower()
+    assert not any(item.status == "not_satisfied" and "python" in item.label.lower() for item in payload.factors)
+
+    sql_rows = [item for item in payload.factors if item.label.lower() == "sql"]
+    assert len(sql_rows) == 1
+    assert sql_rows[0].importance == "preferred"
+    assert sql_rows[0].status == "satisfied"
+    assert sql_rows[0].score_contribution is None
+
+    preferred = next(item for item in payload.factors if item.id == "factor_preferred_skills")
+    skill_points = [
+        item.score_contribution
+        for item in payload.factors
+        if item.section == "preferred_skills" and item.score_contribution is not None
+    ]
+    assert skill_points
+    assert abs(sum(skill_points) - (preferred.score_contribution or 0)) < 0.05
+    required_points = [
+        item.score_contribution
+        for item in payload.factors
+        if item.section == "required_skills" and item.score_contribution is not None
+    ]
+    assert required_points == []
+    assert score.eligibility_status != "likely_ineligible"
+
+
+def test_required_skill_unsatisfied_stays_required(isolated_session) -> None:
+    _user(isolated_session)
+    job = _job(isolated_session)
+    candidate = _candidate(isolated_session, 1, skills=["Python"], projects=[], graduation_year="2027")
+    _prefs(isolated_session, candidate, academic_year="final_year", expected_graduation="2027-05")
+    score_job_verified(isolated_session, job, 1, as_of=AS_OF)
+    payload = get_match_evidence(isolated_session, job.public_id, 1)
+    sql = next((item for item in payload.factors if item.label.lower() == "sql"), None)
+    if sql is not None:
+        assert sql.importance == "required"
+        assert sql.status == "not_satisfied"
+        assert sql.candidate_evidence_refs == []
+        assert "does not know" not in sql.explanation.lower()
+
+
+def test_skill_factor_links_requirement_when_present(isolated_session) -> None:
+    _user(isolated_session)
+    job = _job(isolated_session)
+    candidate = _candidate(isolated_session, 1, graduation_year="2027")
+    _prefs(isolated_session, candidate, academic_year="final_year", expected_graduation="2027-05")
+    score_job_verified(isolated_session, job, 1, as_of=AS_OF)
+    payload = get_match_evidence(isolated_session, job.public_id, 1)
+    python = next(item for item in payload.factors if item.label.lower() == "python")
+    skill_evals = [
+        item
+        for item in payload.evaluations
+        if item.requirement_id and "python" in item.explanation.lower()
+    ]
+    if python.requirement_id:
+        linked = next(item for item in payload.evaluations if item.requirement_id == python.requirement_id)
+        assert linked.result == python.status
+    elif skill_evals:
+        pytest.fail("skill evaluations exist but Python factor has no requirement_id")
+
+
+def test_contradictory_duplicate_factors_are_rejected() -> None:
+    payload = {
+        "factors": [
+            {
+                "id": "factor_skill_preferred_python",
+                "job_id": "job-1",
+                "category": "skill",
+                "section": "preferred_skills",
+                "label": "Python",
+                "importance": "preferred",
+                "status": "satisfied",
+                "rule_id": "preferred_skills_v2",
+                "rule_version": "v2",
+                "explanation": "matched",
+            },
+            {
+                "id": "factor_skill_preferred_python_plus",
+                "job_id": "job-1",
+                "category": "skill",
+                "section": "preferred_skills",
+                "label": "Python a plus",
+                "importance": "preferred",
+                "status": "not_satisfied",
+                "rule_id": "preferred_skills_v2",
+                "rule_version": "v2",
+                "explanation": "missing",
+            },
+        ],
+        "evidence": {},
+    }
+    with pytest.raises(MatchEvidenceConsistencyError) as exc:
+        validate_match_evidence_payload(payload)
+    assert "contradictory_skill" in exc.value.reasons
+
+
+def test_component_contribution_cannot_exceed_max() -> None:
+    payload = {
+        "factors": [
+            {
+                "id": "factor_required_skills",
+                "job_id": "job-1",
+                "category": "skill",
+                "section": "required_skills",
+                "label": "Required skills",
+                "importance": "required",
+                "status": "satisfied",
+                "score_contribution": 20,
+                "max_contribution": 25,
+                "rule_id": "required_skills_v2",
+                "rule_version": "v2",
+                "explanation": "ok",
+            },
+            {
+                "id": "factor_skill_python",
+                "job_id": "job-1",
+                "category": "skill",
+                "section": "required_skills",
+                "label": "Python",
+                "importance": "required",
+                "status": "satisfied",
+                "score_contribution": 10,
+                "max_contribution": 25,
+                "rule_id": "required_skills_v2",
+                "rule_version": "v2",
+                "explanation": "ok",
+            },
+        ],
+        "evidence": {},
+    }
+    with pytest.raises(MatchEvidenceConsistencyError) as exc:
+        validate_match_evidence_payload(payload)
+    assert "required_component_exceeds_max" in exc.value.reasons
