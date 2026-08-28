@@ -102,6 +102,13 @@ describe("auth pages", () => {
     expect(api.login).not.toHaveBeenCalled();
   });
 
+  it("does not render a cursor-following pointer halo on login or dashboard", async () => {
+    renderApp("/login");
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
+    expect(screen.queryByTestId("pointer-halo")).not.toBeInTheDocument();
+    expect(document.querySelector(".pointer-halo")).toBeNull();
+  });
+
   it("keeps invalid credentials on /login with the sanitized backend message", async () => {
     vi.mocked(api.login).mockRejectedValue(new ApiClientError(401, "Invalid email or password."));
     renderApp("/login");

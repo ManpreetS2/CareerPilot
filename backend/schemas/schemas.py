@@ -242,6 +242,15 @@ class ResumeVersionDetail(ResumeVersionSummary):
     profile: ResumeVersionProfile
 
 
+class ExtensionResumeVersion(ResumeVersionSummary):
+    formats: list[Literal["pdf", "docx"]] = Field(default_factory=lambda: ["pdf", "docx"])
+
+
+class ExtensionResumeVersionList(BaseModel):
+    versions: list[ExtensionResumeVersion] = Field(default_factory=list)
+    current_job_id: str | None = None
+
+
 class InterviewPrep(BaseModel):
     job_id: str
     likely_questions: list[str] = Field(default_factory=list)

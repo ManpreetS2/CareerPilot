@@ -17,6 +17,7 @@ import type {
   JobRequirementProfile,
   JobSearchIntent,
   JobVerificationResponse,
+  MatchEvidence,
   MatchScore,
   ParseResumeResponse,
   CurrentProfile,
@@ -189,6 +190,9 @@ export const api = {
     request<JobRequirementProfile>(`/api/jobs/${jobId}/requirements`, {
       method: "POST",
     }),
+
+  getMatchEvidence: (jobId: string, init?: RequestInit) =>
+    request<MatchEvidence>(`/api/jobs/${jobId}/match-evidence`, init),
 
   getStoredScore: (jobId: string, init?: RequestInit) =>
     request<MatchScore>(`/api/jobs/${jobId}/score`, init),

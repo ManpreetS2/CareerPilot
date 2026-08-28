@@ -145,15 +145,22 @@ def evaluate_requirement(
         return RequirementComparison(requirement_id=requirement.id, status="unknown", reason="Equivalent experience was not independently verified here.")
 
     if kind == "skill":
-        name = str((requirement.structured_condition or {}).get("name") or "").strip().lower()
-        skills = [str(item).strip().lower() for item in (candidate.skills or []) if str(item).strip()]
+        from backend.services.analysis_service import candidate_covers_skill
+
+        name = str((requirement.structured_condition or {}).get("name") or requirement.text or "").strip()
         if not name:
             return RequirementComparison(requirement_id=requirement.id, status="unknown", reason="Skill name was not structured.")
-        if not skills:
-            return RequirementComparison(requirement_id=requirement.id, status="unknown", reason="Candidate skills are not on the profile.")
-        if any(name == item or name in item or item in name for item in skills):
-            return RequirementComparison(requirement_id=requirement.id, status="satisfied", reason=f"{name} is on the candidate profile.")
-        return RequirementComparison(requirement_id=requirement.id, status="not_satisfied", reason=f"{name} is not on the candidate profile.")
+        if candidate_covers_skill(candidate, name):
+            return RequirementComparison(
+                requirement_id=requirement.id,
+                status="satisfied",
+                reason="Grounded candidate evidence covers this skill.",
+            )
+        return RequirementComparison(
+            requirement_id=requirement.id,
+            status="unknown",
+            reason="No supporting candidate evidence found.",
+        )
 
     if kind == "work_authorization":
         auth = (preferences.work_authorization or "").strip().lower() if preferences else ""

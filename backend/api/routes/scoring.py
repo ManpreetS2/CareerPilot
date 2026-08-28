@@ -11,6 +11,7 @@ from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
 from backend.db.models import User
 from backend.schemas.job_requirements import JobRequirementProfile
+from backend.schemas.match_evidence import MatchEvidenceResponse
 from backend.schemas.schemas import JobIntelligence, MatchScore
 from backend.services.analysis_service import (
     CandidateRequiredError,
@@ -139,6 +140,21 @@ def score_job_route(
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         if _is_intelligence_pipeline_error(exc):
             raise _http_for_intelligence_error(exc) from exc
+        raise _http_for_scoring_error(exc) from exc
+
+
+@router.get("/jobs/{job_id}/match-evidence", response_model=MatchEvidenceResponse)
+def get_match_evidence_route(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
+    """Read persisted match evidence. Never scores, writes, or calls an LLM."""
+    from backend.services.match_evidence_service import get_match_evidence
+
+    try:
+        return get_match_evidence(db, job_id, user.id)
+    except StoredScoreNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_scoring_error(exc) from exc
 
 

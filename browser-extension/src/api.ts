@@ -176,6 +176,88 @@ export function requestVerifiedFit(jobId: string): Promise<MatchScore> {
   return extensionRequest<MatchScore>("POST", `/api/extension/jobs/${encodeURIComponent(jobId)}/verified-fit`);
 }
 
+export type ResumeExportFormat = "pdf" | "docx";
+
+export type ExtensionResumeVersion = {
+  id: string;
+  job_id: string;
+  job_title: string;
+  company: string;
+  version_number: number;
+  created_at: string;
+  bullet_count: number;
+  provenance_status: "approved_snapshot";
+  matches_current_profile: boolean;
+  formats: ResumeExportFormat[];
+};
+
+export type ExtensionResumeVersionList = {
+  versions: ExtensionResumeVersion[];
+  current_job_id: string | null;
+};
+
+export function listResumeVersions(jobId?: string | null): Promise<ExtensionResumeVersionList> {
+  return extensionGet<ExtensionResumeVersionList>(
+    "/api/extension/resume-versions",
+    jobId ? { job_id: jobId } : {},
+  );
+}
+
+export type DownloadedResumeFile = {
+  bytes: Uint8Array;
+  mimeType: string;
+  filename: string;
+};
+
+function contentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename="([^"]+)"/i.exec(header);
+  return match?.[1] ?? null;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+const PDF_MIME = "application/pdf";
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+export async function downloadResumeVersionFile(
+  versionId: string,
+  format: ResumeExportFormat,
+): Promise<DownloadedResumeFile & { bytesBase64: string }> {
+  if (format !== "pdf" && format !== "docx") {
+    throw new ApiError(422, "Unsupported export format.");
+  }
+  const headers = await sessionHeaders();
+  const path = `/api/extension/resume-versions/${encodeURIComponent(versionId)}/file?format=${encodeURIComponent(format)}`;
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { headers });
+  } catch {
+    throw new BackendUnreachableError();
+  }
+  if (response.status === 401) throw new NotLoggedInError();
+  if (!response.ok) {
+    const body = await parseBody(response);
+    throw new ApiError(response.status, detailMessage(body, response.status));
+  }
+  const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const mimeType = (response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  const expected = format === "pdf" ? PDF_MIME : DOCX_MIME;
+  if (mimeType !== expected) {
+    throw new ApiError(415, "Unsupported document type.");
+  }
+  const filename = contentDispositionFilename(response.headers.get("content-disposition")) || `resume-v1.${format}`;
+  return { bytes, mimeType, filename, bytesBase64: bytesToBase64(bytes) };
+}
+
 /** Only an http(s) page can ever be a job posting. Everything else the
  * browser can sit on — chrome:// internals, the New Tab page, about:blank,
  * file://, another extension's pages — is skipped outright, so those URLs

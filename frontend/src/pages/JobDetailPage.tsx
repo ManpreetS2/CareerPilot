@@ -5,9 +5,9 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { FitScorePanel } from "../components/FitScorePanel";
 import { InterviewPrepPanel } from "../components/InterviewPrepPanel";
 import { JobIntelligencePanel } from "../components/JobIntelligencePanel";
+import { MatchEvidencePanel } from "../components/MatchEvidencePanel";
 import {
   EligibilityPanel,
-  EvidencePanel,
   JobFreshnessBadge,
   JobRequirementSection,
   RequirementGroupView,
@@ -26,7 +26,7 @@ import { getJobsNavIds, jobsListPath } from "../lib/jobs-workspace";
 import { topMatchPercentileLabel } from "../lib/match-percentile";
 import { chipLabel } from "../lib/search-intent";
 import { saveSelectedJobId } from "../lib/session";
-import type { InterviewPrep, Job, JobIntelligence, JobRequirementProfile, MatchScore } from "../lib/types";
+import type { InterviewPrep, Job, JobIntelligence, JobRequirementProfile, MatchEvidence, MatchScore } from "../lib/types";
 
 export function JobDetailPage() {
   const { jobId = "" } = useParams();
@@ -56,6 +56,10 @@ export function JobDetailPage() {
   });
   const [percentile, setPercentile] = useState<string | null>(null);
   const [profile, setProfile] = useState<JobRequirementProfile | null>(null);
+  const [evidence, setEvidence] = useState<MatchEvidence | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<unknown>(null);
+  const [analysisTab, setAnalysisTab] = useState("overview");
   const storedScoreValues = useRef<Record<string, number>>({});
 
   useEffect(() => {
@@ -73,6 +77,9 @@ export function JobDetailPage() {
       setIntelligenceError(null);
       setMatch(null);
       setProfile(null);
+      setEvidence(null);
+      setEvidenceError(null);
+      setAnalysisTab("overview");
       setScoreError(null);
       setInterviewPrep(null);
       setInterviewError(null);
@@ -261,6 +268,16 @@ export function JobDetailPage() {
         } catch {
           /* stored profile is optional */
         }
+        try {
+          setEvidence(await api.getMatchEvidence(jobId));
+          setEvidenceError(null);
+        } catch (err) {
+          if (err instanceof ApiClientError && err.status === 404) {
+            setEvidence(null);
+          } else {
+            setEvidenceError(err);
+          }
+        }
       }
       await refreshIntelligence();
     } catch (err) {
@@ -274,6 +291,24 @@ export function JobDetailPage() {
         scoringInFlight.current = false;
         setScoring(false);
       }
+    }
+  }
+
+  async function loadEvidence() {
+    if (!jobId) return;
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+    try {
+      const next = await api.getMatchEvidence(jobId);
+      setEvidence(next);
+    } catch (err) {
+      if (err instanceof ApiClientError && err.status === 404) {
+        setEvidence(null);
+      } else {
+        setEvidenceError(err);
+      }
+    } finally {
+      setEvidenceLoading(false);
     }
   }
 
@@ -393,7 +428,13 @@ export function JobDetailPage() {
         </div>
       ) : null}
 
-      <Tabs defaultValue="overview">
+      <Tabs
+        value={analysisTab}
+        onValueChange={(value) => {
+          setAnalysisTab(value);
+          if (value === "evidence") void loadEvidence();
+        }}
+      >
         <TabsList aria-label="Job analysis sections">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="match">Match</TabsTrigger>
@@ -457,7 +498,12 @@ export function JobDetailPage() {
           />
         </TabsContent>
         <TabsContent value="evidence" className="mt-4">
-          <EvidencePanel />
+          <MatchEvidencePanel
+            data={evidence}
+            loading={evidenceLoading}
+            error={evidenceError}
+            onRetry={() => void loadEvidence()}
+          />
         </TabsContent>
       </Tabs>
 

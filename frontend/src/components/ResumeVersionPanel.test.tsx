@@ -14,6 +14,7 @@ vi.mock("../lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       listResumeVersions: vi.fn(),
+      createResumeVersion: vi.fn(),
       downloadResumeVersion: vi.fn(),
     },
   };

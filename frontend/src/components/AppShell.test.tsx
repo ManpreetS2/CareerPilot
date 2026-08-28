@@ -82,6 +82,9 @@ describe("AppShell", () => {
     ]);
     expect(screen.queryByRole("link", { name: "Applications" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pointer-halo")).not.toBeInTheDocument();
+    expect(document.querySelector(".pointer-halo")).toBeNull();
+    expect(screen.getByTestId("app-sidebar").querySelector(".glass-refract")).toBeNull();
   });
 
   it("keeps the skip link visually hidden until keyboard focus, then focuses #main", async () => {

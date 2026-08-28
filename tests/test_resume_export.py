@@ -166,3 +166,13 @@ def test_export_route_of_another_users_version_is_a_sanitized_404(isolated_clien
     response = client.get(f"/api/resume-versions/{version_id}/export", params={"format": "pdf"})
 
     assert response.status_code == 404
+
+
+def test_export_route_requires_authentication(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        version_id = _approved_version(db, user_id=client.test_user_id)
+
+    client.post("/api/auth/logout")
+    response = client.get(f"/api/resume-versions/{version_id}/export", params={"format": "pdf"})
+    assert response.status_code == 401

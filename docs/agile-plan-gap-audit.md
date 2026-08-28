@@ -170,10 +170,10 @@ This audit is a map of what already exists. It does not reimplement Fit Score V2
 | Field | Detail |
 | --- | --- |
 | Plan feature | Approved ResumeVersion, export, ownership-checked download, extension attachment |
-| Current implementation | Immutable per-job resume versions with content hash. No PDF/DOCX export, no filesystem access. |
-| Current file(s) | `backend/services/resume_version_service.py`, `backend/db/models.py` (`ResumeVersionRecord`), `tests/test_resume_version_service.py` |
+| Current implementation | Immutable per-job resume versions with content hash. Ownership-checked PDF/DOCX download for the web app and extension. No filesystem resume store; no ATS upload. |
+| Current file(s) | `backend/services/resume_version_service.py`, `backend/services/resume_export.py`, `backend/api/routes/applications.py`, `frontend/src/components/ResumeVersionPanel.tsx` |
 | Status | **partial** |
-| Remaining work | Export availability contract; extension attachment selection. No unsafe FS. |
+| Remaining work | Extension attachment selection on an ATS page. No unsafe FS. |
 | Dependency | Day 5 |
 | Owner | Platform |
 

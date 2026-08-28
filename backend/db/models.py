@@ -234,6 +234,41 @@ class MatchScoreRecord(Base):
     )
 
     job: Mapped[JobRecord] = relationship(back_populates="match_scores")
+    evidence: Mapped["MatchEvidenceRecord | None"] = relationship(
+        back_populates="match_score", uselist=False
+    )
+
+
+class MatchEvidenceRecord(Base):
+    """User-scoped snapshot of grounded Verified Match factors.
+
+    Opening Evidence reads this row. It does not re-run Fit or call an LLM.
+    """
+
+    __tablename__ = "match_evidence"
+    __table_args__ = (
+        Index("ux_match_evidence_score", "match_score_id", unique=True),
+        Index("ix_match_evidence_user_job", "user_id", "job_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id"), nullable=False)
+    match_score_id: Mapped[int] = mapped_column(ForeignKey("match_scores.id"), nullable=False)
+    score_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    scoring_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    evidence_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    candidate_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    preference_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    requirement_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    match_score: Mapped[MatchScoreRecord] = relationship(back_populates="evidence")
+    job: Mapped[JobRecord] = relationship()
 
 
 class ApplicationPackageRecord(Base):

@@ -24,6 +24,7 @@ REQUIRED_TABLES = (
     "job_requirement_profiles",
     "saved_jobs",
     "match_scores",
+    "match_evidence",
     "application_packages",
     "resume_versions",
     "form_fill_attempts",

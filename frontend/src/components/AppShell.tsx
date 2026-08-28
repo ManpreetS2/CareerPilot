@@ -242,7 +242,7 @@ export function AppShell() {
       <CommandPalette />
 
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 p-3 lg:flex" data-testid="app-sidebar">
-        <Glass variant="atmosphere" refract className="flex h-full w-full flex-col rounded-[1.25rem] p-3">
+        <Glass variant="atmosphere" className="flex h-full w-full flex-col rounded-[1.25rem] p-3">
           <Link to="/dashboard" className="mb-5 flex items-center gap-2 px-1.5">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-primary to-accent text-[11px] font-semibold text-primary-foreground">
               CP

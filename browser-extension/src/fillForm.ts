@@ -312,7 +312,7 @@ export async function fillFormInPage(data: {
           github: [] as string[],
           portfolio: [] as string[],
           coverLetter: ["#cover_letter_text", "textarea[name*='cover_letter']"],
-          resume: ["#resume", "input[type='file']"],
+          resume: ["#resume", "input[name='job_application[resume]']", "input[name='resume']"],
         }
       : {
           fullName: ["input[name='name']"],
@@ -326,7 +326,7 @@ export async function fillFormInPage(data: {
           github: ["input[name='urls[GitHub]']"],
           portfolio: ["input[name='urls[Portfolio]']"],
           coverLetter: ["textarea[name='comments']"],
-          resume: ["input[name='resume']"],
+          resume: ["input[name='resume']", "#resume"],
         };
 
   const fullName = fields.full_name as string | undefined;
@@ -413,8 +413,14 @@ export async function fillFormInPage(data: {
     }
   }
 
-  if (document.querySelector(selectorSets.resume.join(", "))) {
-    flagged.push({ name: "resume", reason: "attach your resume manually (no stored file to upload)" });
+  const resumeInput = document.querySelector<HTMLInputElement>(selectorSets.resume.join(", "));
+  if (resumeInput) {
+    const attached = resumeInput.files?.[0];
+    if (attached) {
+      filled.push({ name: "resume", value: attached.name });
+    } else {
+      flagged.push({ name: "resume", reason: "attach your resume manually (no stored file to upload)" });
+    }
   }
 
   await fillSharedReusableFields();

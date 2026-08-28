@@ -1,5 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JobDetailPage } from "./JobDetailPage";
@@ -27,6 +28,7 @@ vi.mock("../lib/api", async (importOriginal) => {
       verifyJob: vi.fn(),
       getRequirementProfile: vi.fn(),
       extractRequirementProfile: vi.fn(),
+      getMatchEvidence: vi.fn(),
     },
   };
 });
@@ -72,6 +74,7 @@ describe("JobDetailPage", () => {
     vi.mocked(api.getStoredScore).mockRejectedValue(new ApiClientError(404, "None"));
     vi.mocked(api.getInterviewPrep).mockRejectedValue(new ApiClientError(404, "None"));
     vi.mocked(api.getRequirementProfile).mockRejectedValue(new ApiClientError(404, "None"));
+    vi.mocked(api.getMatchEvidence).mockRejectedValue(new ApiClientError(404, "None"));
     vi.mocked(api.extractJobIntelligence).mockReset();
     vi.mocked(api.scoreJob).mockReset();
     vi.mocked(api.prepareInterview).mockReset();
@@ -125,5 +128,39 @@ describe("JobDetailPage", () => {
     expect(api.scoreJob).not.toHaveBeenCalled();
     expect(api.extractRequirementProfile).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /Retry verification/i })).not.toBeInTheDocument();
+  });
+
+  it("loads stored match evidence when the Evidence tab is opened", async () => {
+    vi.mocked(api.getMatchEvidence).mockResolvedValue({
+      job_id: "job-1",
+      full_evidence: true,
+      notice: null,
+      provenance: { scoring_version: 2, evidence_version: 1, stale: false, stale_reasons: [], score_kind: "verified" },
+      factors: [
+        {
+          id: "factor_skill_python",
+          job_id: "job-1",
+          category: "skill",
+          section: "qualifications",
+          label: "Python",
+          status: "satisfied",
+          rule_id: "required_skills_v2",
+          rule_version: "v2",
+          explanation: "Exact skill match",
+          job_evidence_refs: [],
+          candidate_evidence_refs: [],
+        },
+      ],
+      evaluations: [],
+      groups: [],
+      evidence: {},
+    });
+    const user = userEvent.setup();
+    renderJob();
+    await screen.findByRole("heading", { name: /Staff Platform Engineer/i });
+    await user.click(screen.getByRole("tab", { name: "Evidence" }));
+    expect(await screen.findByText("Why CareerPilot gave this match")).toBeInTheDocument();
+    expect(api.getMatchEvidence).toHaveBeenCalled();
+    expect(api.scoreJob).not.toHaveBeenCalled();
   });
 });

@@ -215,6 +215,7 @@ def _seed_shared_job(session: Session) -> JobRecord:
         description="Required: Python.",
         source="manual",
         status="verified",
+        content_status="full",
         verification_notes="Synthetic posting passed verification.",
         verified_at=datetime.now(timezone.utc),
     )

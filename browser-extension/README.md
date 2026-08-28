@@ -81,7 +81,8 @@ extension:
 - Assisted apply: Greenhouse and Lever only, matching the backend's
   `detect_ats_platform`, and only once there's an **approved** application
   for that exact posting.
-- `host_permissions` is scoped to `http://localhost:8000/*` only — the
+- `host_permissions` is scoped to `http://localhost:8000/*` and
+  `http://127.0.0.1:8000/*` only — the
   extension has no standing access to any job board. Page access for the
   fill is requested at the moment you click **Fill this page**, scoped to
   that one posting's origin, via `optional_host_permissions` (limited to
