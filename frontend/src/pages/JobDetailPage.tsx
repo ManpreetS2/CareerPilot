@@ -54,8 +54,6 @@ export function JobDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
-    scoringRequest.current += 1;
-    intelligenceRequest.current += 1;
     scoringInFlight.current = false;
     extractionInFlight.current = false;
     async function load() {
