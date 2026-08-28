@@ -11,6 +11,7 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 // manifest.background.service_worker as a fixed path, so it must not be
 // code-split or hashed).
 export default defineConfig({
+  envDir: root,
   // jsdom, not node: render.ts escapes HTML through a real DOM element and
   // the panel module drives document directly.
   test: {

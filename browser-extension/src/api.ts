@@ -1,8 +1,10 @@
+import { API_BASE_URL, sessionCookieUrls } from "./config";
+
 // Same auth pattern as the original popup.js: the extension has no login UI
 // of its own — it rides on whatever session the user already has from
 // logging in at the CareerPilot web app in a regular tab. It CANNOT get
 // there via fetch(..., {credentials:"include"}) the way the web app does:
-// a fetch from chrome-extension://<id> to http://localhost:8000 is a
+// a fetch from chrome-extension://<id> to the API origin is a
 // cross-site request from the browser's point of view, and the session
 // cookie is SameSite=Lax — Lax cookies only ride along on top-level
 // navigations, never a subresource fetch from a different site, so the
@@ -10,7 +12,6 @@
 // chrome.cookies API (not subject to that restriction) reads the cookie's
 // value directly, forwarded as X-CareerPilot-Session — accepted only by
 // routes under /api/extension/.
-const BACKEND_URL = "http://localhost:8000";
 // Must match backend/core/config.py's session_cookie_name / session_header_name.
 const SESSION_COOKIE_NAME = "careerpilot_session";
 const SESSION_HEADER_NAME = "X-CareerPilot-Session";
@@ -39,30 +40,54 @@ export class BackendUnreachableError extends Error {
 }
 
 async function sessionHeaders(): Promise<Record<string, string>> {
-  const sessionCookie = await chrome.cookies.get({ url: BACKEND_URL, name: SESSION_COOKIE_NAME });
-  if (!sessionCookie) throw new NotLoggedInError();
-  return { [SESSION_HEADER_NAME]: sessionCookie.value };
+  for (const url of sessionCookieUrls()) {
+    const sessionCookie = await chrome.cookies.get({ url, name: SESSION_COOKIE_NAME });
+    if (sessionCookie?.value) {
+      return { [SESSION_HEADER_NAME]: sessionCookie.value };
+    }
+  }
+  throw new NotLoggedInError();
 }
 
-async function extensionGet<T>(path: string, params: Record<string, string>): Promise<T> {
-  const headers = await sessionHeaders();
-  const query = new URLSearchParams(params).toString();
+function detailMessage(body: unknown, status: number): string {
+  if (body && typeof body === "object" && "detail" in body) {
+    const detail = (body as { detail?: unknown }).detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+  }
+  return `Request failed (${status})`;
+}
+
+async function parseBody(response: Response): Promise<unknown> {
+  if (response.status === 204) return {};
+  return response.json().catch(() => ({}));
+}
+
+async function extensionRequest<T>(method: string, path: string, options?: { params?: Record<string, string>; body?: unknown }): Promise<T> {
+  const headers: Record<string, string> = await sessionHeaders();
+  if (options?.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  const query = options?.params ? `?${new URLSearchParams(options.params).toString()}` : "";
   let response: Response;
   try {
-    response = await fetch(`${BACKEND_URL}${path}?${query}`, { headers });
+    response = await fetch(`${API_BASE_URL}${path}${query}`, {
+      method,
+      headers,
+      body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
+    });
   } catch {
-    // fetch only rejects on a transport failure (server down, DNS, refused
-    // connection) — an HTTP error status resolves normally and is handled
-    // below. Surfacing the raw "Failed to fetch" here would tell the user
-    // nothing actionable.
     throw new BackendUnreachableError();
   }
   if (response.status === 401) throw new NotLoggedInError();
-  const body = await response.json().catch(() => ({}));
+  const body = await parseBody(response);
   if (!response.ok) {
-    throw new ApiError(response.status, body.detail || `Request failed (${response.status})`);
+    throw new ApiError(response.status, detailMessage(body, response.status));
   }
   return body as T;
+}
+
+async function extensionGet<T>(path: string, params: Record<string, string>): Promise<T> {
+  return extensionRequest<T>("GET", path, { params });
 }
 
 export type JobStatus = "discovered" | "verified" | "flagged" | "stale";
@@ -77,6 +102,7 @@ export type Job = {
   source: string;
   status: JobStatus;
   date_scraped?: string | null;
+  saved?: boolean;
 };
 
 export type MatchScore = {
@@ -88,6 +114,13 @@ export type MatchScore = {
   rationale: string;
   score_kind?: "full" | "preliminary" | "verified" | null;
   eligibility_status?: "likely_eligible" | "eligibility_uncertain" | "likely_ineligible" | null;
+  qualification_score?: number | null;
+  preference_score?: number | null;
+  confidence_score?: number | null;
+  confidence_level?: "high" | "medium" | "low" | null;
+  match_reasons?: string[];
+  watchouts?: string[];
+  gap_reasons?: string[];
 };
 
 export type MaterialsStatus = "missing" | "current" | "stale_pending" | "stale_reviewed" | null;
@@ -106,6 +139,9 @@ export type PanelData = {
    * so its claims were never verified against the resume. */
   materials_unverified: boolean;
   review_required?: boolean;
+  saved?: boolean;
+  must_have?: string[];
+  approval_status?: string | null;
 };
 
 export function getPanelData(url: string): Promise<PanelData> {
@@ -122,6 +158,22 @@ export type AutofillResponse = {
 
 export function getAutofillData(url: string): Promise<AutofillResponse> {
   return extensionGet<AutofillResponse>("/api/extension/autofill", { url });
+}
+
+export function ingestJobUrl(url: string): Promise<Job> {
+  return extensionRequest<Job>("POST", "/api/extension/ingest-url", { body: { url } });
+}
+
+export function saveTrackedJob(jobId: string): Promise<Job> {
+  return extensionRequest<Job>("POST", `/api/extension/jobs/${encodeURIComponent(jobId)}/save`);
+}
+
+export function unsaveTrackedJob(jobId: string): Promise<void> {
+  return extensionRequest<void>("DELETE", `/api/extension/jobs/${encodeURIComponent(jobId)}/save`);
+}
+
+export function requestVerifiedFit(jobId: string): Promise<MatchScore> {
+  return extensionRequest<MatchScore>("POST", `/api/extension/jobs/${encodeURIComponent(jobId)}/verified-fit`);
 }
 
 /** Only an http(s) page can ever be a job posting. Everything else the
