@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,8 @@ from backend.schemas.schemas import (
     AutofillResponse,
     CreateResumeVersionRequest,
     ExtensionPanelData,
+    ExtensionResumeVersion,
+    ExtensionResumeVersionList,
     FormFillResult,
     IngestJobUrlRequest,
     Job,
@@ -50,12 +52,14 @@ from backend.services.resume_version_service import (
     ResumeVersionConflictError,
     ResumeVersionNotFoundError,
     ResumeVersionPersistenceError,
+    export_owned_resume_version,
     get_resume_version,
     get_user_resume_version,
     list_resume_versions,
     list_user_resume_versions,
     save_resume_version,
 )
+from backend.services.resume_export import InvalidResumeExportFormatError, ResumeExportError
 
 router = APIRouter(prefix="/api", tags=["applications"])
 
@@ -294,3 +298,40 @@ def extension_verified_fit(
         if _is_intelligence_pipeline_error(exc):
             raise _http_for_intelligence_error(exc) from exc
         raise _http_for_scoring_error(exc) from exc
+
+
+@router.get("/extension/resume-versions", response_model=ExtensionResumeVersionList)
+def extension_list_resume_versions(
+    job_id: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_extension_user),
+) -> ExtensionResumeVersionList:
+    """Metadata only. Never downloads document bytes on list."""
+    versions = [
+        ExtensionResumeVersion(**item.model_dump(), formats=["pdf", "docx"])
+        for item in list_user_resume_versions(db, user.id)
+    ]
+    return ExtensionResumeVersionList(versions=versions, current_job_id=job_id)
+
+
+@router.get("/extension/resume-versions/{version_id}/file")
+def extension_resume_version_file(
+    version_id: str,
+    format: str = Query(default="pdf"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_extension_user),
+) -> Response:
+    """Ownership-checked PDF/DOCX download. Format is an allowlist, not a path."""
+    try:
+        payload, mime, filename = export_owned_resume_version(db, version_id, user.id, format)
+    except InvalidResumeExportFormatError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported export format.")
+    except ResumeVersionNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume version not found.")
+    except ResumeExportError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Resume export is unavailable.")
+    return Response(
+        content=payload,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

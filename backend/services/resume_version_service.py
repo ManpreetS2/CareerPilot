@@ -33,6 +33,12 @@ from backend.services.candidate_provenance import (
     hash_resume_input_snapshot,
     version_content_hash,
 )
+from backend.services.resume_export import (
+    InvalidResumeExportFormatError,
+    ResumeExportError,
+    export_resume_bytes,
+    parse_export_format,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -308,3 +314,50 @@ def save_resume_version(db: Session, job_public_id: str, user_id: int) -> tuple[
         return _record_to_schema(record, job.public_id), True
     logger.error("resume version persist failed error_type=allocation_exhausted")
     raise ResumeVersionPersistenceError()
+
+
+def get_owned_resume_version_record(
+    db: Session, version_public_id: str, user_id: int
+) -> ResumeVersionRecord:
+    """Return one owned row. Cross-user access is indistinguishable from missing."""
+    row = (
+        db.query(ResumeVersionRecord)
+        .options(joinedload(ResumeVersionRecord.job))
+        .filter(
+            ResumeVersionRecord.public_id == version_public_id,
+            ResumeVersionRecord.user_id == user_id,
+        )
+        .first()
+    )
+    if row is None:
+        raise ResumeVersionNotFoundError()
+    return row
+
+
+def export_owned_resume_version(
+    db: Session, version_public_id: str, user_id: int, fmt: str
+) -> tuple[bytes, str, str]:
+    """Ownership-checked PDF/DOCX bytes. Never logs document contents."""
+    parsed = parse_export_format(fmt)
+    record = get_owned_resume_version_record(db, version_public_id, user_id)
+    try:
+        payload, mime, filename = export_resume_bytes(
+            snapshot=record.resume_input_snapshot if isinstance(record.resume_input_snapshot, dict) else {},
+            tailored_bullets=list(record.tailored_bullets or []),
+            version_number=record.version_number,
+            fmt=parsed,
+        )
+    except ResumeExportError:
+        logger.info(
+            "resume export failed version_id=%s format=%s category=unavailable",
+            version_public_id,
+            parsed,
+        )
+        raise
+    logger.info(
+        "resume export ok version_id=%s format=%s bytes=%s",
+        version_public_id,
+        parsed,
+        len(payload),
+    )
+    return payload, mime, filename
