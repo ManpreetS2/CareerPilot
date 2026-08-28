@@ -12,13 +12,10 @@ authorization, gender, race/ethnicity, disability, veteran status, and
 other sensitive preference fields. It also omits timestamps and internal
 row IDs so hashes are stable.
 
-Future boundary (not implemented here): a later Developer A PR will render
-one immutable resume version — using this private snapshot plus the saved
-bullets — into PDF/DOCX and return an opaque artifact identifier with an
-authenticated download. Developer B may later consume that artifact from
-the extension only after the user explicitly selects and approves a
-version. The extension must never choose or upload a resume version
-automatically.
+Export renders this private snapshot plus the saved bullets into PDF/DOCX
+and returns an authenticated, ownership-checked download. The extension may
+download a user-selected version; it must never choose or upload a resume
+version automatically.
 """
 
 from __future__ import annotations

@@ -140,6 +140,25 @@ def _http_for_resume_version_error(exc: Exception) -> HTTPException:
     )
 
 
+def _resume_version_file_response(db: Session, version_id: str, user_id: int, fmt: str) -> Response:
+    try:
+        payload, mime, filename = export_owned_resume_version(db, version_id, user_id, fmt)
+    except InvalidResumeExportFormatError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unsupported export format.",
+        )
+    except ResumeVersionNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume version not found.")
+    except ResumeExportError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Resume export is unavailable.")
+    return Response(
+        content=payload,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/jobs/{job_id}/resume-versions", response_model=ResumeVersion)
 def create_resume_version_route(
     job_id: str,
@@ -212,6 +231,17 @@ def get_user_resume_version_route(
         return get_user_resume_version(db, version_id, user.id)
     except ResumeVersionNotFoundError as exc:
         raise _http_for_resume_version_error(exc) from exc
+
+
+@router.get("/resume-versions/{version_id}/file")
+def resume_version_file(
+    version_id: str,
+    format: str = Query(default="pdf"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Cookie-authenticated PDF/DOCX download. Cross-user access is a sanitized 404."""
+    return _resume_version_file_response(db, version_id, user.id, format)
 
 
 @router.post("/jobs/{job_id}/fill-application", response_model=FormFillResult)
@@ -322,16 +352,4 @@ def extension_resume_version_file(
     user: User = Depends(get_extension_user),
 ) -> Response:
     """Ownership-checked PDF/DOCX download. Format is an allowlist, not a path."""
-    try:
-        payload, mime, filename = export_owned_resume_version(db, version_id, user.id, format)
-    except InvalidResumeExportFormatError:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported export format.")
-    except ResumeVersionNotFoundError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume version not found.")
-    except ResumeExportError:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Resume export is unavailable.")
-    return Response(
-        content=payload,
-        media_type=mime,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return _resume_version_file_response(db, version_id, user.id, format)

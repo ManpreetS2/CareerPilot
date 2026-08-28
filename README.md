@@ -85,7 +85,7 @@ Opening Dashboard, Jobs, Job Detail, Prepare Application, Profile, Resume, or Se
 
 Job discovery currently supports Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, and manual posting URLs. The Jobs workspace now uses a compact list plus desktop preview, internships/full-time/both title filter, and previous/next job navigation. Developer B still owns discovery, verification, ATS/form-fill, and the Chrome extension; see `docs/developer-b-ui-handoff.md`.
 
-PDF and DOCX export are **not** implemented. Do not expect download buttons.
+Approved resume versions can be downloaded as PDF or DOCX from Prepare Application. The Chrome extension can download the same owned files; it does not upload a resume to an ATS.
 
 The Chrome extension provides a side panel and approved autofill for Greenhouse/Lever. Extension resume-file upload is not implemented. Unpacked real-Chrome visual verification remains Developer B’s lane and is not claimed complete here.
 
@@ -108,7 +108,6 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - Login rate limiting
 - Live-provider verification in CI
 - Automatic job application submission
-- PDF / DOCX resume export
 - Extension resume-file upload
 
 

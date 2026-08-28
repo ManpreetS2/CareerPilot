@@ -68,6 +68,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+export function resumeVersionFileUrl(versionId: string, format: "pdf" | "docx"): string {
+  return `${API_BASE_URL}/api/resume-versions/${encodeURIComponent(versionId)}/file?format=${encodeURIComponent(format)}`;
+}
+
 export const api = {
   health: (init?: RequestInit) => request<HealthResponse>("/health", init),
 
@@ -233,6 +237,8 @@ export const api = {
 
   getResumeVersionDetail: (versionId: string, init?: RequestInit) =>
     request<ResumeVersionDetail>(`/api/resume-versions/${versionId}`, init),
+
+  resumeVersionFileUrl,
 
   createResumeVersion: (jobId: string) =>
     request<ResumeVersion>(`/api/jobs/${jobId}/resume-versions`, {

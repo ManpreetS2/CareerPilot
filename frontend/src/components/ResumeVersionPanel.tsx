@@ -4,7 +4,7 @@ import { BookmarkPlus } from "lucide-react";
 import { ErrorBanner } from "./ErrorBanner";
 import { LoadingState } from "./LoadingState";
 import { LockIn } from "./signature/LockIn";
-import { api, ApiClientError } from "../lib/api";
+import { api, ApiClientError, resumeVersionFileUrl } from "../lib/api";
 import { queryKeys } from "../lib/query-keys";
 import type { ApplicationPackage, ResumeVersion } from "../lib/types";
 
@@ -139,6 +139,26 @@ export function ResumeVersionPanel({
                   <li key={`${version.id}:${index}`}>{bullet}</li>
                 ))}
               </ul>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <a
+                  className="btn-secondary"
+                  href={resumeVersionFileUrl(version.id, "pdf")}
+                  download
+                  data-testid={`resume-version-${version.version_number}-download-pdf`}
+                  aria-label={`Download resume version ${version.version_number} as PDF`}
+                >
+                  Download PDF
+                </a>
+                <a
+                  className="btn-secondary"
+                  href={resumeVersionFileUrl(version.id, "docx")}
+                  download
+                  data-testid={`resume-version-${version.version_number}-download-docx`}
+                  aria-label={`Download resume version ${version.version_number} as DOCX`}
+                >
+                  Download DOCX
+                </a>
+              </div>
             </li>
           ))}
         </ol>

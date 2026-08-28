@@ -209,87 +209,86 @@ def _snippet_for_skill(blob: str, skill: str) -> str | None:
     return _line_with(blob, needle) or blob.strip()[:280]
 
 
-def _find_candidate_skill_refs(store: MatchEvidenceStore, candidate: Candidate, skill: str) -> list[str]:
-    needle = skill.strip()
-    if not needle:
-        return []
-    refs: list[str] = []
+def _find_one_skill_ref(store: MatchEvidenceStore, candidate: Candidate, needle: str) -> str:
+    if not needle.strip():
+        return ""
     for index, project in enumerate(candidate.projects or []):
         blob = _stringify_item(project)
         line = _snippet_for_skill(blob, needle)
         if not line:
             continue
         name = project.get("name") if isinstance(project, dict) else None
-        refs.append(
-            store.add(
-                source_type="candidate_project",
-                exact_text=line,
-                source_entity_id=str(name or index),
-                field="projects",
-                locator=f"projects[{index}]",
-            )
+        return store.add(
+            source_type="candidate_project",
+            exact_text=line,
+            source_entity_id=str(name or index),
+            field="projects",
+            locator=f"projects[{index}]",
         )
-        return refs
     for index, role in enumerate(candidate.experience or []):
         blob = _stringify_item(role)
         line = _snippet_for_skill(blob, needle)
         if not line:
             continue
         title = role.get("title") if isinstance(role, dict) else None
-        refs.append(
-            store.add(
-                source_type="candidate_experience",
-                exact_text=line,
-                source_entity_id=str(title or index),
-                field="experience",
-                locator=f"experience[{index}]",
-            )
+        return store.add(
+            source_type="candidate_experience",
+            exact_text=line,
+            source_entity_id=str(title or index),
+            field="experience",
+            locator=f"experience[{index}]",
         )
-        return refs
     for index, item in enumerate(candidate.education or []):
         blob = _stringify_item(item)
         line = _snippet_for_skill(blob, needle)
         if not line:
             continue
-        refs.append(
-            store.add(
-                source_type="candidate_education",
-                exact_text=line,
-                source_entity_id=str(index),
-                field="education",
-                locator=f"education[{index}]",
-            )
+        return store.add(
+            source_type="candidate_education",
+            exact_text=line,
+            source_entity_id=str(index),
+            field="education",
+            locator=f"education[{index}]",
         )
-        return refs
     for index, cert in enumerate(candidate.certifications or []):
         blob = _stringify_item(cert)
         line = _snippet_for_skill(blob, needle)
         if not line:
             continue
-        refs.append(
-            store.add(
-                source_type="candidate_profile",
-                exact_text=line,
-                source_entity_id=str(index),
-                field="certifications",
-                locator=f"certifications[{index}]",
-            )
+        return store.add(
+            source_type="candidate_profile",
+            exact_text=line,
+            source_entity_id=str(index),
+            field="certifications",
+            locator=f"certifications[{index}]",
         )
-        return refs
     for index, listed in enumerate(candidate.skills or []):
         if not _blob_covers_skill(str(listed), needle):
             continue
-        refs.append(
-            store.add(
-                source_type="candidate_profile",
-                exact_text=str(listed),
-                source_entity_id="skills",
-                field="skills",
-                locator=f"skills[{index}]",
-            )
+        return store.add(
+            source_type="candidate_profile",
+            exact_text=str(listed),
+            source_entity_id="skills",
+            field="skills",
+            locator=f"skills[{index}]",
         )
-        return refs
-    return []
+    return ""
+
+
+def _find_candidate_skill_refs(store: MatchEvidenceStore, candidate: Candidate, skill: str) -> list[str]:
+    needle = skill.strip()
+    if not needle:
+        return []
+    concepts = skill_concepts_in_label(needle)
+    needles = concepts or [needle]
+    refs: list[str] = []
+    seen: set[str] = set()
+    for item in needles:
+        ref = _find_one_skill_ref(store, candidate, item)
+        if ref and ref not in seen:
+            seen.add(ref)
+            refs.append(ref)
+    return refs
 
 
 def _education_refs(store: MatchEvidenceStore, candidate: Candidate) -> list[str]:

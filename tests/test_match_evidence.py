@@ -278,6 +278,74 @@ def test_canonical_skill_identity_is_conservative() -> None:
     assert _skill_group_key("Java") != _skill_group_key("JavaScript")
 
 
+def test_equivalent_compound_labels_deduplicate_and_collect_both_refs(isolated_session) -> None:
+    _user(isolated_session)
+    job = JobRecord(
+        public_id="compound-js-react",
+        title="Frontend Intern",
+        company="Example Co",
+        location="Remote",
+        url="https://example.com/compound-js-react",
+        description="Nice to have: JavaScript/React experience a plus (the tool will have a web UI).",
+        source="manual",
+        status="verified",
+        content_status="full",
+    )
+    isolated_session.add(job)
+    isolated_session.commit()
+    isolated_session.refresh(job)
+    isolated_session.add(
+        JobIntelligenceRecord(
+            job_id=job.id,
+            required_skills=[],
+            preferred_skills=[
+                "JavaScript/React",
+                "JavaScript/React experience a plus (the tool will have a web UI)",
+            ],
+            years_experience=None,
+            education_requirements=[],
+            tech_stack=[],
+            seniority="intern",
+            responsibilities=["Build the web UI"],
+            likely_interview_focus=[],
+        )
+    )
+    isolated_session.commit()
+    candidate = _candidate(
+        isolated_session,
+        1,
+        skills=["JavaScript", "React"],
+        projects=[],
+        graduation_year="2027",
+    )
+    _prefs(isolated_session, candidate, academic_year="final_year", expected_graduation="2027-05")
+    score = score_job_verified(isolated_session, job, 1, as_of=AS_OF)
+    payload = get_match_evidence(isolated_session, job.public_id, 1)
+
+    required = next(item for item in payload.factors if item.id == "factor_required_skills")
+    assert required.status == "not_applicable"
+
+    preferred_rows = [
+        item
+        for item in payload.factors
+        if item.section == "preferred_skills" and item.id != "factor_preferred_skills"
+    ]
+    assert len(preferred_rows) == 1
+    row = preferred_rows[0]
+    assert row.label == "JavaScript/React"
+    assert row.status == "satisfied"
+    assert row.importance == "preferred"
+    assert row.score_contribution is None
+    texts = {payload.evidence[ref].exact_text for ref in row.candidate_evidence_refs}
+    assert texts == {"JavaScript", "React"}
+
+    preferred = next(item for item in payload.factors if item.id == "factor_preferred_skills")
+    assert preferred.score_contribution == 10.0
+    assert preferred.max_contribution == 10.0
+    assert preferred.status == "satisfied"
+    assert score.overall_score is not None
+
+
 def test_availity_preferred_skills_do_not_count_as_required(isolated_session) -> None:
     _user(isolated_session)
     job = JobRecord(

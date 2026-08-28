@@ -243,7 +243,7 @@ def _canonical_skill_key(label: str) -> str:
 
 
 def candidate_covers_skill(candidate: Candidate, label: str) -> bool:
-    return _canonical_skill_key(label) in _candidate_skill_evidence(candidate)
+    return _match_label_against_evidence(label, _candidate_skill_evidence(candidate)) == FULL_MATCH
 
 
 @lru_cache(maxsize=None)
@@ -703,8 +703,30 @@ def _candidate_skill_evidence(candidate: Candidate) -> set[str]:
             labels.extend(extract_explicit_skills_from_description(cert).tech_stack)
     evidence: set[str] = set()
     for label in labels:
-        evidence.add(_canonical_skill_key(label))
+        concepts = skill_concepts_in_label(label)
+        if concepts:
+            evidence.update(concepts)
+        else:
+            evidence.add(_canonical_skill_key(label))
     return evidence
+
+
+def _match_label_against_evidence(label: str, evidence: set[str]) -> float:
+    concepts = skill_concepts_in_label(label)
+    if len(concepts) >= 2:
+        present = sum(1 for item in concepts if item in evidence)
+        if present == len(concepts):
+            return FULL_MATCH
+        if present:
+            return PARTIAL_MATCH
+        return MISSING_MATCH
+    canonical = _canonical_skill_key(label)
+    if canonical in evidence:
+        return FULL_MATCH
+    related = _PARTIAL_CANDIDATE_FOR_JOB.get(canonical, frozenset())
+    if evidence & related:
+        return PARTIAL_MATCH
+    return MISSING_MATCH
 
 
 def _match_skills(requirements: GroundedRequirements, evidence: set[str]) -> SkillMatchResult:
@@ -716,18 +738,14 @@ def _match_skills(requirements: GroundedRequirements, evidence: set[str]) -> Ski
         missing: list[str] = []
         scores: list[float] = []
         for label in job_labels:
-            canonical = _canonical_skill_key(label)
-            if canonical in evidence:
+            score = _match_label_against_evidence(label, evidence)
+            scores.append(score)
+            if score == FULL_MATCH:
                 matched.append(label)
-                scores.append(FULL_MATCH)
-                continue
-            related = _PARTIAL_CANDIDATE_FOR_JOB.get(canonical, frozenset())
-            if evidence & related:
+            elif score == PARTIAL_MATCH:
                 partial.append(label)
-                scores.append(PARTIAL_MATCH)
             else:
                 missing.append(label)
-                scores.append(MISSING_MATCH)
         ratio = sum(scores) / len(scores)
         return matched, partial, missing, ratio
 
