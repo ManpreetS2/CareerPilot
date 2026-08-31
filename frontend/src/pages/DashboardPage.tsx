@@ -12,7 +12,6 @@ import {
   profileReadinessItems,
   resolveNextAction,
 } from "../lib/dashboard-next-action";
-import { shouldPromptFinishSetup } from "../lib/onboarding";
 import { queryKeys } from "../lib/query-keys";
 import { useCandidateSession } from "../lib/session";
 
@@ -115,15 +114,6 @@ export function DashboardPage() {
             <Link to={next.to} className="btn-primary mt-5 inline-flex" data-testid="dashboard-next-action">
               {next.cta}
             </Link>
-            {user && shouldPromptFinishSetup(user.id) ? (
-              <p className="mt-3 text-sm text-muted-foreground">
-                You can also{" "}
-                <Link to="/onboarding" className="font-semibold text-foreground underline-offset-2 hover:underline">
-                  finish setup
-                </Link>
-                .
-              </p>
-            ) : null}
           </Glass>
 
           <Glass variant="solid" className="rounded-[var(--radius-lg)] p-5">
