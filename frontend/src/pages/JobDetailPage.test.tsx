@@ -5,6 +5,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JobDetailPage } from "./JobDetailPage";
 import { api, ApiClientError } from "../lib/api";
+import { bindSessionUser } from "../lib/session";
+import { saveJobsNavIds } from "../lib/jobs-workspace";
 import { ThemeProvider } from "../lib/theme";
 import { createTestQueryClient } from "../test/render";
 import "../index.css";
@@ -50,6 +52,7 @@ function renderJob() {
 describe("JobDetailPage", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    bindSessionUser(null);
     vi.mocked(api.getJob).mockResolvedValue({
       id: "job-1",
       title: "Staff Platform Engineer for Extremely-Long-Company-Name-That-Must-Wrap",
@@ -104,7 +107,8 @@ describe("JobDetailPage", () => {
   });
 
   it("moves Previous and Next within the stored result context without wrapping", async () => {
-    sessionStorage.setItem("careerpilot.jobsNavIds", JSON.stringify(["job-0", "job-1", "job-2"]));
+    bindSessionUser(1);
+    saveJobsNavIds(["job-0", "job-1", "job-2"]);
     renderJob();
     expect(await screen.findByRole("link", { name: /Previous job/i })).toHaveAttribute("href", "/jobs/job-0");
     expect(screen.getByRole("link", { name: /Next job/i })).toHaveAttribute("href", "/jobs/job-2");

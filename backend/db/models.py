@@ -199,6 +199,7 @@ class SavedJobRecord(Base):
 
 class MatchScoreRecord(Base):
     __tablename__ = "match_scores"
+    __table_args__ = (Index("ux_match_scores_job_candidate", "job_id", "candidate_id", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))

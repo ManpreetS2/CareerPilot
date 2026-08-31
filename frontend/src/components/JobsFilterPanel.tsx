@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Sheet, SheetContent } from "./ui/sheet";
 import type { JobsWorkspaceState } from "../lib/jobs-workspace";
 
@@ -45,6 +46,18 @@ export function JobsFilterPanel({
   state: JobsWorkspaceState;
   onChange: (patch: Partial<JobsWorkspaceState>) => void;
 }) {
+  const committedLocation = state.location?.[0] ?? "";
+  const [locationDraft, setLocationDraft] = useState(committedLocation);
+  useEffect(() => {
+    setLocationDraft(committedLocation);
+  }, [committedLocation, open]);
+
+  function commitLocation(raw: string) {
+    const trimmed = raw.trim();
+    if (trimmed === committedLocation) return;
+    onChange({ location: trimmed ? [trimmed] : [], page: 1 });
+  }
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" title="Filters">
@@ -115,13 +128,12 @@ export function JobsFilterPanel({
             <input
               className="input"
               placeholder="San Francisco, Remote US…"
-              value={state.location?.[0] ?? ""}
-              onChange={(event) =>
-                onChange({
-                  location: event.target.value.trim() ? [event.target.value.trim()] : [],
-                  page: 1,
-                })
-              }
+              value={locationDraft}
+              onChange={(event) => setLocationDraft(event.target.value)}
+              onBlur={(event) => commitLocation(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") commitLocation(locationDraft);
+              }}
             />
           </label>
           <fieldset>

@@ -1046,29 +1046,28 @@ def test_provisional_recommendation_boundaries(
     assert analysis_service._recommend(overall, "description", True) == expected
 
 
-def test_existing_duplicate_score_rows_are_collapsed_on_recalculation(
+def test_recalculation_keeps_one_score_row_per_job_candidate(
     isolated_session,
 ) -> None:
     candidate = _candidate(isolated_session, skills=["Python"])
     job = _job(isolated_session, description="Requirements: Python.")
-    for score in (30.0, 40.0):
-        isolated_session.add(
-            MatchScoreRecord(
-                job_id=job.id,
-                candidate_id=candidate.id,
-                overall_score=score,
-                skill_score=score,
-                experience_score=None,
-                education_score=None,
-                location_score=None,
-                preference_score=None,
-                matched_skills=[],
-                partial_matches=[],
-                missing_skills=["Python"],
-                recommendation="skip",
-                rationale="synthetic prior row",
-            )
+    isolated_session.add(
+        MatchScoreRecord(
+            job_id=job.id,
+            candidate_id=candidate.id,
+            overall_score=40.0,
+            skill_score=40.0,
+            experience_score=None,
+            education_score=None,
+            location_score=None,
+            preference_score=None,
+            matched_skills=[],
+            partial_matches=[],
+            missing_skills=["Python"],
+            recommendation="skip",
+            rationale="synthetic prior row",
         )
+    )
     isolated_session.commit()
 
     score_job(isolated_session, job.public_id, TEST_USER_ID)

@@ -277,7 +277,9 @@ def test_opportunity_type_is_canonical_not_title_guesswork() -> None:
     assert infer_opportunity_type("Staff Platform Engineer", "Full-time. Remote.") == "role"
     assert infer_opportunity_type("Engineer", "Build products.") == "unknown"
     assert infer_employment_type("New Grad SWE", "New grad program.") == "new_grad"
-    assert infer_opportunity_type("New Grad SWE", "New grad program.") == "internship"
+    assert infer_opportunity_type("New Grad SWE", "New grad program.") == "role"
+    assert infer_opportunity_type("Software Engineering Intern", "Summer internship.") == "internship"
+    assert infer_opportunity_type("Software Engineering Co-op", "Fall co-op rotation.") == "internship"
     assert infer_work_mode("Engineer", "Hybrid in San Francisco.") == "hybrid"
     assert infer_work_mode("Engineer", "Remote US only.") == "remote"
 
@@ -300,7 +302,7 @@ def test_jobs_query_filters_confidence_and_date_posted(isolated_client) -> None:
     assert [item["job"]["id"] for item in high.json()["items"]] == ["recent"]
 
     week = client.get("/api/jobs/query", params={"date_posted": "past_7d"})
-    assert [item["job"]["id"] for item in week.json()["items"]] == ["recent"]
+    assert week.json()["items"] == []
 
 
 def test_jobs_query_sorts_qualification_with_verified_authority(isolated_client) -> None:

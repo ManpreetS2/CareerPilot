@@ -6,7 +6,7 @@ import logging
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
@@ -36,7 +36,6 @@ from backend.services.job_scout_service import (
 from backend.services.job_service import (
     clean_search_term,
     derive_scout_criteria,
-    get_job,
     record_to_job,
     scout_jobs,
 )
@@ -110,7 +109,12 @@ def _auto_score_scouted_jobs(db: Session, jobs: list[Job], user_id: int) -> tupl
 
 @router.get("/jobs", response_model=list[Job])
 def get_jobs(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Job]:
-    records = db.query(JobRecord).order_by(JobRecord.date_scraped.desc()).all()
+    records = (
+        db.query(JobRecord)
+        .options(joinedload(JobRecord.requirement_profile))
+        .order_by(JobRecord.date_scraped.desc())
+        .all()
+    )
     return [record_to_job(record) for record in records]
 
 
@@ -348,8 +352,20 @@ def unsave_job_route(
 
 
 @router.get("/jobs/{job_id}", response_model=Job)
-def get_job_by_id(job_id: str, user: User = Depends(get_current_user)) -> Job:
-    return get_job(job_id)
+def get_job_by_id(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Job:
+    record = (
+        db.query(JobRecord)
+        .options(joinedload(JobRecord.requirement_profile))
+        .filter(JobRecord.public_id == job_id)
+        .first()
+    )
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{job_id}' not found")
+    return record_to_job(record)
 
 
 @router.post("/jobs/verify", response_model=JobVerificationResponse)

@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { keepJobsQueryData, readJobsWorkspace, scopeJobsWorkspaceForTab, writeJobsWorkspace } from "./jobs-workspace";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  applySavedJobUnsave,
+  getJobsNavIds,
+  getJobsWorkspaceHref,
+  jobsListPath,
+  keepJobsQueryData,
+  readJobsWorkspace,
+  rollbackJobInCachedPage,
+  saveJobsNavIds,
+  saveJobsWorkspaceHref,
+  scopeJobsWorkspaceForTab,
+  writeJobsWorkspace,
+} from "./jobs-workspace";
+import { bindSessionUser } from "./session";
 import type { JobListPage } from "./types";
 
 describe("jobs workspace URL state", () => {
@@ -72,12 +85,12 @@ describe("jobs workspace URL state", () => {
 
   it("keeps prior page data only within the same Jobs tab", () => {
     const savedPage: JobListPage = {
-      items: [],
+      items: [{ job: { id: "job-1", title: "A", company: "Acme", url: "https://example.com/a", description: "", source: "manual", status: "discovered" }, saved: true }],
       total: 2,
       page: 1,
       page_size: 40,
       verified_count: 0,
-      potential_count: 0,
+      potential_count: 1,
       ids: ["job-1", "job-2"],
     };
     const previousQuery = { queryKey: ["jobs-workspace", { tab: "saved", page: 1 }] as const };
@@ -87,5 +100,217 @@ describe("jobs workspace URL state", () => {
     expect(
       keepJobsQueryData(savedPage, previousQuery, { tab: "saved", page: 2, page_size: 40 }),
     ).toBe(savedPage);
+  });
+
+  it("does not reuse an emptied later Saved page as placeholder data for page 1", () => {
+    const emptiedPageTwo: JobListPage = {
+      items: [],
+      total: 2,
+      page: 2,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 0,
+      ids: ["job-a", "job-b"],
+    };
+    const previousQuery = { queryKey: ["jobs-workspace", { tab: "saved", page: 2 }] as const };
+    expect(
+      keepJobsQueryData(emptiedPageTwo, previousQuery, { tab: "saved", page: 1, page_size: 2 }),
+    ).toBeUndefined();
+  });
+});
+
+describe("saved unsave cache patches", () => {
+  const job = (id: string, title: string) => ({
+    job: {
+      id,
+      title,
+      company: "Acme",
+      url: `https://example.com/${id}`,
+      description: "",
+      source: "manual" as const,
+      status: "discovered" as const,
+      saved: true,
+    },
+    match: null,
+    saved: true,
+  });
+
+  it("does not derive a neighbor from a Saved cache that never contained the job", () => {
+    const withB: JobListPage = {
+      items: [job("a", "A"), job("b", "B"), job("c", "C")],
+      total: 3,
+      page: 1,
+      page_size: 40,
+      verified_count: 0,
+      potential_count: 3,
+      ids: ["a", "b", "c"],
+    };
+    const withoutB: JobListPage = {
+      items: [job("x", "X")],
+      total: 1,
+      page: 1,
+      page_size: 40,
+      verified_count: 0,
+      potential_count: 1,
+      ids: ["x"],
+    };
+    expect(applySavedJobUnsave(withoutB, "b", "b").nextSelected).toBeUndefined();
+    expect(applySavedJobUnsave(withB, "b", "b").nextSelected).toBe("c");
+  });
+
+  it("steps back when the last item on a later Saved page is removed and earlier pages still have jobs", () => {
+    const pageTwo: JobListPage = {
+      items: [job("c", "C")],
+      total: 3,
+      page: 2,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 1,
+      ids: ["a", "b", "c"],
+    };
+    const result = applySavedJobUnsave(pageTwo, "c", "c");
+    expect(result.page.items).toEqual([]);
+    expect(result.page.total).toBe(2);
+    expect(result.shouldStepBack).toBe(true);
+    expect(result.nextPage).toBe(1);
+    expect(result.nextSelected).toBeNull();
+  });
+
+  it("removes an unsaved job from every Saved page's ids and total even when it is not visible", () => {
+    const page1: JobListPage = {
+      items: [job("a", "A"), job("b", "B")],
+      total: 4,
+      page: 1,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b", "c", "d"],
+    };
+    const page2: JobListPage = {
+      items: [job("c", "C"), job("d", "D")],
+      total: 4,
+      page: 2,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b", "c", "d"],
+    };
+    const next1 = applySavedJobUnsave(page1, "b", "b");
+    const next2 = applySavedJobUnsave(page2, "b", "b");
+    expect(next1.page.items.map((item) => item.job.id)).toEqual(["a"]);
+    expect(next1.page.ids).toEqual(["a", "c", "d"]);
+    expect(next1.page.total).toBe(3);
+    expect(next1.nextSelected).toBe("a");
+    expect(next1.page.potential_count).toBe(1);
+    expect(next2.page.items.map((item) => item.job.id)).toEqual(["c", "d"]);
+    expect(next2.page.ids).toEqual(["a", "c", "d"]);
+    expect(next2.page.total).toBe(3);
+    expect(next2.nextSelected).toBeUndefined();
+    expect(next2.page.potential_count).toBe(2);
+    expect(next2.shouldStepBack).toBe(false);
+    expect(applySavedJobUnsave(next1.page, "b", "b").page.total).toBe(3);
+
+    const restored1 = rollbackJobInCachedPage(page1, next1.page, "b");
+    const restored2 = rollbackJobInCachedPage(page2, next2.page, "b");
+    expect(restored1.items.map((item) => item.job.id)).toEqual(["a", "b"]);
+    expect(restored1.ids).toEqual(["a", "b", "c", "d"]);
+    expect(restored1.total).toBe(4);
+    expect(restored2.items.map((item) => item.job.id)).toEqual(["c", "d"]);
+    expect(restored2.ids).toEqual(["a", "b", "c", "d"]);
+    expect(restored2.total).toBe(4);
+  });
+
+  it("rolls back only A when A fails after B was already unsaved from both Saved pages", () => {
+    const page1: JobListPage = {
+      items: [job("a", "A"), job("b", "B")],
+      total: 4,
+      page: 1,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b", "c", "d"],
+    };
+    const page2: JobListPage = {
+      items: [job("c", "C"), job("d", "D")],
+      total: 4,
+      page: 2,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b", "c", "d"],
+    };
+    const afterA1 = applySavedJobUnsave(page1, "a", "a").page;
+    const afterA2 = applySavedJobUnsave(page2, "a", "a").page;
+    const afterB1 = applySavedJobUnsave(afterA1, "b", "a").page;
+    const afterB2 = applySavedJobUnsave(afterA2, "b", "a").page;
+    expect(afterB1.ids).toEqual(["c", "d"]);
+    expect(afterB1.total).toBe(2);
+    expect(afterB2.ids).toEqual(["c", "d"]);
+
+    const restored1 = rollbackJobInCachedPage(page1, afterB1, "a");
+    const restored2 = rollbackJobInCachedPage(page2, afterB2, "a");
+    expect(restored1.items.map((item) => item.job.id)).toEqual(["a"]);
+    expect(restored1.ids).toEqual(["a", "c", "d"]);
+    expect(restored1.total).toBe(3);
+    expect(restored2.items.map((item) => item.job.id)).toEqual(["c", "d"]);
+    expect(restored2.ids).toEqual(["a", "c", "d"]);
+    expect(restored2.total).toBe(3);
+    expect(restored1.items.find((item) => item.job.id === "b")).toBeUndefined();
+    expect(restored2.ids).not.toContain("b");
+  });
+
+  it("rolls back only the failed job inside a later cache snapshot", () => {
+    const before: JobListPage = {
+      items: [job("a", "A"), job("b", "B")],
+      total: 2,
+      page: 1,
+      page_size: 40,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b"],
+    };
+    const afterAFailedButBSaved: JobListPage = {
+      items: [
+        { ...job("a", "A"), saved: false, job: { ...job("a", "A").job, saved: false } },
+        { ...job("b", "B"), saved: true, job: { ...job("b", "B").job, saved: true } },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 40,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b"],
+    };
+    const restored = rollbackJobInCachedPage(before, afterAFailedButBSaved, "a");
+    expect(restored.items.find((item) => item.job.id === "a")?.saved).toBe(true);
+    expect(restored.items.find((item) => item.job.id === "b")?.saved).toBe(true);
+  });
+});
+
+describe("jobs workspace session isolation", () => {
+  afterEach(() => {
+    bindSessionUser(null);
+    sessionStorage.clear();
+  });
+
+  it("does not leak User A's search or nav ids to User B after logout", () => {
+    bindSessionUser(11);
+    saveJobsNavIds(["job-alice-1", "job-alice-2"]);
+    saveJobsWorkspaceHref("search=A-query&selected=A-job");
+
+    bindSessionUser(null);
+    expect(getJobsNavIds()).toEqual([]);
+    expect(getJobsWorkspaceHref()).toBe("");
+    expect(jobsListPath()).toBe("/jobs");
+
+    bindSessionUser(22);
+    expect(getJobsNavIds()).toEqual([]);
+    expect(getJobsWorkspaceHref()).toBe("");
+    expect(jobsListPath()).toBe("/jobs");
+
+    bindSessionUser(11);
+    expect(getJobsNavIds()).toEqual(["job-alice-1", "job-alice-2"]);
+    expect(getJobsWorkspaceHref()).toBe("search=A-query&selected=A-job");
+    expect(jobsListPath()).toBe("/jobs?search=A-query&selected=A-job");
   });
 });

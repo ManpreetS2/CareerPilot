@@ -1,3 +1,4 @@
+import { getActiveSessionUserId } from "./session";
 import type { JobListPage, JobQueryParams, JobsSort, JobsTab, OpportunityFilter } from "./types";
 
 export type JobsWorkspaceState = JobQueryParams & {
@@ -127,22 +128,136 @@ export function keepJobsQueryData(
 ): JobListPage | undefined {
   const prev = previousQuery?.queryKey[1] as JobQueryParams | undefined;
   if (!previousData || !prev || prev.tab !== nextParams.tab) return undefined;
+  if (prev.page !== nextParams.page && previousData.items.length === 0) return undefined;
   return previousData;
 }
 
+export type SavedUnsavePatch = {
+  page: JobListPage;
+  nextSelected?: string | null;
+  shouldStepBack: boolean;
+  nextPage: number;
+};
+
+export function applySavedJobUnsave(
+  page: JobListPage,
+  jobId: string,
+  selectedJobId: string | null,
+): SavedUnsavePatch {
+  const visibleIndex = page.items.findIndex((item) => item.job.id === jobId);
+  const inIds = page.ids.includes(jobId);
+  if (visibleIndex < 0 && !inIds) {
+    return { page, shouldStepBack: false, nextPage: page.page };
+  }
+  const removedItem = visibleIndex >= 0 ? page.items[visibleIndex] : undefined;
+  const items = removedItem ? page.items.filter((item) => item.job.id !== jobId) : page.items;
+  const ids = inIds ? page.ids.filter((id) => id !== jobId) : page.ids;
+  const total = inIds ? Math.max(0, page.total - 1) : page.total;
+  const nextPageData: JobListPage = {
+    ...page,
+    items,
+    ids,
+    total,
+    verified_count:
+      removedItem?.match?.score_kind === "verified"
+        ? Math.max(0, page.verified_count - 1)
+        : page.verified_count,
+    potential_count:
+      removedItem && removedItem.match?.score_kind !== "verified"
+        ? Math.max(0, page.potential_count - 1)
+        : page.potential_count,
+  };
+  let nextSelected: string | null | undefined;
+  if (removedItem && selectedJobId === jobId) {
+    const neighbor = items[visibleIndex] ?? items[visibleIndex - 1] ?? null;
+    nextSelected = neighbor?.job.id ?? null;
+  }
+  const pageSize = Math.max(1, page.page_size || 1);
+  const lastValidPage = Math.max(1, Math.ceil(total / pageSize) || 1);
+  const shouldStepBack = items.length === 0 && total > 0 && page.page > 1;
+  return {
+    page: nextPageData,
+    nextSelected,
+    shouldStepBack,
+    nextPage: shouldStepBack ? lastValidPage : page.page,
+  };
+}
+
+export function patchJobSavedFlag(page: JobListPage, jobId: string, saved: boolean): JobListPage {
+  return {
+    ...page,
+    items: page.items.map((item) =>
+      item.job.id === jobId ? { ...item, saved, job: { ...item.job, saved } } : item,
+    ),
+  };
+}
+
+export function rollbackJobInCachedPage(
+  snapshot: JobListPage,
+  current: JobListPage,
+  jobId: string,
+): JobListPage {
+  const snapItem = snapshot.items.find((item) => item.job.id === jobId);
+  const snapHasId = snapshot.ids.includes(jobId);
+  if (!snapItem && !snapHasId) return current;
+
+  const currentHasItem = current.items.some((item) => item.job.id === jobId);
+  const currentHasId = current.ids.includes(jobId);
+
+  let ids = current.ids;
+  if (snapHasId && !currentHasId) {
+    ids = [...current.ids];
+    const idAt = snapshot.ids.indexOf(jobId);
+    ids.splice(Math.min(Math.max(idAt, 0), ids.length), 0, jobId);
+  }
+
+  let items = current.items;
+  let verified_count = current.verified_count;
+  let potential_count = current.potential_count;
+  if (snapItem && currentHasItem) {
+    items = current.items.map((item) => (item.job.id === jobId ? snapItem : item));
+  } else if (snapItem && !currentHasItem) {
+    const insertAt = snapshot.items.findIndex((item) => item.job.id === jobId);
+    items = [...current.items];
+    items.splice(Math.min(Math.max(insertAt, 0), items.length), 0, snapItem);
+    if (snapItem.match?.score_kind === "verified") verified_count += 1;
+    else potential_count += 1;
+  }
+
+  return {
+    ...current,
+    items,
+    ids,
+    total: snapHasId && !currentHasId ? current.total + 1 : current.total,
+    verified_count,
+    potential_count,
+  };
+}
+
 const NAV_KEY = "careerpilot.jobsNavIds";
+const WORKSPACE_HREF_KEY = "careerpilot.jobsWorkspaceHref";
+
+function scopedSessionKey(base: string): string | null {
+  const userId = getActiveSessionUserId();
+  if (userId == null) return null;
+  return `${base}.u${userId}`;
+}
 
 export function saveJobsNavIds(ids: string[]) {
+  const key = scopedSessionKey(NAV_KEY);
+  if (!key) return;
   try {
-    sessionStorage.setItem(NAV_KEY, JSON.stringify(ids));
+    sessionStorage.setItem(key, JSON.stringify(ids));
   } catch {
     /* ignore quota */
   }
 }
 
 export function getJobsNavIds(): string[] {
+  const key = scopedSessionKey(NAV_KEY);
+  if (!key) return [];
   try {
-    const raw = sessionStorage.getItem(NAV_KEY);
+    const raw = sessionStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
@@ -151,19 +266,21 @@ export function getJobsNavIds(): string[] {
   }
 }
 
-const WORKSPACE_HREF_KEY = "careerpilot.jobsWorkspaceHref";
-
 export function saveJobsWorkspaceHref(search: string) {
+  const key = scopedSessionKey(WORKSPACE_HREF_KEY);
+  if (!key) return;
   try {
-    sessionStorage.setItem(WORKSPACE_HREF_KEY, search);
+    sessionStorage.setItem(key, search);
   } catch {
     /* ignore quota */
   }
 }
 
 export function getJobsWorkspaceHref(): string {
+  const key = scopedSessionKey(WORKSPACE_HREF_KEY);
+  if (!key) return "";
   try {
-    return sessionStorage.getItem(WORKSPACE_HREF_KEY) ?? "";
+    return sessionStorage.getItem(key) ?? "";
   } catch {
     return "";
   }

@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JobsPage } from "./JobsPage";
 import { api, ApiClientError } from "../lib/api";
+import { readJobsWorkspace, toJobQueryParams } from "../lib/jobs-workspace";
 import { ThemeProvider } from "../lib/theme";
 import { createTestQueryClient } from "../test/render";
 import { JOB_DISCOVERY_STAGES } from "../components/JobDiscoveryProgress";
@@ -61,9 +62,9 @@ function pageOf(jobs: Job[], extra?: Partial<JobListPage>): JobListPage {
   };
 }
 
-function renderJobs(route = "/jobs") {
+function renderJobs(route = "/jobs", queryClient = createTestQueryClient()) {
   return render(
-    <QueryClientProvider client={createTestQueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <MemoryRouter initialEntries={[route]}>
           <JobsPage />
@@ -315,6 +316,85 @@ describe("JobsPage workspace", () => {
     expect((input as HTMLInputElement).placeholder).not.toMatch(/Software engineering internships in the Bay Area/i);
   });
 
+  it("removes an unsaved job from the Saved tab immediately and keeps other cards usable", async () => {
+    const jobA: Job = { ...existingJob, id: "saved-a", title: "Saved Role A", saved: true };
+    const jobB: Job = { ...existingJob, id: "saved-b", title: "Saved Role B", saved: true };
+    const jobC: Job = { ...existingJob, id: "saved-c", title: "Saved Role C", saved: true };
+    let rejectUnsave: ((error: ApiClientError) => void) | undefined;
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "saved") return Promise.resolve(pageOf([jobA, jobB, jobC]));
+      return Promise.resolve(pageOf([existingJob]));
+    });
+    vi.mocked(api.unsaveJob).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectUnsave = reject;
+        }),
+    );
+
+    renderJobs("/jobs?tab=saved");
+    expect(await screen.findByText("Saved Role B")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("save-job-saved-b"));
+
+    expect(screen.queryByText("Saved Role B")).not.toBeInTheDocument();
+    expect(screen.getByText("Saved Role A")).toBeInTheDocument();
+    expect(screen.getByText("Saved Role C")).toBeInTheDocument();
+    expect(screen.queryByTestId("save-job-saved-b")).not.toBeInTheDocument();
+    expect(screen.getByTestId("save-job-saved-a")).not.toBeDisabled();
+    expect(screen.getByTestId("save-job-saved-c")).not.toBeDisabled();
+
+    rejectUnsave?.(new ApiClientError(500, "save failed"));
+    expect(await screen.findByText("Saved Role B")).toBeInTheDocument();
+    expect(screen.getByText("Saved Role A")).toBeInTheDocument();
+    expect(screen.getByText("Saved Role C")).toBeInTheDocument();
+  });
+
+  it("moves selection to a remaining saved job when the selected card is unsaved", async () => {
+    const jobA: Job = { ...existingJob, id: "saved-a", title: "Saved Role A", saved: true };
+    const jobB: Job = { ...existingJob, id: "saved-b", title: "Saved Role B", saved: true };
+    const jobC: Job = { ...existingJob, id: "saved-c", title: "Saved Role C", saved: true };
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "saved") return Promise.resolve(pageOf([jobA, jobB, jobC]));
+      return Promise.resolve(pageOf([existingJob]));
+    });
+    vi.mocked(api.unsaveJob).mockImplementation(() => new Promise(() => undefined));
+    renderJobs("/jobs?tab=saved&selected=saved-b");
+    expect(await screen.findByRole("heading", { name: "Saved Role B" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Saved" }));
+    expect(screen.queryByRole("heading", { name: "Saved Role B" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Saved Role C" })).toBeInTheDocument();
+  });
+
+  it("clears Saved to the empty state when the last job is unsaved", async () => {
+    const only: Job = { ...existingJob, id: "saved-only", title: "Last Saved Role", saved: true };
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "saved") return Promise.resolve(pageOf([only]));
+      return Promise.resolve(pageOf([existingJob]));
+    });
+    vi.mocked(api.unsaveJob).mockImplementation(() => new Promise(() => undefined));
+    renderJobs("/jobs?tab=saved");
+    expect(await screen.findByText("Last Saved Role")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("save-job-saved-only"));
+    expect(await screen.findByText("No saved jobs yet")).toBeInTheDocument();
+    expect(screen.queryByText("Last Saved Role")).not.toBeInTheDocument();
+  });
+
+  it("keeps an unsaved Discover card visible and only toggles that card's pending bookmark", async () => {
+    const listed: Job = { ...existingJob, saved: true };
+    const other: Job = { ...newJob, id: "other-discover", title: "Other Discover Role", saved: false };
+    vi.mocked(api.queryJobs).mockResolvedValue(pageOf([listed, other]));
+    vi.mocked(api.unsaveJob).mockImplementation(() => new Promise(() => undefined));
+    renderJobs("/jobs");
+    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
+    const bookmark = screen.getByTestId("save-job-jobicy-existing");
+    expect(bookmark).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(bookmark);
+    expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
+    expect(screen.getByTestId("save-job-jobicy-existing")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("save-job-jobicy-existing")).toBeDisabled();
+    expect(screen.getByTestId("save-job-other-discover")).not.toBeDisabled();
+  });
+
   it("opens the filter panel and applies a work-mode filter", async () => {
     renderJobs();
     await screen.findByText("Backend Engineer");
@@ -324,6 +404,183 @@ describe("JobsPage workspace", () => {
     await waitFor(() => {
       const lastQuery = vi.mocked(api.queryJobs).mock.calls.at(-1)?.[0];
       expect(lastQuery?.work_mode).toEqual(expect.arrayContaining(["hybrid"]));
+    });
+  });
+
+  it("lets Location keep spaces while typing multi-word cities", async () => {
+    renderJobs();
+    await screen.findByText("Backend Engineer");
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const location = await screen.findByPlaceholderText(/San Francisco, Remote US/i);
+    for (const city of ["San Francisco", "New York", "Palo Alto", "Remote US"]) {
+      await userEvent.clear(location);
+      await userEvent.type(location, city);
+      expect(location).toHaveValue(city);
+    }
+  });
+
+  it("keeps B saved when A's in-flight save fails after B succeeds", async () => {
+    const jobA: Job = { ...existingJob, id: "disc-a", title: "Discover Role A", saved: false };
+    const jobB: Job = { ...existingJob, id: "disc-b", title: "Discover Role B", saved: false };
+    const savedIds = new Set<string>();
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "saved") {
+        return Promise.resolve(
+          pageOf(
+            [jobA, jobB].filter((job) => savedIds.has(job.id!)).map((job) => ({ ...job, saved: true })),
+          ),
+        );
+      }
+      return Promise.resolve(
+        pageOf([
+          { ...jobA, saved: savedIds.has("disc-a") },
+          { ...jobB, saved: savedIds.has("disc-b") },
+        ]),
+      );
+    });
+    let rejectA: ((error: ApiClientError) => void) | undefined;
+    let resolveB: ((value: Job) => void) | undefined;
+    vi.mocked(api.saveJob).mockImplementation((jobId: string) => {
+      if (jobId === "disc-a") {
+        return new Promise<Job>((_resolve, reject) => {
+          rejectA = reject;
+        });
+      }
+      return new Promise<Job>((resolve) => {
+        resolveB = resolve;
+      });
+    });
+
+    renderJobs();
+    expect(await screen.findByText("Discover Role A")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("save-job-disc-a"));
+    await userEvent.click(screen.getByTestId("save-job-disc-b"));
+    expect(screen.getByTestId("save-job-disc-a")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("save-job-disc-b")).toHaveAttribute("aria-pressed", "true");
+
+    savedIds.add("disc-b");
+    resolveB?.({ ...jobB, saved: true });
+    await waitFor(() => expect(screen.getByTestId("save-job-disc-b")).toHaveAttribute("aria-pressed", "true"));
+    rejectA?.(new ApiClientError(500, "save failed"));
+
+    await waitFor(() => expect(screen.getByTestId("save-job-disc-a")).toHaveAttribute("aria-pressed", "false"));
+    expect(screen.getByTestId("save-job-disc-b")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("does not issue a conflicting unsave when the same unsaved card is clicked twice", async () => {
+    vi.mocked(api.saveJob).mockImplementation(() => new Promise(() => undefined));
+    vi.mocked(api.unsaveJob).mockImplementation(() => new Promise(() => undefined));
+    renderJobs();
+    await screen.findByText("Backend Engineer");
+    const bookmark = screen.getByTestId("save-job-jobicy-existing");
+    await userEvent.click(bookmark);
+    await userEvent.click(bookmark);
+    expect(api.saveJob).toHaveBeenCalledTimes(1);
+    expect(api.unsaveJob).not.toHaveBeenCalled();
+  });
+
+  it("does not clear selection because a stale Saved cache lacked the unsaved job", async () => {
+    const jobA: Job = { ...existingJob, id: "saved-a", title: "Saved Role A", saved: true };
+    const jobB: Job = { ...existingJob, id: "saved-b", title: "Saved Role B", saved: true };
+    const jobC: Job = { ...existingJob, id: "saved-c", title: "Saved Role C", saved: true };
+    const route = "/jobs?tab=saved&selected=saved-b";
+    const activeParams = toJobQueryParams(readJobsWorkspace(new URLSearchParams(route.slice("/jobs?".length))));
+    const staleParams = { ...activeParams, sort: "newest" as const };
+    const client = createTestQueryClient();
+    client.setQueryData(["jobs-workspace", staleParams], pageOf([jobA], { page: 1, total: 1 }));
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "saved") return Promise.resolve(pageOf([jobA, jobB, jobC]));
+      return Promise.resolve(pageOf([existingJob]));
+    });
+    vi.mocked(api.unsaveJob).mockImplementation(() => new Promise(() => undefined));
+
+    renderJobs(route, client);
+    expect(await screen.findByRole("heading", { name: "Saved Role B" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Saved" }));
+    expect(screen.queryByRole("heading", { name: "Saved Role B" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Saved Role C" })).toBeInTheDocument();
+  });
+
+  it("does not show the empty Saved state after unsaving the last job on a later page", async () => {
+    const jobA: Job = { ...existingJob, id: "saved-a", title: "Saved Role A", saved: true };
+    const jobC: Job = { ...existingJob, id: "saved-c", title: "Saved Page Two Role", saved: true };
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "saved" && params.page === 2) {
+        return Promise.resolve(
+          pageOf([jobC], { page: 2, page_size: 40, total: 41, ids: ["saved-a", jobC.id!] }),
+        );
+      }
+      if (params.tab === "saved") {
+        return Promise.resolve(pageOf([jobA], { page: 1, page_size: 40, total: 40 }));
+      }
+      return Promise.resolve(pageOf([existingJob]));
+    });
+    vi.mocked(api.unsaveJob).mockImplementation(() => new Promise(() => undefined));
+
+    renderJobs("/jobs?tab=saved&page=2");
+    expect(await screen.findByText("Saved Page Two Role")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("save-job-saved-c"));
+    expect(screen.queryByText("No saved jobs yet")).not.toBeInTheDocument();
+    expect(await screen.findByText("Saved Role A")).toBeInTheDocument();
+  });
+
+  it("strips an unsaved job from ids on every cached Saved page and restores both on failure", async () => {
+    const jobA: Job = { ...existingJob, id: "saved-a", title: "Saved Role A", saved: true };
+    const jobB: Job = { ...existingJob, id: "saved-b", title: "Saved Role B", saved: true };
+    const jobC: Job = { ...existingJob, id: "saved-c", title: "Saved Role C", saved: true };
+    const jobD: Job = { ...existingJob, id: "saved-d", title: "Saved Role D", saved: true };
+    const page1Params = toJobQueryParams(readJobsWorkspace(new URLSearchParams("tab=saved")));
+    const page2Params = { ...page1Params, page: 2 };
+    const page1 = pageOf([jobA, jobB], {
+      page: 1,
+      page_size: 2,
+      total: 4,
+      ids: ["saved-a", "saved-b", "saved-c", "saved-d"],
+    });
+    const page2 = pageOf([jobC, jobD], {
+      page: 2,
+      page_size: 2,
+      total: 4,
+      ids: ["saved-a", "saved-b", "saved-c", "saved-d"],
+    });
+    const client = createTestQueryClient();
+    client.setQueryData(["jobs-workspace", page2Params], page2);
+    let rejectUnsave: ((error: ApiClientError) => void) | undefined;
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "saved" && params.page === 2) return Promise.resolve(page2);
+      if (params.tab === "saved") return Promise.resolve(page1);
+      return Promise.resolve(pageOf([existingJob]));
+    });
+    vi.mocked(api.unsaveJob).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectUnsave = reject;
+        }),
+    );
+
+    renderJobs("/jobs?tab=saved", client);
+    expect(await screen.findByText("Saved Role B")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("save-job-saved-b"));
+
+    const cached1 = client.getQueryData<JobListPage>(["jobs-workspace", page1Params]);
+    const cached2 = client.getQueryData<JobListPage>(["jobs-workspace", page2Params]);
+    expect(cached1?.items.map((item) => item.job.id)).toEqual(["saved-a"]);
+    expect(cached1?.ids).toEqual(["saved-a", "saved-c", "saved-d"]);
+    expect(cached1?.total).toBe(3);
+    expect(cached2?.items.map((item) => item.job.id)).toEqual(["saved-c", "saved-d"]);
+    expect(cached2?.ids).toEqual(["saved-a", "saved-c", "saved-d"]);
+    expect(cached2?.total).toBe(3);
+
+    rejectUnsave?.(new ApiClientError(500, "save failed"));
+    await waitFor(() => {
+      const rolled1 = client.getQueryData<JobListPage>(["jobs-workspace", page1Params]);
+      const rolled2 = client.getQueryData<JobListPage>(["jobs-workspace", page2Params]);
+      expect(rolled1?.ids).toEqual(["saved-a", "saved-b", "saved-c", "saved-d"]);
+      expect(rolled1?.total).toBe(4);
+      expect(rolled1?.items.map((item) => item.job.id)).toEqual(["saved-a", "saved-b"]);
+      expect(rolled2?.ids).toEqual(["saved-a", "saved-b", "saved-c", "saved-d"]);
+      expect(rolled2?.total).toBe(4);
+      expect(rolled2?.items.map((item) => item.job.id)).toEqual(["saved-c", "saved-d"]);
     });
   });
 });

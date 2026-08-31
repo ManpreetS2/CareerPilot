@@ -6,11 +6,12 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from functools import lru_cache
 from typing import Any
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from backend.db.models import (
     Candidate,
@@ -1283,6 +1284,34 @@ def compute_breakdown(
     )
 
 
+def _match_score_recency(row: MatchScoreRecord) -> tuple[bool, datetime, int]:
+    created = row.created_at
+    if created is None:
+        return (False, datetime.min, row.id)
+    if created.tzinfo is not None:
+        created = created.replace(tzinfo=None)
+    return (True, created, row.id)
+
+
+def _newest_match_score_rows(rows: list[MatchScoreRecord]) -> list[MatchScoreRecord]:
+    return sorted(rows, key=_match_score_recency, reverse=True)
+
+
+def _is_match_score_uniqueness_error(exc: IntegrityError) -> bool:
+    parts = [str(exc)]
+    orig = getattr(exc, "orig", None)
+    if orig is not None:
+        parts.append(str(orig))
+        args = getattr(orig, "args", ())
+        parts.extend(str(arg) for arg in args)
+    blob = " ".join(parts).lower()
+    if "ux_match_scores_job_candidate" in blob:
+        return True
+    if "unique constraint failed: match_scores.job_id, match_scores.candidate_id" in blob:
+        return True
+    return False
+
+
 def persist_score(
     db: Session,
     job: JobRecord,
@@ -1296,11 +1325,9 @@ def persist_score(
         existing_rows = (
             db.query(MatchScoreRecord)
             .filter(MatchScoreRecord.job_id == job.id, MatchScoreRecord.candidate_id == candidate.id)
-            .order_by(MatchScoreRecord.id.desc())
             .all()
         )
-    else:
-        existing_rows = sorted(existing_rows, key=lambda row: row.id, reverse=True)
+    existing_rows = _newest_match_score_rows(existing_rows)
     existing = existing_rows[0] if existing_rows else None
     payload = {
         "job_id": job.id,
@@ -1346,6 +1373,25 @@ def persist_score(
         if commit:
             db.commit()
             db.refresh(record)
+    except IntegrityError as exc:
+        if not commit:
+            raise
+        db.rollback()
+        if not _is_match_score_uniqueness_error(exc):
+            raise
+        canonical_rows = _newest_match_score_rows(
+            db.query(MatchScoreRecord)
+            .filter(MatchScoreRecord.job_id == job.id, MatchScoreRecord.candidate_id == candidate.id)
+            .all()
+        )
+        if not canonical_rows:
+            raise
+        canonical = canonical_rows[0]
+        for key, value in payload.items():
+            setattr(canonical, key, value)
+        db.commit()
+        db.refresh(canonical)
+        record = canonical
     except Exception:
         if commit:
             db.rollback()
