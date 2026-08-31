@@ -2,18 +2,20 @@ import type { HTMLAttributes } from "react";
 import { useGlassRefraction } from "../../hooks/useGlassRefraction";
 import { cn } from "../../lib/cn";
 
-type GlassVariant = "atmosphere" | "working" | "floating" | "subtle" | "surface";
+type GlassVariant = "panel" | "floating" | "solid" | "atmosphere" | "working" | "subtle" | "surface";
 
 const VARIANT_CLASS: Record<GlassVariant, string> = {
-  atmosphere: "glass-atmosphere",
-  subtle: "glass-atmosphere",
-  working: "glass-working",
-  surface: "glass-working",
+  panel: "glass-panel",
+  atmosphere: "glass-panel",
+  subtle: "glass-panel",
+  working: "glass-panel",
+  surface: "glass-panel",
   floating: "glass-floating",
+  solid: "solid-surface",
 };
 
 export function Glass({
-  variant = "working",
+  variant = "panel",
   refract = false,
   className,
   ...props
@@ -22,10 +24,12 @@ export function Glass({
   refract?: boolean;
 }) {
   const ref = useGlassRefraction<HTMLDivElement>(refract);
+  const mapped =
+    variant === "floating" ? "floating" : variant === "solid" ? "solid" : "panel";
   return (
     <div
       ref={ref}
-      data-glass={variant === "subtle" ? "atmosphere" : variant === "surface" ? "working" : variant}
+      data-glass={mapped}
       className={cn(VARIANT_CLASS[variant], refract && "glass-refract", className)}
       {...props}
     />

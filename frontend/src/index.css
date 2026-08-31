@@ -4,50 +4,47 @@
 
 :root {
   color-scheme: light;
-  --background: #f3f5f8;
-  --foreground: #14161c;
-  --surface: #ffffff;
-  --surface-secondary: #eef1f6;
-  --surface-elevated: #ffffff;
-  --muted: #e7ebf2;
-  --muted-foreground: #5a6270;
-  --border: #d7dce6;
-  --border-strong: #c0c7d4;
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --primary-foreground: #f7f6ff;
-  --accent: #2563eb;
-  --accent-foreground: #eff6ff;
-  --success: #059669;
-  --warning: #d97706;
-  --danger: #e11d48;
-  --ring: #6366f1;
-  --radius-sm: 8px;
-  --radius-md: 11px;
-  --radius-lg: 14px;
-  --shadow-floating: 0 22px 50px -24px rgba(28, 32, 48, 0.28), 0 8px 18px -12px rgba(79, 70, 229, 0.18);
-  --shadow-atmosphere: 0 30px 80px -48px rgba(49, 46, 129, 0.35);
-  --glass-subtle: color-mix(in srgb, #ffffff 38%, transparent);
-  --glass-surface: color-mix(in srgb, #ffffff 86%, transparent);
-  --glass-floating: color-mix(in srgb, #ffffff 70%, transparent);
-  --glass: var(--glass-surface);
-  --glass-border: color-mix(in srgb, var(--primary) 28%, rgba(255, 255, 255, 0.55));
-  --glass-highlight: rgba(255, 255, 255, 0.78);
-  --atmosphere-a: rgba(79, 70, 229, 0.22);
-  --atmosphere-b: rgba(14, 165, 233, 0.14);
-  --atmosphere-c: rgba(244, 114, 182, 0.08);
+  --background: #e8decf;
+  --background-secondary: #ded1bf;
+  --foreground: #29231e;
+  --surface: #f5efe6;
+  --surface-secondary: #efe6d8;
+  --surface-elevated: #faf7f2;
+  --muted: #e4d8c6;
+  --muted-foreground: #746b61;
+  --border: rgba(91, 74, 58, 0.16);
+  --border-strong: rgba(91, 74, 58, 0.27);
+  --primary: #342b24;
+  --primary-hover: #46392e;
+  --primary-foreground: #faf7f2;
+  --accent: #9a8062;
+  --accent-foreground: #faf7f2;
+  --success: #3f6b4a;
+  --warning: #b07a2e;
+  --danger: #a33d3d;
+  --ring: #806a50;
+  --radius-sm: 9px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --shadow-floating: 0 16px 40px -28px rgba(73, 58, 44, 0.35), 0 6px 16px -12px rgba(73, 58, 44, 0.16);
+  --shadow-panel: 0 10px 28px -20px rgba(73, 58, 44, 0.22);
+  --glass-fill: rgba(245, 239, 230, 0.66);
+  --glass-floating-fill: rgba(250, 247, 242, 0.72);
+  --glass: var(--glass-fill);
+  --glass-border: rgba(91, 74, 58, 0.16);
+  --glass-highlight: rgba(255, 252, 247, 0.72);
+  --atmosphere-a: rgba(250, 247, 242, 0.55);
+  --atmosphere-b: rgba(222, 209, 191, 0.7);
   --line: var(--border);
   --bg: var(--background);
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-expressive: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-panel: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-spring-soft: cubic-bezier(0.34, 1.15, 0.64, 1);
   --motion-instant: 80ms;
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --motion-panel: 240ms;
   --motion-emphasis: 320ms;
-  --motion-hero: 450ms;
   --z-shell: 30;
   --z-overlay: 50;
   --z-palette: 60;
@@ -55,35 +52,34 @@
 
 .dark {
   color-scheme: dark;
-  --background: #0b0c11;
-  --foreground: #e7eaf1;
-  --surface: #141722;
-  --surface-secondary: #1a1e2a;
-  --surface-elevated: #1c2130;
-  --muted: #222838;
-  --muted-foreground: #97a0b3;
-  --border: #2a3142;
-  --border-strong: #3a4358;
-  --primary: #818cf8;
-  --primary-hover: #a5b4fc;
-  --primary-foreground: #0b0c11;
-  --accent: #38bdf8;
-  --accent-foreground: #082f49;
-  --success: #34d399;
-  --warning: #fbbf24;
-  --danger: #fb7185;
-  --ring: #818cf8;
-  --shadow-floating: 0 28px 70px -34px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(129, 140, 248, 0.08);
-  --shadow-atmosphere: 0 40px 90px -50px rgba(56, 189, 248, 0.28);
-  --glass-subtle: color-mix(in srgb, #10131c 46%, transparent);
-  --glass-surface: color-mix(in srgb, #151925 84%, transparent);
-  --glass-floating: color-mix(in srgb, #171c2a 72%, transparent);
-  --glass: var(--glass-surface);
-  --glass-border: color-mix(in srgb, var(--accent) 32%, rgba(255, 255, 255, 0.08));
-  --glass-highlight: rgba(255, 255, 255, 0.12);
-  --atmosphere-a: rgba(99, 102, 241, 0.28);
-  --atmosphere-b: rgba(56, 189, 248, 0.16);
-  --atmosphere-c: rgba(244, 114, 182, 0.1);
+  --background: #1c1814;
+  --background-secondary: #241f1a;
+  --foreground: #faf7f2;
+  --surface: #2a2520;
+  --surface-secondary: #322c26;
+  --surface-elevated: #35302a;
+  --muted: #3a342e;
+  --muted-foreground: #b5a99a;
+  --border: rgba(232, 222, 207, 0.12);
+  --border-strong: rgba(232, 222, 207, 0.22);
+  --primary: #ede6dc;
+  --primary-hover: #f5efe6;
+  --primary-foreground: #29231e;
+  --accent: #b59a78;
+  --accent-foreground: #1c1814;
+  --success: #7dba8a;
+  --warning: #e0b36a;
+  --danger: #d98989;
+  --ring: #c4ae93;
+  --shadow-floating: 0 18px 44px -28px rgba(0, 0, 0, 0.55);
+  --shadow-panel: 0 10px 28px -22px rgba(0, 0, 0, 0.45);
+  --glass-fill: rgba(42, 37, 32, 0.62);
+  --glass-floating-fill: rgba(53, 48, 42, 0.72);
+  --glass: var(--glass-fill);
+  --glass-border: rgba(232, 222, 207, 0.14);
+  --glass-highlight: rgba(255, 252, 247, 0.08);
+  --atmosphere-a: rgba(53, 48, 42, 0.5);
+  --atmosphere-b: rgba(28, 24, 20, 0.9);
 }
 
 html,
@@ -105,6 +101,8 @@ body {
   margin: 0;
   color: var(--foreground);
   background-color: var(--background);
+  font-size: 15px;
+  line-height: 1.5;
   font-feature-settings: "ss01" on, "cv11" on;
   transition:
     background-color var(--motion-panel) var(--ease-standard),
@@ -116,80 +114,65 @@ body {
 }
 
 .title-fluid {
-  font-size: clamp(1.65rem, 2.4vw, 2.35rem);
+  font-size: clamp(1.75rem, 2vw, 2.25rem);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.section-title {
+  font-size: clamp(1.125rem, 1.4vw, 1.375rem);
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 
 .hero-fluid {
-  font-size: clamp(2.15rem, 6.2vw, 4.4rem);
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
 }
 
 .score-fluid {
-  font-size: clamp(2.4rem, 5vw, 3.5rem);
+  font-size: 1.125rem;
 }
 
+/* New primitives. Legacy glass-* names alias these so untouched pages stay readable. */
+.glass-panel,
 .glass-atmosphere,
 .glass-subtle,
 .glass-working,
-.glass-surface,
-.glass-floating {
-  --glass-fill: var(--glass-surface);
+.glass-surface {
   position: relative;
   isolation: isolate;
   background-color: var(--glass-fill);
-  background-image: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--glass-highlight) 55%, transparent),
-    transparent 38%
-  );
   border: 1px solid var(--glass-border);
   box-shadow:
     inset 0 1px 0 var(--glass-highlight),
-    0 18px 44px -28px color-mix(in srgb, var(--primary) 28%, transparent);
-}
-
-.glass-atmosphere,
-.glass-subtle {
-  --glass-fill: var(--glass-subtle);
-  backdrop-filter: blur(22px) saturate(1.45);
-  -webkit-backdrop-filter: blur(22px) saturate(1.45);
-  box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 0 0 1px color-mix(in srgb, var(--glass-border) 70%, transparent),
-    var(--shadow-atmosphere);
-}
-
-.glass-working,
-.glass-surface {
-  --glass-fill: var(--glass-surface);
-  backdrop-filter: blur(12px) saturate(1.18);
-  -webkit-backdrop-filter: blur(12px) saturate(1.18);
-  box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 10px 28px -18px rgba(20, 22, 32, 0.22);
+    var(--shadow-panel);
+  backdrop-filter: blur(20px) saturate(1.08);
+  -webkit-backdrop-filter: blur(20px) saturate(1.08);
 }
 
 .glass-floating {
-  --glass-fill: var(--glass-floating);
-  backdrop-filter: blur(28px) saturate(1.55);
-  -webkit-backdrop-filter: blur(28px) saturate(1.55);
+  position: relative;
+  isolation: isolate;
+  background-color: var(--glass-floating-fill);
+  border: 1px solid var(--glass-border);
   box-shadow:
     inset 0 1px 0 var(--glass-highlight),
     var(--shadow-floating);
+  backdrop-filter: blur(22px) saturate(1.12);
+  -webkit-backdrop-filter: blur(22px) saturate(1.12);
 }
 
-.glass-atmosphere::after,
-.glass-subtle::after,
-.glass-working::after,
-.glass-surface::after,
-.glass-floating::after {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  opacity: 0.045;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='80' height='80' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+.solid-surface {
+  position: relative;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+.cp-kicker {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
 }
 
 .glass-refract {
@@ -205,30 +188,27 @@ body {
   z-index: 0;
   border-radius: inherit;
   background: radial-gradient(
-    220px circle at var(--glass-x) var(--glass-y),
-    color-mix(in srgb, var(--accent) 28%, transparent),
-    transparent 64%
+    180px circle at var(--glass-x) var(--glass-y),
+    color-mix(in srgb, var(--glass-highlight) 55%, transparent),
+    transparent 70%
   );
   opacity: 0;
   transition: opacity var(--motion-base) var(--ease-standard);
 }
 
-.glass-refract:focus-within::before {
-  opacity: 1;
-}
-
 @media (hover: hover) and (pointer: fine) {
   .glass-refract:hover::before {
-    opacity: 1;
+    opacity: 0.45;
   }
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-panel,
+  .glass-floating,
   .glass-atmosphere,
   .glass-subtle,
   .glass-working,
-  .glass-surface,
-  .glass-floating {
+  .glass-surface {
     background-color: var(--surface);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -250,44 +230,24 @@ body {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(72% 48% at 8% -6%, var(--atmosphere-a), transparent 62%),
-    radial-gradient(58% 42% at 94% 4%, var(--atmosphere-b), transparent 58%),
-    radial-gradient(46% 34% at 72% 108%, var(--atmosphere-c), transparent 68%),
-    repeating-linear-gradient(
-      0deg,
-      color-mix(in srgb, var(--foreground) 4.2%, transparent) 0 1px,
-      transparent 1px 44px
-    ),
-    repeating-linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--foreground) 3.4%, transparent) 0 1px,
-      transparent 1px 44px
-    );
-  animation: aurora-drift 36s var(--ease-standard) infinite alternate;
-}
-
-.app-canvas::after,
-.cp-atmosphere::after {
-  content: "";
-  pointer-events: none;
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  opacity: 0.04;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+    radial-gradient(70% 48% at 12% -8%, var(--atmosphere-a), transparent 58%),
+    radial-gradient(55% 40% at 92% 108%, var(--atmosphere-b), transparent 62%),
+    var(--background);
 }
 
 .fixed.glass-atmosphere,
 .fixed.glass-subtle,
 .fixed.glass-working,
 .fixed.glass-surface,
-.fixed.glass-floating {
+.fixed.glass-floating,
+.fixed.glass-panel {
   position: fixed;
 }
 
 .sticky.glass-atmosphere,
 .sticky.glass-working,
-.sticky.glass-floating {
+.sticky.glass-floating,
+.sticky.glass-panel {
   position: sticky;
 }
 
@@ -346,7 +306,9 @@ body {
 }
 
 .nav-indicator {
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 80%, var(--primary));
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--foreground);
 }
 
 .path-stroke {
@@ -358,28 +320,6 @@ body {
 .status-sheen {
   position: relative;
   overflow: hidden;
-}
-
-.status-sheen::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-120%);
-  background: linear-gradient(
-    105deg,
-    transparent 30%,
-    color-mix(in srgb, var(--accent) 35%, transparent) 48%,
-    transparent 62%
-  );
-  animation: sheen-once var(--motion-emphasis) var(--ease-expressive) 1;
-}
-
-.cp-kicker {
-  font-size: 0.72rem;
-  font-weight: 650;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--primary);
 }
 
 .wrap-anywhere {
@@ -405,9 +345,6 @@ body {
     var(--accent) var(--score-deg),
     color-mix(in srgb, var(--muted) 88%, transparent) 0
   );
-  box-shadow:
-    inset 0 1px 0 var(--glass-highlight),
-    0 10px 24px -16px color-mix(in srgb, var(--primary) 45%, transparent);
 }
 
 .score-orb-inner {
@@ -442,10 +379,10 @@ body {
     background: var(--primary-hover);
   }
   .btn-secondary:hover {
-    background: var(--surface-secondary);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
   }
   .btn-ghost:hover {
-    background: var(--muted);
+    background: color-mix(in srgb, var(--foreground) 6%, transparent);
     color: var(--foreground);
   }
 }
@@ -477,40 +414,6 @@ body {
   }
 }
 
-@keyframes sheen-once {
-  to {
-    transform: translateX(120%);
-  }
-}
-
-@keyframes node-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 0.8;
-  }
-}
-
-@keyframes field-drift {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    transform: translate3d(8px, -10px, 0);
-  }
-}
-
-@keyframes aurora-drift {
-  from {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  to {
-    transform: translate3d(1.4%, -0.8%, 0) scale(1.03);
-  }
-}
-
 @keyframes palette-in {
   from {
     opacity: 0;
@@ -525,7 +428,7 @@ body {
 @keyframes resume-parse-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 40%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 28%, transparent);
   }
   50% {
     box-shadow: 0 0 0 7px transparent;
@@ -539,7 +442,7 @@ body {
 @keyframes job-discovery-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 35%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 24%, transparent);
   }
   50% {
     box-shadow: 0 0 0 6px transparent;
@@ -565,9 +468,8 @@ body {
 
 .job-card-selected {
   box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--primary) 45%, transparent),
-    0 12px 32px -18px color-mix(in oklab, var(--primary) 55%, transparent),
-    inset 0 1px 0 color-mix(in oklab, var(--primary) 22%, transparent);
+    0 0 0 1px var(--border-strong),
+    inset 0 1px 0 var(--glass-highlight);
 }
 
 .filter-chip {
@@ -608,8 +510,6 @@ body {
   }
 
   .path-stroke,
-  .app-canvas::before,
-  .cp-atmosphere::before,
   .command-palette {
     animation: none !important;
   }
@@ -636,8 +536,6 @@ body {
 }
 
 .reduce-motion .path-stroke,
-.reduce-motion .app-canvas::before,
-.reduce-motion .cp-atmosphere::before,
 .reduce-motion .command-palette {
   animation: none !important;
 }
@@ -662,8 +560,7 @@ body {
       background-color var(--motion-fast) var(--ease-standard),
       color var(--motion-fast) var(--ease-standard),
       border-color var(--motion-fast) var(--ease-standard),
-      box-shadow var(--motion-fast) var(--ease-standard),
-      transform var(--motion-fast) var(--ease-standard);
+      box-shadow var(--motion-fast) var(--ease-standard);
   }
   .btn:focus-visible {
     outline: 2px solid var(--ring);
@@ -674,27 +571,31 @@ body {
     background: var(--primary);
   }
   .btn-secondary {
-    @apply btn border border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)];
+    @apply btn border text-[var(--foreground)];
+    border-color: var(--border-strong);
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
   }
   .btn-ghost {
     @apply btn text-[var(--muted-foreground)];
+    background: transparent;
   }
   .btn-danger {
     @apply btn text-white;
     background: var(--danger);
   }
   .card {
-    @apply glass-working rounded-[var(--radius-md)];
+    @apply glass-panel rounded-[var(--radius-md)];
   }
   .input {
-    @apply w-full rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--foreground)] outline-none;
+    @apply w-full rounded-[var(--radius-sm)] border bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--foreground)] outline-none;
+    border-color: var(--border);
     transition:
       border-color var(--motion-fast) var(--ease-standard),
       box-shadow var(--motion-fast) var(--ease-standard);
   }
   .input:focus {
     border-color: var(--ring);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 28%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent);
   }
   .input::placeholder,
   .jobs-search-input::placeholder {
@@ -713,6 +614,6 @@ body {
     @apply mb-1.5 block text-sm font-medium text-[var(--foreground)];
   }
   .status-pill {
-    @apply inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold;
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold;
   }
 }

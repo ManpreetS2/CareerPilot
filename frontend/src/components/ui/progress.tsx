@@ -20,7 +20,7 @@ export function Progress({
       ) : null}
       <div className="h-1.5 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-primary to-accent"
+          className="h-full rounded-full bg-accent"
           style={{ width: `${clamped}%` }}
         />
       </div>
