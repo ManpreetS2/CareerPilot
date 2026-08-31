@@ -64,24 +64,24 @@ describe("AppShell", () => {
     renderShell();
     expect(screen.getByRole("link", { name: "Skip to content" })).toHaveAttribute("href", "#main");
     expect(WORKFLOW_NAV.map((item) => item.label)).toEqual([
-      "Overview",
-      "Discover",
-      "Analyze",
-      "Prepare",
-      "Track",
-    ]);
-    expect(PRIMARY_NAV.map((item) => item.label)).toEqual([
-      "Overview",
-      "Discover",
-      "Analyze",
-      "Prepare",
-      "Track",
+      "Dashboard",
+      "Jobs",
       "Profile",
       "Resume",
-      "Settings",
+    ]);
+    expect(PRIMARY_NAV.map((item) => item.label)).toEqual([
+      "Dashboard",
+      "Jobs",
+      "Profile",
+      "Resume",
     ]);
     expect(screen.queryByRole("link", { name: "Applications" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
+    const sidebar = screen.getByTestId("app-sidebar");
+    expect(within(sidebar).getByRole("link", { name: "Dashboard", hidden: true })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("link", { name: "Jobs", hidden: true })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("link", { name: "Overview", hidden: true })).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("link", { name: "Discover", hidden: true })).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("link", { name: "Analyze", hidden: true })).not.toBeInTheDocument();
     expect(screen.queryByTestId("pointer-halo")).not.toBeInTheDocument();
     expect(document.querySelector(".pointer-halo")).toBeNull();
     expect(screen.getByTestId("app-sidebar").querySelector(".glass-refract")).toBeNull();
@@ -128,7 +128,7 @@ describe("AppShell", () => {
     const palette = await screen.findByTestId("command-palette");
     expect(palette).toBeInTheDocument();
     expect(palette).toHaveClass("command-palette");
-    expect(screen.getByRole("option", { name: /Overview/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Dashboard/i })).toBeInTheDocument();
     expect(document.body.contains(palette)).toBe(true);
     expect(screen.getByTestId("app-shell").contains(palette)).toBe(false);
     const style = getComputedStyle(palette);
@@ -161,16 +161,7 @@ describe("AppShell", () => {
     const labels = within(drawer)
       .getAllByRole("link")
       .map((link) => link.textContent);
-    expect(labels).toEqual([
-      "Overview",
-      "Discover",
-      "Analyze",
-      "Prepare",
-      "Track",
-      "Profile",
-      "Resume",
-      "Settings",
-    ]);
+    expect(labels).toEqual(["Dashboard", "Jobs", "Profile", "Resume", "Settings"]);
     expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
     const sheet = screen.getByRole("dialog");
     expect(sheet.className).toMatch(/max-h-\[100dvh\]/);
@@ -196,7 +187,7 @@ describe("AppShell", () => {
     await user.keyboard("{Control>}k{/Control}");
     await user.type(screen.getByLabelText("Filter commands"), "set");
     expect(screen.getByRole("option", { name: /Settings/i })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /^Overview/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^Dashboard/i })).not.toBeInTheDocument();
     await user.keyboard("{Enter}");
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
     expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();

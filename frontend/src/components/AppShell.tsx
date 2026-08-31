@@ -1,17 +1,13 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { motion } from "motion/react";
 import {
   BriefcaseBusiness,
-  FileSearch,
   FileText,
-  Kanban,
   LayoutDashboard,
   LogOut,
   Menu,
   Monitor,
   Moon,
-  PenLine,
   Settings,
   Sun,
   UserRound,
@@ -26,60 +22,43 @@ import { useAuth } from "../lib/auth";
 import { APP_NAME } from "../lib/config";
 import { cn } from "../lib/cn";
 import { shouldPromptFinishSetup } from "../lib/onboarding";
-import { getSelectedJobId } from "../lib/session";
 import { useTheme, type ThemePreference } from "../lib/theme";
 
 type NavItem = {
   to: string;
   label: string;
   icon: LucideIcon;
-  id: "overview" | "discover" | "analyze" | "prepare" | "track" | "profile" | "resume" | "settings";
+  id: "dashboard" | "jobs" | "profile" | "resume" | "settings";
 };
 
-export const WORKFLOW_NAV: NavItem[] = [
-  { id: "overview", to: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { id: "discover", to: "/jobs", label: "Discover", icon: BriefcaseBusiness },
-  { id: "analyze", to: "/analyze", label: "Analyze", icon: FileSearch },
-  { id: "prepare", to: "/prepare", label: "Prepare", icon: PenLine },
-  { id: "track", to: "/track", label: "Track", icon: Kanban },
-];
-
-export const SUPPORTING_NAV: NavItem[] = [
+export const PRIMARY_NAV: NavItem[] = [
+  { id: "dashboard", to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "jobs", to: "/jobs", label: "Jobs", icon: BriefcaseBusiness },
   { id: "profile", to: "/profile", label: "Profile", icon: UserRound },
   { id: "resume", to: "/resume", label: "Resume", icon: FileText },
+];
+
+export const ACCOUNT_NAV: NavItem[] = [
   { id: "settings", to: "/settings", label: "Settings", icon: Settings },
 ];
 
-export const PRIMARY_NAV: NavItem[] = [...WORKFLOW_NAV, ...SUPPORTING_NAV];
-
-function resolveNavTo(item: NavItem): string {
-  if (item.id === "analyze") {
-    const jobId = getSelectedJobId();
-    return jobId ? `/jobs/${jobId}` : "/analyze";
-  }
-  if (item.id === "prepare") {
-    const jobId = getSelectedJobId();
-    return jobId ? `/jobs/${jobId}/prepare` : "/prepare";
-  }
-  return item.to;
-}
+/** @deprecated Use PRIMARY_NAV. Kept so older tests can migrate in this PR. */
+export const WORKFLOW_NAV = PRIMARY_NAV;
 
 function isNavActive(item: NavItem, pathname: string): boolean {
-  if (item.id === "overview") return pathname.startsWith("/dashboard");
-  if (item.id === "discover") return pathname === "/jobs";
-  if (item.id === "analyze") return /^\/jobs\/[^/]+$/.test(pathname) || pathname === "/analyze";
-  if (item.id === "prepare") return /\/jobs\/[^/]+\/prepare/.test(pathname) || pathname === "/prepare";
-  if (item.id === "track") return pathname.startsWith("/track") || pathname.startsWith("/applications");
+  if (item.id === "dashboard") return pathname.startsWith("/dashboard");
+  if (item.id === "jobs") return pathname.startsWith("/jobs") || pathname.startsWith("/analyze") || pathname.startsWith("/prepare");
   if (item.id === "resume") return pathname.startsWith("/resume");
+  if (item.id === "settings") return pathname.startsWith("/settings");
   return pathname === item.to || pathname.startsWith(`${item.to}/`);
 }
 
 function navClass(isActive: boolean) {
   return cn(
-    "relative flex min-h-10 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium",
+    "relative flex min-h-11 items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 text-[14px] font-medium",
     isActive
-      ? "nav-indicator bg-primary/[0.09] text-foreground"
-      : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+      ? "nav-indicator text-foreground"
+      : "text-muted-foreground hover:bg-[color-mix(in_srgb,var(--foreground)_6%,transparent)] hover:text-foreground",
   );
 }
 
@@ -91,7 +70,6 @@ function NavGroup({
   onNavigate?: () => void;
 }) {
   const location = useLocation();
-  const { reducedMotion } = useTheme();
   return (
     <div className="flex flex-col gap-0.5">
       {items.map((item) => {
@@ -99,18 +77,11 @@ function NavGroup({
         return (
           <NavLink
             key={item.id}
-            to={resolveNavTo(item)}
+            to={item.to}
             className={navClass(active)}
             aria-current={active ? "page" : undefined}
             onClick={onNavigate}
           >
-            {active && !reducedMotion ? (
-              <motion.span
-                layoutId="nav-active"
-                className="absolute inset-0 -z-10 rounded-md bg-primary/[0.1]"
-                transition={{ type: "spring", stiffness: 420, damping: 34 }}
-              />
-            ) : null}
             <item.icon className="h-4 w-4 shrink-0" aria-hidden />
             {item.label}
           </NavLink>
@@ -122,13 +93,10 @@ function NavGroup({
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <nav aria-label="Primary" className="flex flex-col gap-4">
-      <NavGroup items={WORKFLOW_NAV} onNavigate={onNavigate} />
-      <div>
-        <p className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Account
-        </p>
-        <NavGroup items={SUPPORTING_NAV} onNavigate={onNavigate} />
+    <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col">
+      <NavGroup items={PRIMARY_NAV} onNavigate={onNavigate} />
+      <div className="mt-auto space-y-1 pt-6">
+        <NavGroup items={ACCOUNT_NAV} onNavigate={onNavigate} />
       </div>
     </nav>
   );
@@ -143,7 +111,7 @@ function ThemeMenu() {
   ];
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="btn-ghost h-10 min-h-10 w-full justify-start px-2.5 text-[13px]" aria-label="Appearance">
+      <DropdownMenuTrigger className="btn-ghost h-11 min-h-11 w-full justify-start px-2.5 text-[14px]" aria-label="Appearance">
         {preference === "dark" ? (
           <Moon className="h-4 w-4" aria-hidden />
         ) : preference === "light" ? (
@@ -183,7 +151,7 @@ function AccountFooter() {
   }
 
   return (
-    <div className="mt-auto space-y-2 border-t border-border/80 pt-3">
+    <div className="space-y-2 border-t border-border pt-3">
       <ThemeMenu />
       {user ? (
         <p className="truncate px-2.5 text-xs text-muted-foreground" title={user.email}>
@@ -197,7 +165,7 @@ function AccountFooter() {
       </p>
       <button
         type="button"
-        className="btn-ghost h-10 min-h-10 w-full justify-start px-2.5 text-[13px]"
+        className="btn-ghost h-11 min-h-11 w-full justify-start px-2.5 text-[14px]"
         onClick={() => void onLogout()}
         disabled={loggingOut}
         aria-label="Log out"
@@ -219,7 +187,6 @@ export function AppShell() {
     location.pathname.startsWith("/track") ||
     location.pathname.startsWith("/applications");
   const showFinish = user ? shouldPromptFinishSetup(user.id) : false;
-  const { reducedMotion } = useTheme();
 
   useEffect(() => {
     window.scrollTo?.(0, 0);
@@ -242,12 +209,12 @@ export function AppShell() {
       <CommandPalette />
 
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 p-3 lg:flex" data-testid="app-sidebar">
-        <Glass variant="atmosphere" className="flex h-full w-full flex-col rounded-[1.25rem] p-3">
-          <Link to="/dashboard" className="mb-5 flex items-center gap-2 px-1.5">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-primary to-accent text-[11px] font-semibold text-primary-foreground">
+        <Glass variant="panel" className="flex h-full w-full flex-col rounded-[var(--radius-lg)] p-3">
+          <Link to="/dashboard" className="mb-6 flex items-center gap-2.5 px-1.5">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-sm)] bg-primary text-[11px] font-semibold text-primary-foreground">
               CP
             </span>
-            <span className="font-display text-[15px] font-semibold tracking-tight">{APP_NAME}</span>
+            <span className="font-display text-[15px] font-semibold">{APP_NAME}</span>
           </Link>
           <NavLinks />
           <AccountFooter />
@@ -255,7 +222,7 @@ export function AppShell() {
       </aside>
 
       <header className="safe-pad sticky top-0 z-40 flex items-center gap-3 px-3 py-2 lg:hidden">
-        <Glass variant="atmosphere" className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-2 py-1">
+        <Glass variant="panel" className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-2 py-1">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <button
               type="button"
@@ -266,7 +233,7 @@ export function AppShell() {
             >
               <Menu className="h-5 w-5" />
             </button>
-            <SheetContent title="CareerPilot" side="left" className="glass-floating">
+            <SheetContent title="CareerPilot" side="left">
               <div className="flex h-full flex-col" data-testid="mobile-nav">
                 <NavLinks onNavigate={() => setMobileOpen(false)} />
                 <AccountFooter />
@@ -288,24 +255,17 @@ export function AppShell() {
           wide ? "max-w-none" : "",
         )}
       >
-        <div className={cn("min-w-0", wide ? "mx-auto max-w-7xl" : "mx-auto max-w-5xl")}>
+        <div className={cn("min-w-0", wide ? "mx-auto max-w-[1360px]" : "mx-auto max-w-5xl")}>
           {showFinish ? (
-            <div className="glass-working mb-4 rounded-[var(--radius-md)] px-4 py-3 text-sm">
+            <div className="solid-surface mb-4 rounded-[var(--radius-md)] px-4 py-3 text-sm">
               Setup is unfinished.{" "}
-              <Link to="/onboarding" className="font-semibold text-primary">
+              <Link to="/onboarding" className="font-semibold text-foreground underline-offset-2 hover:underline">
                 Finish setup
               </Link>
             </div>
           ) : null}
           <ErrorBoundary key={location.pathname} scope="This page">
-            <motion.div
-              key={location.pathname}
-              initial={reducedMotion ? false : { opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: reducedMotion ? 0 : 0.2 }}
-            >
-              <Outlet />
-            </motion.div>
+            <Outlet />
           </ErrorBoundary>
         </div>
       </main>

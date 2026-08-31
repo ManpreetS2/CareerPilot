@@ -2,11 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BriefcaseBusiness,
-  FileSearch,
   FileText,
-  Kanban,
   LayoutDashboard,
-  PenLine,
   Search,
   Settings,
   Upload,
@@ -27,15 +24,12 @@ type Command = {
 };
 
 const BASE_COMMANDS: Command[] = [
-  { id: "overview", label: "Overview", hint: "Next action and stored signals", to: "/dashboard", icon: LayoutDashboard },
-  { id: "discover", label: "Discover", hint: "Find and triage roles", to: "/jobs", icon: BriefcaseBusiness },
-  { id: "analyze", label: "Analyze", hint: "Job evidence and fit", to: "/analyze", icon: FileSearch },
-  { id: "prepare", label: "Prepare", hint: "Grounded application workspace", to: "/prepare", icon: PenLine },
-  { id: "track", label: "Track", hint: "Pipeline Kanban and list", to: "/track", icon: Kanban },
-  { id: "profile", label: "Upload Resume", hint: "Profile workspace", to: "/profile", icon: Upload },
-  { id: "resume", label: "Resume", hint: "Immutable version library", to: "/resume", icon: FileText },
+  { id: "dashboard", label: "Dashboard", hint: "What to do next", to: "/dashboard", icon: LayoutDashboard },
+  { id: "jobs", label: "Jobs", hint: "Find and review roles", to: "/jobs", icon: BriefcaseBusiness },
+  { id: "profile", label: "Profile", hint: "Grounded candidate record", to: "/profile", icon: UserRound },
+  { id: "resume", label: "Resume", hint: "Version library", to: "/resume", icon: FileText },
   { id: "settings", label: "Settings", hint: "Appearance and privacy", to: "/settings", icon: Settings },
-  { id: "profile-nav", label: "Profile", hint: "Grounded candidate record", to: "/profile", icon: UserRound },
+  { id: "profile-upload", label: "Upload Resume", hint: "Profile workspace", to: "/profile", icon: Upload },
 ];
 
 export function CommandPalette() {
@@ -93,7 +87,7 @@ export function CommandPalette() {
         <DialogPrimitive.Content
           aria-label="Command palette"
           data-testid="command-palette"
-          className="command-palette glass-floating glass-refract fixed rounded-[var(--radius-lg)] border border-border p-2 shadow-floating"
+          className="command-palette glass-floating fixed rounded-[var(--radius-lg)] p-2"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             inputRef.current?.focus();
@@ -141,7 +135,7 @@ export function CommandPalette() {
                     aria-selected={index === active}
                     className={cn(
                       "flex w-full items-center gap-3 rounded-[var(--radius-sm)] px-3 py-2.5 text-left text-sm",
-                      index === active ? "bg-primary/10" : "hover:bg-muted",
+                      index === active ? "bg-[color-mix(in_srgb,var(--foreground)_8%,transparent)]" : "hover:bg-muted",
                     )}
                     onMouseEnter={() => setActive(index)}
                     onClick={() => run(command)}

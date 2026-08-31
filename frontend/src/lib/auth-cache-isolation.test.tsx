@@ -199,7 +199,7 @@ describe("authenticated query cache isolation", () => {
     renderApp("/resume");
     expect((await screen.findAllByText(/A-Only Resume Labs/)).length).toBeGreaterThan(0);
 
-    await user.click(screen.getAllByRole("link", { name: "Discover" })[0]!);
+    await user.click(screen.getAllByRole("link", { name: "Jobs" })[0]!);
     await user.click(await screen.findByRole("tab", { name: "Saved" }));
     expect(await screen.findByText("A-Only Saved Fintech Internship")).toBeInTheDocument();
     expect(screen.getByText(/97% Verified Fit/)).toBeInTheDocument();
@@ -257,7 +257,7 @@ describe("authenticated query cache isolation", () => {
       expect(screen.queryByText(/97% Verified Fit/)).not.toBeInTheDocument();
     });
 
-    await user.click(screen.getAllByRole("link", { name: "Discover" })[0]!);
+    await user.click(screen.getAllByRole("link", { name: "Jobs" })[0]!);
     await user.click(await screen.findByRole("tab", { name: "Saved" }));
     expect(screen.queryByText("A-Only Saved Fintech Internship")).not.toBeInTheDocument();
     expect(screen.queryByText(/97% Verified Fit/)).not.toBeInTheDocument();
@@ -269,7 +269,7 @@ describe("authenticated query cache isolation", () => {
     expect((await screen.findAllByText(/B-Only Resume Shop/)).length).toBeGreaterThan(0);
     expect(screen.queryAllByText(/A-Only Resume Labs/)).toHaveLength(0);
 
-    await user.click(screen.getAllByRole("link", { name: "Discover" })[0]!);
+    await user.click(screen.getAllByRole("link", { name: "Jobs" })[0]!);
     await user.click(await screen.findByRole("tab", { name: "Saved" }));
     expect(await screen.findByText("B-Only Backend Role")).toBeInTheDocument();
     expect(screen.queryByText("A-Only Saved Fintech Internship")).not.toBeInTheDocument();
