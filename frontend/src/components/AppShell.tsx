@@ -251,12 +251,12 @@ export function AppShell() {
         id="main"
         tabIndex={-1}
         className={cn(
-          "px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-8 outline-none sm:px-6 lg:ml-56 lg:pt-10",
+          "relative px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-8 outline-none sm:px-6 lg:ml-56 lg:pt-10",
           "safe-pad",
           wide ? "max-w-none" : "",
         )}
       >
-        <div className={cn("relative z-[1] min-w-0", wide ? "mx-auto max-w-[1360px]" : "mx-auto max-w-5xl")}>
+        <div className={cn("relative min-w-0", wide ? "mx-auto max-w-[1360px]" : "mx-auto max-w-5xl")}>
           {showFinish ? (
             <div className="glass-panel mb-4 rounded-[var(--radius-md)] px-4 py-3 text-sm">
               Setup is unfinished.{" "}

@@ -26,20 +26,20 @@
   --radius-sm: 9px;
   --radius-md: 16px;
   --radius-lg: 20px;
-  --shadow-floating: 0 24px 60px rgba(68, 53, 39, 0.16), 0 8px 18px rgba(68, 53, 39, 0.08);
-  --shadow-panel: 0 22px 50px rgba(68, 53, 39, 0.15), 0 6px 14px rgba(68, 53, 39, 0.08);
-  --glass-fill: rgba(255, 250, 244, 0.16);
-  --glass-floating-fill: rgba(255, 252, 247, 0.24);
+  --shadow-floating: 0 28px 64px rgba(68, 53, 39, 0.18), 0 8px 20px rgba(68, 53, 39, 0.1);
+  --shadow-panel: 0 24px 54px rgba(68, 53, 39, 0.16), 0 8px 16px rgba(68, 53, 39, 0.08);
+  --glass-fill: rgba(255, 255, 255, 0.12);
+  --glass-floating-fill: rgba(255, 255, 255, 0.18);
   --glass: var(--glass-fill);
-  --glass-border: rgba(255, 255, 255, 0.62);
-  --glass-highlight: rgba(255, 255, 255, 0.82);
+  --glass-border: rgba(255, 255, 255, 0.82);
+  --glass-highlight: rgba(255, 255, 255, 0.95);
   --glass-inset-warm: inset 0 0 0 1px rgba(91, 74, 58, 0.06);
   --glass-inset-bottom: inset 0 -1px 0 rgba(91, 74, 58, 0.05);
   --glass-blur: blur(32px) saturate(1.18);
   --glass-floating-blur: blur(36px) saturate(1.2);
   --glass-sheen: linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 42%, rgba(255, 255, 255, 0.05));
-  --atmosphere-a: rgba(255, 251, 245, 0.95);
-  --atmosphere-b: rgba(168, 128, 86, 0.48);
+  --atmosphere-a: rgba(255, 251, 245, 0.92);
+  --atmosphere-b: rgba(150, 108, 68, 0.62);
   --line: var(--border);
   --bg: var(--background);
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -95,10 +95,6 @@ body,
 #root {
   min-height: 100%;
   background-color: var(--background);
-  background-image:
-    radial-gradient(circle at 12% 10%, var(--atmosphere-a), transparent 38%),
-    radial-gradient(circle at 62% 52%, var(--atmosphere-b), transparent 44%);
-  background-attachment: fixed;
 }
 
 html {
@@ -238,32 +234,28 @@ body {
 }
 
 .app-wash {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  z-index: 0;
   pointer-events: none;
   background-color: var(--background);
   background-image:
-    radial-gradient(ellipse 42% 80% at 6% 48%, var(--atmosphere-b), transparent 68%),
-    radial-gradient(circle at 18% 8%, var(--atmosphere-a), transparent 32%),
-    radial-gradient(ellipse 75% 70% at 56% 46%, var(--atmosphere-b), transparent 58%);
+    radial-gradient(ellipse 42% 90% at 8% 45%, var(--atmosphere-b), transparent 62%),
+    radial-gradient(circle at 18% 8%, var(--atmosphere-a), transparent 34%),
+    radial-gradient(ellipse 80% 75% at 58% 48%, var(--atmosphere-b), transparent 56%);
 }
 
 .dashboard-stack {
   position: relative;
-  z-index: 0;
 }
 
 .dashboard-wash {
   position: absolute;
-  inset: -1.75rem -1rem -2.25rem;
-  z-index: -1;
+  inset: -1.5rem -0.75rem -2rem;
   pointer-events: none;
   border-radius: 1.75rem;
-  background-color: var(--background);
   background-image:
-    radial-gradient(ellipse 90% 80% at 50% 42%, var(--atmosphere-b), transparent 68%),
-    radial-gradient(ellipse 50% 40% at 8% 0%, var(--atmosphere-a), transparent 52%);
+    radial-gradient(ellipse 90% 80% at 48% 40%, var(--atmosphere-b), transparent 64%),
+    radial-gradient(ellipse 45% 35% at 10% 0%, var(--atmosphere-a), transparent 50%);
 }
 
 .fixed.glass-atmosphere,
