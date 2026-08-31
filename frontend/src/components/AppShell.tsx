@@ -202,7 +202,10 @@ export function AppShell() {
 
   return (
     <div className="app-canvas min-h-screen" data-testid="app-shell">
-      <div className="app-wash" aria-hidden="true" />
+      <div className="app-wash" aria-hidden="true">
+        <span className="app-wash-tone app-wash-tone--cream" />
+        <span className="app-wash-tone app-wash-tone--sidebar" />
+      </div>
       <a href="#main" className="skip-link" data-testid="skip-to-content" onClick={focusMain}>
         Skip to content
       </a>

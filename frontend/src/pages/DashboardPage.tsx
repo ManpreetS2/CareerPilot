@@ -89,8 +89,12 @@ export function DashboardPage() {
 
   return (
     <div className="dashboard-stack space-y-6">
-      <div className="dashboard-wash" aria-hidden="true" />
-      <header className="relative z-[1] max-w-2xl">
+      <div className="dashboard-wash" aria-hidden="true">
+        <span className="dashboard-wash-tone dashboard-wash-tone--cream" />
+        <span className="dashboard-wash-tone dashboard-wash-tone--tan" />
+        <span className="dashboard-wash-tone dashboard-wash-tone--deep" />
+      </div>
+      <header className="relative max-w-2xl">
         <h1 className="title-fluid font-display font-semibold text-foreground">
           {greetingForHour(hour)}, {greetingName}
         </h1>
@@ -100,7 +104,7 @@ export function DashboardPage() {
       </header>
       <ErrorBanner error={error} />
       {loading ? (
-        <div className="relative z-[1] space-y-4" aria-busy>
+        <div className="relative space-y-4" aria-busy>
           <Skeleton className="h-36 w-full" />
           <div className="grid gap-4 lg:grid-cols-2">
             <Skeleton className="h-40 w-full" />
