@@ -76,10 +76,10 @@ function isNavActive(item: NavItem, pathname: string): boolean {
 
 function navClass(isActive: boolean) {
   return cn(
-    "relative flex min-h-10 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium",
+    "relative flex min-h-10 items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-all",
     isActive
-      ? "nav-indicator bg-primary/[0.09] text-foreground"
-      : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+      ? "bg-gradient-to-r from-primary/15 to-accent/10 text-white shadow-lg shadow-primary/20"
+      : "text-gray-400 hover:bg-white/5 hover:text-white",
   );
 }
 

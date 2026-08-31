@@ -97,16 +97,23 @@ export function DashboardPage() {
   ].filter((item) => item.value > 0);
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Dashboard"
-        description={
-          searchFocus
-            ? `Welcome back, ${greetingName}. Current search focus: ${searchFocus}.`
-            : `Welcome back, ${greetingName}. One next step, then the real signals CareerPilot already has.`
-        }
-      />
+    <div className="space-y-8">
+      <div className="relative">
+        <div className="pointer-events-none absolute -top-40 left-1/2 h-64 w-96 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl" />
+        <div className="relative">
+          <h1 className="text-3xl font-bold tracking-tight text-white">
+            Welcome back, {greetingName}
+          </h1>
+          <p className="mt-2 text-muted-foreground">
+            {searchFocus
+              ? `Current search focus: ${searchFocus}`
+              : "Your next opportunities are ready"}
+          </p>
+        </div>
+      </div>
+
       <ErrorBanner error={error} />
+
       {loading ? (
         <div className="space-y-4" aria-busy>
           <Skeleton className="h-36 w-full" />
@@ -117,17 +124,21 @@ export function DashboardPage() {
         </div>
       ) : (
         <>
-          <Glass variant="atmosphere" refract className="rounded-[var(--radius-lg)] p-6">
-            <p className="cp-kicker">Next action</p>
-            <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight">{next.title}</h2>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{next.description}</p>
-            <Link to={next.to} className="btn-primary mt-4 inline-flex" data-testid="dashboard-next-action">
+          <Glass variant="floating" className="rounded-2xl p-8">
+            <p className="text-sm font-medium text-primary">Next Action</p>
+            <h2 className="mt-3 text-2xl font-bold tracking-tight text-white">{next.title}</h2>
+            <p className="mt-3 max-w-2xl leading-relaxed text-gray-300">{next.description}</p>
+            <Link
+              to={next.to}
+              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-6 py-3 font-semibold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30"
+              data-testid="dashboard-next-action"
+            >
               {next.cta}
             </Link>
             {user && shouldPromptFinishSetup(user.id) ? (
-              <p className="mt-3 text-sm text-muted-foreground">
+              <p className="mt-4 text-sm text-muted-foreground">
                 You can also{" "}
-                <Link to="/onboarding" className="font-semibold text-primary">
+                <Link to="/onboarding" className="font-semibold text-primary hover:text-primary-hover">
                   finish setup
                 </Link>{" "}
                 when you have a minute.
@@ -145,30 +156,30 @@ export function DashboardPage() {
             ]}
           />
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-            <Glass variant="working" className="rounded-[var(--radius-lg)] p-5">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Glass variant="panel" className="rounded-2xl p-6">
               <div className="flex items-center justify-between gap-3">
-              <h2 className="font-display text-lg font-semibold">Strongest matches</h2>
-              <Link to="/jobs?tab=matches" className="text-sm font-medium text-primary">
-                Open Matches
-              </Link>
+                <h2 className="text-lg font-semibold text-white">Top Matches</h2>
+                <Link to="/jobs?tab=matches" className="text-sm font-medium text-primary hover:text-primary-hover">
+                  View All
+                </Link>
               </div>
               {strong.length === 0 ? (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  No verified matches yet. Open Matches to review Potential Match rankings.
+                <p className="mt-4 text-sm text-muted-foreground">
+                  No verified matches yet. Open Matches to review rankings.
                 </p>
               ) : (
-                <ul className="mt-3 space-y-3">
-                  {strong.slice(0, 4).map((score) => {
+                <ul className="mt-4 space-y-4">
+                  {strong.slice(0, 3).map((score) => {
                     const job = jobs.find((item) => item.id === score.job_id);
                     return (
                       <li key={score.job_id}>
-                        <Link to={`/jobs/${score.job_id}`} className="flex items-start gap-3 text-sm">
+                        <Link to={`/jobs/${score.job_id}`} className="group flex items-start gap-4 rounded-xl border border-white/5 bg-white/[0.02] p-3 transition-all hover:border-white/10 hover:bg-white/[0.04]">
                           <ScoreOrb score={score.overall_score} compact />
-                          <span className="min-w-0 wrap-anywhere">
-                            <span className="font-semibold">{job?.title ?? "Role"}</span>
-                            <span className="mt-0.5 block text-muted-foreground">{job?.company ?? "Company"}</span>
-                          </span>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-white group-hover:text-primary">{job?.title ?? "Role"}</p>
+                            <p className="mt-1 text-sm text-muted-foreground">{job?.company ?? "Company"}</p>
+                          </div>
                         </Link>
                       </li>
                     );
@@ -176,35 +187,40 @@ export function DashboardPage() {
                 </ul>
               )}
             </Glass>
-            <Glass variant="working" className="rounded-[var(--radius-lg)] p-5">
-              <h2 className="font-display text-lg font-semibold">Profile readiness</h2>
-              <div className="mt-3">
+
+            <Glass variant="panel" className="rounded-2xl p-6">
+              <h2 className="text-lg font-semibold text-white">Profile Readiness</h2>
+              <div className="mt-4">
                 <ReadinessPath flags={readinessFlags} />
               </div>
-              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <dl className="mt-6 grid grid-cols-2 gap-4">
                 <div>
-                  <dt className="text-muted-foreground">Skills</dt>
-                  <dd className="tabular font-semibold">{liveCandidate?.skills.length ?? 0}</dd>
+                  <dt className="text-sm text-muted-foreground">Skills</dt>
+                  <dd className="mt-1 text-2xl font-bold tabular text-white">{liveCandidate?.skills.length ?? 0}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">Jobs discovered</dt>
-                  <dd className="tabular font-semibold">{jobs.length}</dd>
+                  <dt className="text-sm text-muted-foreground">Jobs Found</dt>
+                  <dd className="mt-1 text-2xl font-bold tabular text-white">{jobs.length}</dd>
                 </div>
               </dl>
             </Glass>
-            <div className="rounded-[var(--radius-lg)] border border-border/70 p-5">
-              <h2 className="font-display text-lg font-semibold">Recent resume versions</h2>
+
+            <Glass variant="panel" className="rounded-2xl p-6">
+              <h2 className="text-lg font-semibold text-white">Recent Versions</h2>
               {versions.length === 0 ? (
-                <p className="mt-2 text-sm text-muted-foreground">No approved resume versions yet.</p>
+                <p className="mt-4 text-sm text-muted-foreground">No resume versions yet.</p>
               ) : (
-                <ul className="mt-3 space-y-2 text-sm">
-                  {versions.slice(0, 4).map((version) => (
+                <ul className="mt-4 space-y-3">
+                  {versions.slice(0, 3).map((version) => (
                     <li key={version.id}>
-                      <Link to={`/resume/${version.id}`} className="flex justify-between gap-3">
-                        <span className="min-w-0 wrap-anywhere">
-                          Version {version.version_number} · {version.company}
+                      <Link to={`/resume/${version.id}`} className="group flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-white/[0.02] p-3 transition-all hover:border-white/10 hover:bg-white/[0.04]">
+                        <span className="min-w-0 text-sm">
+                          <span className="font-medium text-white group-hover:text-primary">
+                            Version {version.version_number}
+                          </span>
+                          <span className="text-muted-foreground"> · {version.company}</span>
                         </span>
-                        <span className="shrink-0 tabular text-muted-foreground">
+                        <span className="shrink-0 text-xs tabular text-muted-foreground">
                           {new Date(version.created_at).toLocaleDateString()}
                         </span>
                       </Link>
@@ -212,30 +228,31 @@ export function DashboardPage() {
                   ))}
                 </ul>
               )}
-            </div>
-            <div className="rounded-[var(--radius-lg)] border border-border/70 p-5">
-              <h2 className="font-display text-lg font-semibold">Application pipeline</h2>
+            </Glass>
+
+            <Glass variant="panel" className="rounded-2xl p-6">
+              <h2 className="text-lg font-semibold text-white">Application Pipeline</h2>
               {pipelineBits.length === 0 ? (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Nothing is in your tracker yet. Save or prepare a role when you are ready — zeros
-                  are not a scoreboard.
+                <p className="mt-4 text-sm text-muted-foreground">
+                  Nothing in your tracker yet.
                 </p>
               ) : (
-                <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <dl className="mt-4 space-y-3">
                   {pipelineBits.map((item) => (
-                    <div key={item.label}>
-                      <dt className="text-muted-foreground">{item.label}</dt>
-                      <dd className="tabular font-semibold">{item.value}</dd>
+                    <div key={item.label} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] p-3">
+                      <dt className="text-sm text-muted-foreground">{item.label}</dt>
+                      <dd className="text-xl font-bold tabular text-white">{item.value}</dd>
                     </div>
                   ))}
                 </dl>
               )}
-              <p className="mt-3 text-sm">
-                <Link to="/track" className="font-semibold text-primary">
-                  Open Track
-                </Link>
-              </p>
-            </div>
+              <Link
+                to="/track"
+                className="mt-4 inline-block text-sm font-semibold text-primary hover:text-primary-hover"
+              >
+                Open Tracker →
+              </Link>
+            </Glass>
           </div>
         </>
       )}
