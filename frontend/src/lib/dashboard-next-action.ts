@@ -18,10 +18,10 @@ export function resolveNextAction(input: {
   if (!input.candidate) {
     return {
       id: "profile",
-      title: "Build your profile",
+      title: "Finish your profile",
       description: "Upload a resume so CareerPilot can ground every later recommendation in your real experience.",
       to: "/profile",
-      cta: "Open profile",
+      cta: "Finish your profile",
     };
   }
   if (!input.preferences?.target_roles?.length) {
@@ -39,7 +39,7 @@ export function resolveNextAction(input: {
       title: "Find jobs",
       description: "Scout Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, and Himalayas roles — or paste a posting URL.",
       to: "/jobs",
-      cta: "Open jobs",
+      cta: "Find jobs",
     };
   }
   const verified = input.scores.filter((score) => score.score_kind === "verified");
@@ -52,7 +52,7 @@ export function resolveNextAction(input: {
           ? "Open Matches to see Verified Fit first. Potential Matches stay clearly labeled until requirements are verified."
           : "CareerPilot has preliminary rankings. Open Matches — percentages become authoritative only after verification.",
       to: "/jobs?tab=matches",
-      cta: "Open Matches",
+      cta: "Review matches",
     };
   }
   if (input.resumeVersions.length > 0) {
@@ -70,6 +70,43 @@ export function resolveNextAction(input: {
     title: "Find jobs",
     description: "Scout roles and calculate fit on the ones that look promising.",
     to: "/jobs",
-    cta: "Open jobs",
+    cta: "Find jobs",
   };
+}
+
+export function pickTopMatches(
+  jobs: Job[],
+  scores: MatchScore[],
+  limit = 3,
+): Array<{ job: Job; score: MatchScore }> {
+  const byId = new Map(scores.map((score) => [score.job_id, score]));
+  return jobs
+    .filter((job): job is Job & { id: string } => Boolean(job.id) && byId.has(job.id as string))
+    .map((job) => ({ job, score: byId.get(job.id as string)! }))
+    .sort((a, b) => {
+      const verifiedA = a.score.score_kind === "verified" ? 1 : 0;
+      const verifiedB = b.score.score_kind === "verified" ? 1 : 0;
+      if (verifiedB !== verifiedA) return verifiedB - verifiedA;
+      const rankA = a.score.ranking_score ?? a.score.overall_score ?? 0;
+      const rankB = b.score.ranking_score ?? b.score.overall_score ?? 0;
+      return rankB - rankA;
+    })
+    .slice(0, limit);
+}
+
+export function profileReadinessItems(input: {
+  candidate: CandidateProfile | null;
+  preferences: TargetPreferences | null;
+  resumeVersions: ResumeVersionSummary[];
+}): Array<{ label: string; done: boolean }> {
+  const candidate = input.candidate;
+  return [
+    { label: "Add your name", done: Boolean(candidate?.name) },
+    { label: "Add skills", done: Boolean(candidate?.skills.length) },
+    { label: "Set target roles", done: Boolean(input.preferences?.target_roles?.length) },
+    {
+      label: "Upload a resume",
+      done: Boolean(candidate?.experience.length || input.resumeVersions.length),
+    },
+  ];
 }

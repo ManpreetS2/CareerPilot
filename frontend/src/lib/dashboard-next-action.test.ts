@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveNextAction } from "./dashboard-next-action";
+import { pickTopMatches, profileReadinessItems, resolveNextAction } from "./dashboard-next-action";
 import type { CandidateProfile, Job, MatchScore, ResumeVersionSummary } from "./types";
 
 const candidate: CandidateProfile = {
@@ -56,8 +56,8 @@ describe("resolveNextAction", () => {
         jobs: [],
         scores: [],
         resumeVersions: [],
-      }).id,
-    ).toBe("jobs");
+      }).cta,
+    ).toBe("Find jobs");
   });
 
   it("points at strongest matches when scores are strong", () => {
@@ -102,5 +102,35 @@ describe("resolveNextAction", () => {
         resumeVersions: [version],
       }).to,
     ).toBe("/resume/ver-1");
+  });
+});
+
+describe("pickTopMatches", () => {
+  it("puts verified matches first and keeps the list to three", () => {
+    const jobs: Job[] = [
+      { ...job, id: "a", title: "A" },
+      { ...job, id: "b", title: "B" },
+      { ...job, id: "c", title: "C" },
+      { ...job, id: "d", title: "D" },
+    ];
+    const scores: MatchScore[] = [
+      { job_id: "a", overall_score: 90, matched_skills: [], partial_matches: [], missing_skills: [], recommendation: "apply", rationale: "a", score_kind: "preliminary" },
+      { job_id: "b", overall_score: 70, matched_skills: [], partial_matches: [], missing_skills: [], recommendation: "apply", rationale: "b", score_kind: "verified" },
+      { job_id: "c", overall_score: 80, matched_skills: [], partial_matches: [], missing_skills: [], recommendation: "apply", rationale: "c", score_kind: "preliminary" },
+      { job_id: "d", overall_score: 95, matched_skills: [], partial_matches: [], missing_skills: [], recommendation: "apply", rationale: "d", score_kind: "verified" },
+    ];
+    expect(pickTopMatches(jobs, scores).map((row) => row.job.id)).toEqual(["d", "b", "a"]);
+  });
+});
+
+describe("profileReadinessItems", () => {
+  it("caps readiness at four existing profile facts", () => {
+    const items = profileReadinessItems({
+      candidate,
+      preferences: { target_roles: ["Engineer"], preferred_locations: [], constraints: [] },
+      resumeVersions: [],
+    });
+    expect(items).toHaveLength(4);
+    expect(items.filter((item) => item.done)).toHaveLength(4);
   });
 });

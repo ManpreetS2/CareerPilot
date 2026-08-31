@@ -1,18 +1,33 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { ReadinessPath } from "../components/signature/ReadinessPath";
-import { ScoreOrb } from "../components/signature/ScoreOrb";
-import { WorkflowPath } from "../components/signature/WorkflowPath";
+import { MatchBadge } from "../components/MatchBadge";
 import { Glass } from "../components/ui/glass";
-import { PageHeader } from "../components/ui/page-header";
+import { Progress } from "../components/ui/progress";
 import { Skeleton } from "../components/ui/skeleton";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { resolveNextAction } from "../lib/dashboard-next-action";
+import {
+  pickTopMatches,
+  profileReadinessItems,
+  resolveNextAction,
+} from "../lib/dashboard-next-action";
 import { shouldPromptFinishSetup } from "../lib/onboarding";
 import { queryKeys } from "../lib/query-keys";
 import { useCandidateSession } from "../lib/session";
+
+function greetingForHour(hour: number): string {
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function workModeLabel(mode: string | null | undefined): string | null {
+  if (mode === "remote") return "Remote";
+  if (mode === "hybrid") return "Hybrid";
+  if (mode === "onsite") return "On-site";
+  return null;
+}
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -47,28 +62,12 @@ export function DashboardPage() {
     queryFn: ({ signal }) => api.getProfile({ signal }),
   });
 
-  const summaryQuery = useQuery({
-    queryKey: queryKeys.dashboardSummary,
-    queryFn: async ({ signal }) => {
-      try {
-        return await api.getDashboardSummary({ signal });
-      } catch {
-        return null;
-      }
-    },
-  });
-
   const loading =
-    jobsQuery.isPending ||
-    scoresQuery.isPending ||
-    versionsQuery.isPending ||
-    profileQuery.isPending ||
-    summaryQuery.isPending;
+    jobsQuery.isPending || scoresQuery.isPending || versionsQuery.isPending || profileQuery.isPending;
   const error = jobsQuery.error ?? profileQuery.error;
   const jobs = jobsQuery.data ?? [];
   const scores = scoresQuery.data ?? [];
   const versions = versionsQuery.data ?? [];
-  const summary = summaryQuery.data;
   const liveCandidate = profileQuery.data?.candidate ?? candidate;
   const livePreferences = profileQuery.data?.preferences ?? preferences;
   const next = resolveNextAction({
@@ -78,34 +77,27 @@ export function DashboardPage() {
     scores,
     resumeVersions: versions,
   });
-  const strong = scores.filter((score) => score.score_kind === "verified");
-  const readinessFlags = [
-    Boolean(liveCandidate?.name),
-    Boolean(liveCandidate?.skills.length),
-    Boolean(liveCandidate?.experience.length),
-    Boolean(liveCandidate?.projects.length),
-    Boolean(livePreferences?.target_roles?.length),
-  ];
-
+  const matches = pickTopMatches(jobs, scores, 3);
+  const readiness = profileReadinessItems({
+    candidate: liveCandidate,
+    preferences: livePreferences,
+    resumeVersions: versions,
+  });
+  const readinessDone = readiness.filter((item) => item.done).length;
   const greetingName =
     liveCandidate?.name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
-  const searchFocus = livePreferences?.target_roles?.[0];
-  const pipelineBits = [
-    { label: "Ready to apply", value: summary?.ready_to_apply ?? 0 },
-    { label: "Applied", value: summary?.applications_applied ?? 0 },
-    { label: "Interviews", value: summary?.interviews ?? 0 },
-  ].filter((item) => item.value > 0);
+  const hour = new Date().getHours();
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Dashboard"
-        description={
-          searchFocus
-            ? `Welcome back, ${greetingName}. Current search focus: ${searchFocus}.`
-            : `Welcome back, ${greetingName}. One next step, then the real signals CareerPilot already has.`
-        }
-      />
+      <header className="max-w-2xl">
+        <h1 className="title-fluid font-display font-semibold text-foreground">
+          {greetingForHour(hour)}, {greetingName}
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground sm:text-[15px]">
+          Your next opportunities are ready.
+        </p>
+      </header>
       <ErrorBanner error={error} />
       {loading ? (
         <div className="space-y-4" aria-busy>
@@ -117,92 +109,99 @@ export function DashboardPage() {
         </div>
       ) : (
         <>
-          <Glass variant="atmosphere" refract className="rounded-[var(--radius-lg)] p-6">
-            <p className="cp-kicker">Next action</p>
-            <h2 className="mt-2 font-display text-2xl font-semibold tracking-tight">{next.title}</h2>
+          <Glass variant="panel" className="rounded-[var(--radius-lg)] p-6">
+            <h2 className="section-title font-display">{next.title}</h2>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{next.description}</p>
-            <Link to={next.to} className="btn-primary mt-4 inline-flex" data-testid="dashboard-next-action">
+            <Link to={next.to} className="btn-primary mt-5 inline-flex" data-testid="dashboard-next-action">
               {next.cta}
             </Link>
             {user && shouldPromptFinishSetup(user.id) ? (
               <p className="mt-3 text-sm text-muted-foreground">
                 You can also{" "}
-                <Link to="/onboarding" className="font-semibold text-primary">
+                <Link to="/onboarding" className="font-semibold text-foreground underline-offset-2 hover:underline">
                   finish setup
-                </Link>{" "}
-                when you have a minute.
+                </Link>
+                .
               </p>
             ) : null}
           </Glass>
 
-          <WorkflowPath
-            nodes={[
-              { id: "profile", label: "Profile", state: liveCandidate?.name ? "complete" : "current" },
-              { id: "discover", label: "Discover", state: jobs.length ? "complete" : "upcoming" },
-              { id: "analyze", label: "Analyze", state: scores.length ? "complete" : jobs.length ? "current" : "upcoming" },
-              { id: "prepare", label: "Prepare", state: versions.length ? "complete" : "upcoming" },
-              { id: "track", label: "Track", state: pipelineBits.length ? "current" : "upcoming" },
-            ]}
-          />
-
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-            <Glass variant="working" className="rounded-[var(--radius-lg)] p-5">
-              <div className="flex items-center justify-between gap-3">
-              <h2 className="font-display text-lg font-semibold">Strongest matches</h2>
-              <Link to="/jobs?tab=matches" className="text-sm font-medium text-primary">
-                Open Matches
+          <Glass variant="solid" className="rounded-[var(--radius-lg)] p-5">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="section-title font-display">Top matches</h2>
+              <Link to="/jobs?tab=matches" className="text-sm font-medium text-foreground underline-offset-2 hover:underline">
+                View all matches
               </Link>
-              </div>
-              {strong.length === 0 ? (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  No verified matches yet. Open Matches to review Potential Match rankings.
-                </p>
-              ) : (
-                <ul className="mt-3 space-y-3">
-                  {strong.slice(0, 4).map((score) => {
-                    const job = jobs.find((item) => item.id === score.job_id);
-                    return (
-                      <li key={score.job_id}>
-                        <Link to={`/jobs/${score.job_id}`} className="flex items-start gap-3 text-sm">
-                          <ScoreOrb score={score.overall_score} compact />
-                          <span className="min-w-0 wrap-anywhere">
-                            <span className="font-semibold">{job?.title ?? "Role"}</span>
-                            <span className="mt-0.5 block text-muted-foreground">{job?.company ?? "Company"}</span>
+            </div>
+            {matches.length === 0 ? (
+              <p className="mt-3 text-sm text-muted-foreground">
+                No ranked matches yet. Find jobs, then open Matches for your personal ranking.
+              </p>
+            ) : (
+              <ul className="mt-4 divide-y divide-border">
+                {matches.map(({ job, score }) => {
+                  const mode = workModeLabel(job.work_mode);
+                  const place = [job.location, mode].filter(Boolean).join(" · ");
+                  const reason =
+                    score.score_kind === "verified"
+                      ? score.rationale?.split(".")[0]
+                      : null;
+                  return (
+                    <li key={score.job_id}>
+                      <Link
+                        to={`/jobs/${score.job_id}`}
+                        className="flex flex-wrap items-start justify-between gap-3 py-3 text-sm"
+                      >
+                        <span className="min-w-0">
+                          <span className="block font-semibold text-foreground">{job.title}</span>
+                          <span className="mt-0.5 block text-muted-foreground">
+                            {job.company}
+                            {place ? ` · ${place}` : ""}
                           </span>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </Glass>
-            <Glass variant="working" className="rounded-[var(--radius-lg)] p-5">
-              <h2 className="font-display text-lg font-semibold">Profile readiness</h2>
-              <div className="mt-3">
-                <ReadinessPath flags={readinessFlags} />
+                          {reason ? (
+                            <span className="mt-1 block text-[13px] text-muted-foreground">{reason}.</span>
+                          ) : null}
+                        </span>
+                        <MatchBadge
+                          score={score.overall_score}
+                          scoreKind={score.score_kind}
+                          matchTier={score.match_tier}
+                          compact
+                        />
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Glass>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Glass variant="solid" className="rounded-[var(--radius-lg)] p-5">
+              <h2 className="section-title font-display">Profile readiness</h2>
+              <div className="mt-4">
+                <Progress value={(readinessDone / readiness.length) * 100} label={`${readinessDone} of ${readiness.length} complete`} />
               </div>
-              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <dt className="text-muted-foreground">Skills</dt>
-                  <dd className="tabular font-semibold">{liveCandidate?.skills.length ?? 0}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Jobs discovered</dt>
-                  <dd className="tabular font-semibold">{jobs.length}</dd>
-                </div>
-              </dl>
+              <ul className="mt-4 space-y-2 text-sm">
+                {readiness.map((item) => (
+                  <li key={item.label} className="flex items-center justify-between gap-3">
+                    <span className={item.done ? "text-muted-foreground" : "text-foreground"}>{item.label}</span>
+                    <span className="text-xs font-medium text-muted-foreground">{item.done ? "Done" : "Missing"}</span>
+                  </li>
+                ))}
+              </ul>
             </Glass>
-            <div className="rounded-[var(--radius-lg)] border border-border/70 p-5">
-              <h2 className="font-display text-lg font-semibold">Recent resume versions</h2>
+            <Glass variant="solid" className="rounded-[var(--radius-lg)] p-5">
+              <h2 className="section-title font-display">Recent activity</h2>
               {versions.length === 0 ? (
-                <p className="mt-2 text-sm text-muted-foreground">No approved resume versions yet.</p>
+                <p className="mt-3 text-sm text-muted-foreground">No resume versions or applications yet.</p>
               ) : (
-                <ul className="mt-3 space-y-2 text-sm">
+                <ul className="mt-3 space-y-2.5 text-sm">
                   {versions.slice(0, 4).map((version) => (
                     <li key={version.id}>
                       <Link to={`/resume/${version.id}`} className="flex justify-between gap-3">
                         <span className="min-w-0 wrap-anywhere">
-                          Version {version.version_number} · {version.company}
+                          Resume v{version.version_number} · {version.company}
                         </span>
                         <span className="shrink-0 tabular text-muted-foreground">
                           {new Date(version.created_at).toLocaleDateString()}
@@ -212,30 +211,7 @@ export function DashboardPage() {
                   ))}
                 </ul>
               )}
-            </div>
-            <div className="rounded-[var(--radius-lg)] border border-border/70 p-5">
-              <h2 className="font-display text-lg font-semibold">Application pipeline</h2>
-              {pipelineBits.length === 0 ? (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Nothing is in your tracker yet. Save or prepare a role when you are ready — zeros
-                  are not a scoreboard.
-                </p>
-              ) : (
-                <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                  {pipelineBits.map((item) => (
-                    <div key={item.label}>
-                      <dt className="text-muted-foreground">{item.label}</dt>
-                      <dd className="tabular font-semibold">{item.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-              <p className="mt-3 text-sm">
-                <Link to="/track" className="font-semibold text-primary">
-                  Open Track
-                </Link>
-              </p>
-            </div>
+            </Glass>
           </div>
         </>
       )}
