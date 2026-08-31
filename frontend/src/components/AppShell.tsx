@@ -17,7 +17,6 @@ import { CommandPalette } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Sheet, SheetContent } from "./ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { Glass } from "./ui/glass";
 import { useAuth } from "../lib/auth";
 import { APP_NAME } from "../lib/config";
 import { cn } from "../lib/cn";
@@ -202,14 +201,18 @@ export function AppShell() {
   }
 
   return (
-    <div className="app-canvas min-h-screen bg-background" data-testid="app-shell">
+    <div className="app-canvas min-h-screen" data-testid="app-shell">
+      <div className="app-wash" aria-hidden="true" />
       <a href="#main" className="skip-link" data-testid="skip-to-content" onClick={focusMain}>
         Skip to content
       </a>
       <CommandPalette />
 
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 p-3 lg:flex" data-testid="app-sidebar">
-        <Glass variant="panel" className="flex h-full min-h-0 w-full flex-col overflow-y-auto rounded-[var(--radius-lg)] p-3">
+      <aside
+        className="glass-floating fixed inset-y-3 left-3 z-30 hidden w-[12.5rem] min-h-0 flex-col rounded-[var(--radius-lg)] p-3 lg:flex"
+        data-testid="app-sidebar"
+      >
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <Link to="/dashboard" className="mb-6 flex items-center gap-2.5 px-1.5">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-sm)] bg-primary text-[11px] font-semibold text-primary-foreground">
               CP
@@ -218,11 +221,10 @@ export function AppShell() {
           </Link>
           <NavLinks />
           <AccountFooter />
-        </Glass>
+          </div>
       </aside>
 
-      <header className="safe-pad sticky top-0 z-40 flex items-center gap-3 px-3 py-2 lg:hidden">
-        <Glass variant="panel" className="flex w-full items-center gap-3 rounded-[var(--radius-md)] px-2 py-1">
+      <header className="glass-floating safe-pad sticky top-2 z-40 mx-3 mt-2 flex items-center gap-3 rounded-[var(--radius-md)] px-2 py-1 lg:hidden">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <button
               type="button"
@@ -243,21 +245,20 @@ export function AppShell() {
           <Link to="/dashboard" className="font-display text-base font-semibold">
             {APP_NAME}
           </Link>
-        </Glass>
       </header>
 
       <main
         id="main"
         tabIndex={-1}
         className={cn(
-          "relative z-[1] px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-8 outline-none sm:px-6 lg:ml-56 lg:pt-10",
+          "px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-8 outline-none sm:px-6 lg:ml-56 lg:pt-10",
           "safe-pad",
           wide ? "max-w-none" : "",
         )}
       >
-        <div className={cn("min-w-0", wide ? "mx-auto max-w-[1360px]" : "mx-auto max-w-5xl")}>
+        <div className={cn("relative z-[1] min-w-0", wide ? "mx-auto max-w-[1360px]" : "mx-auto max-w-5xl")}>
           {showFinish ? (
-            <div className="solid-surface mb-4 rounded-[var(--radius-md)] px-4 py-3 text-sm">
+            <div className="glass-panel mb-4 rounded-[var(--radius-md)] px-4 py-3 text-sm">
               Setup is unfinished.{" "}
               <Link to="/onboarding" className="font-semibold text-foreground underline-offset-2 hover:underline">
                 Finish setup

@@ -88,8 +88,9 @@ export function DashboardPage() {
   const hour = new Date().getHours();
 
   return (
-    <div className="space-y-6">
-      <header className="max-w-2xl">
+    <div className="dashboard-stack space-y-6">
+      <div className="dashboard-wash" aria-hidden="true" />
+      <header className="relative z-[1] max-w-2xl">
         <h1 className="title-fluid font-display font-semibold text-foreground">
           {greetingForHour(hour)}, {greetingName}
         </h1>
@@ -99,7 +100,7 @@ export function DashboardPage() {
       </header>
       <ErrorBanner error={error} />
       {loading ? (
-        <div className="space-y-4" aria-busy>
+        <div className="relative z-[1] space-y-4" aria-busy>
           <Skeleton className="h-36 w-full" />
           <div className="grid gap-4 lg:grid-cols-2">
             <Skeleton className="h-40 w-full" />
@@ -116,7 +117,7 @@ export function DashboardPage() {
             </Link>
           </Glass>
 
-          <Glass variant="solid" className="rounded-[var(--radius-lg)] p-5">
+          <Glass variant="panel" className="rounded-[var(--radius-lg)] p-5">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="section-title font-display">Top matches</h2>
               <Link to="/jobs?tab=matches" className="text-sm font-medium text-foreground underline-offset-2 hover:underline">
@@ -167,7 +168,7 @@ export function DashboardPage() {
           </Glass>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <Glass variant="solid" className="rounded-[var(--radius-lg)] p-5">
+            <Glass variant="panel" className="rounded-[var(--radius-lg)] p-5">
               <h2 className="section-title font-display">Profile readiness</h2>
               <div className="mt-4">
                 <Progress value={(readinessDone / readiness.length) * 100} label={`${readinessDone} of ${readiness.length} complete`} />
@@ -181,7 +182,7 @@ export function DashboardPage() {
                 ))}
               </ul>
             </Glass>
-            <Glass variant="solid" className="rounded-[var(--radius-lg)] p-5">
+            <Glass variant="panel" className="rounded-[var(--radius-lg)] p-5">
               <h2 className="section-title font-display">Recent activity</h2>
               {versions.length === 0 ? (
                 <p className="mt-3 text-sm text-muted-foreground">No resume versions or applications yet.</p>
