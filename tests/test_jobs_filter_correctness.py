@@ -225,6 +225,90 @@ def test_location_filter_uses_canonical_location_not_description(isolated_client
     assert "hybrid-palo-alto" in ids
 
 
+def test_location_filter_does_not_match_short_abbreviations_as_substrings(isolated_client) -> None:
+    from backend.services.job_query_service import _location_matches
+
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        _job(db, public_id="toronto-canada", title="Software Engineer", location="Toronto, Canada")
+        _job(db, public_id="sf-ca", title="Software Engineer", location="San Francisco, CA")
+        _job(db, public_id="palo-alto-ca", title="Software Engineer", location="Palo Alto, CA")
+        _job(db, public_id="ny-york", title="Software Engineer", location="New York, NY")
+        _job(db, public_id="portland-or", title="Software Engineer", location="Portland, OR")
+        _job(db, public_id="albany-ny", title="Software Engineer", location="Albany, NY")
+        _job(db, public_id="company-nyse", title="Software Engineer", location="Company NYSE listing")
+        _job(db, public_id="indiana", title="Software Engineer", location="Indianapolis, IN")
+        _job(db, public_id="austin", title="Software Engineer", location="Austin, TX")
+
+    assert _location_matches("toronto, canada", ["CA"]) is False
+    assert _location_matches("san francisco, ca", ["CA"]) is True
+    assert _location_matches("palo alto, ca", ["California"]) is True
+    assert _location_matches("new york, ny", ["OR"]) is False
+    assert _location_matches("portland, or", ["OR"]) is True
+    assert _location_matches("albany, ny", ["NY"]) is True
+    assert _location_matches("company nyse listing", ["NY"]) is False
+    assert _location_matches("austin, tx", ["IN"]) is False
+    assert _location_matches("indianapolis, in", ["IN"]) is True
+
+    ca = set(_ids(client.get("/api/jobs/query", params={"location": "CA"})))
+    assert "toronto-canada" not in ca
+    assert "sf-ca" in ca
+    assert "palo-alto-ca" in ca
+
+    california = set(_ids(client.get("/api/jobs/query", params={"location": "California"})))
+    assert "palo-alto-ca" in california
+    assert "sf-ca" in california
+    assert "toronto-canada" not in california
+
+    oregon = set(_ids(client.get("/api/jobs/query", params={"location": "OR"})))
+    assert "ny-york" not in oregon
+    assert "portland-or" in oregon
+
+    ny = set(_ids(client.get("/api/jobs/query", params={"location": "NY"})))
+    assert "albany-ny" in ny
+    assert "ny-york" in ny
+    assert "company-nyse" not in ny
+
+    indiana = set(_ids(client.get("/api/jobs/query", params={"location": "IN"})))
+    assert "indiana" in indiana
+    assert "austin" not in indiana
+    assert "ny-york" not in indiana
+
+
+def test_date_only_past_24h_is_frozen_and_not_fake_midnight(isolated_client) -> None:
+    from backend.services.job_query_service import query_jobs
+    from backend.services.job_search_parser import JobSearchIntent
+
+    client, SessionLocal = isolated_client
+    early = datetime(2026, 8, 31, 3, 0, tzinfo=timezone.utc)
+    late = datetime(2026, 8, 31, 23, 30, tzinfo=timezone.utc)
+    with SessionLocal() as db:
+        _job(db, public_id="date-aug-30", title="Software Engineer", date_posted="2026-08-30")
+        _job(db, public_id="date-aug-31", title="Software Engineer II", date_posted="2026-08-31")
+        _job(
+            db,
+            public_id="exact-aug-30-afternoon",
+            title="Software Engineer III",
+            date_posted="2026-08-30T15:00:00Z",
+        )
+        _job(
+            db,
+            public_id="exact-old",
+            title="Software Engineer IV",
+            date_posted="2026-08-29T12:00:00Z",
+        )
+        intent = JobSearchIntent(date_posted="past_24h")
+        early_ids = {item.job.id for item in query_jobs(db, client.test_user_id, intent, now=early).items}
+        late_ids = {item.job.id for item in query_jobs(db, client.test_user_id, intent, now=late).items}
+
+    assert early_ids == {"date-aug-30", "date-aug-31", "exact-aug-30-afternoon"}
+    assert "date-aug-31" in late_ids
+    assert "date-aug-30" in late_ids
+    assert "exact-aug-30-afternoon" not in late_ids
+    assert "exact-old" not in early_ids
+    assert "exact-old" not in late_ids
+
+
 def test_role_and_experience_filters_use_canonical_fields(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
@@ -420,6 +504,35 @@ def test_work_mode_and_employment_ignore_description_false_positives(isolated_cl
         "Software Engineer",
         "Full-time employee benefits are available. Coordinate with contract vendors.",
     ) == "unknown"
+
+
+def test_employment_type_reads_conservative_title_patterns() -> None:
+    assert infer_employment_type("Contract Software Engineer", "Build our backend platform.") == "contract"
+    assert infer_employment_type("Software Engineer - Contract", "Build our backend platform.") == "contract"
+    assert infer_employment_type("Software Engineer — Contract", "Build our backend platform.") == "contract"
+    assert infer_employment_type("Full-Time Software Engineer", "Build products.") == "full_time"
+    assert infer_employment_type("Part-Time Data Analyst", "Analyze datasets.") == "part_time"
+    assert infer_employment_type("Software Engineering Intern", "Summer internship.") == "internship"
+    assert infer_employment_type("New Grad Software Engineer", "New grad program.") == "new_grad"
+    assert infer_employment_type("Software Engineering Fellow", "Research rotation.") == "fellowship"
+    assert infer_employment_type("Contract Negotiation Manager", "Own vendor contracts.") != "contract"
+    assert infer_employment_type("Software Engineering Intern", "This is a full-time intern program.") == "internship"
+
+
+def test_employment_filter_uses_title_when_description_is_sparse(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        _job(db, public_id="contract-title", title="Contract Software Engineer", description="Build our backend platform.")
+        _job(db, public_id="contract-suffix", title="Software Engineer - Contract", description="Build our backend platform.")
+        _job(db, public_id="full-time-title", title="Full-Time Software Engineer", description="Build products.")
+        _job(db, public_id="part-time-title", title="Part-Time Data Analyst", description="Analyze datasets.")
+        _job(db, public_id="negotiation", title="Contract Negotiation Manager", description="Own vendor contracts.")
+
+    assert "contract-title" in set(_ids(client.get("/api/jobs/query", params={"employment_type": "contract"})))
+    assert "contract-suffix" in set(_ids(client.get("/api/jobs/query", params={"employment_type": "contract"})))
+    assert "negotiation" not in set(_ids(client.get("/api/jobs/query", params={"employment_type": "contract"})))
+    assert "full-time-title" in set(_ids(client.get("/api/jobs/query", params={"employment_type": "full_time"})))
+    assert "part-time-title" in set(_ids(client.get("/api/jobs/query", params={"employment_type": "part_time"})))
 
 
 def test_experience_level_uses_occupational_title_patterns(isolated_client) -> None:

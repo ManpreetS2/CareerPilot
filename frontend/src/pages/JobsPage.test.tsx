@@ -523,4 +523,64 @@ describe("JobsPage workspace", () => {
     expect(screen.queryByText("No saved jobs yet")).not.toBeInTheDocument();
     expect(await screen.findByText("Saved Role A")).toBeInTheDocument();
   });
+
+  it("strips an unsaved job from ids on every cached Saved page and restores both on failure", async () => {
+    const jobA: Job = { ...existingJob, id: "saved-a", title: "Saved Role A", saved: true };
+    const jobB: Job = { ...existingJob, id: "saved-b", title: "Saved Role B", saved: true };
+    const jobC: Job = { ...existingJob, id: "saved-c", title: "Saved Role C", saved: true };
+    const jobD: Job = { ...existingJob, id: "saved-d", title: "Saved Role D", saved: true };
+    const page1Params = toJobQueryParams(readJobsWorkspace(new URLSearchParams("tab=saved")));
+    const page2Params = { ...page1Params, page: 2 };
+    const page1 = pageOf([jobA, jobB], {
+      page: 1,
+      page_size: 2,
+      total: 4,
+      ids: ["saved-a", "saved-b", "saved-c", "saved-d"],
+    });
+    const page2 = pageOf([jobC, jobD], {
+      page: 2,
+      page_size: 2,
+      total: 4,
+      ids: ["saved-a", "saved-b", "saved-c", "saved-d"],
+    });
+    const client = createTestQueryClient();
+    client.setQueryData(["jobs-workspace", page2Params], page2);
+    let rejectUnsave: ((error: ApiClientError) => void) | undefined;
+    vi.mocked(api.queryJobs).mockImplementation((params = {}) => {
+      if (params.tab === "saved" && params.page === 2) return Promise.resolve(page2);
+      if (params.tab === "saved") return Promise.resolve(page1);
+      return Promise.resolve(pageOf([existingJob]));
+    });
+    vi.mocked(api.unsaveJob).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectUnsave = reject;
+        }),
+    );
+
+    renderJobs("/jobs?tab=saved", client);
+    expect(await screen.findByText("Saved Role B")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("save-job-saved-b"));
+
+    const cached1 = client.getQueryData<JobListPage>(["jobs-workspace", page1Params]);
+    const cached2 = client.getQueryData<JobListPage>(["jobs-workspace", page2Params]);
+    expect(cached1?.items.map((item) => item.job.id)).toEqual(["saved-a"]);
+    expect(cached1?.ids).toEqual(["saved-a", "saved-c", "saved-d"]);
+    expect(cached1?.total).toBe(3);
+    expect(cached2?.items.map((item) => item.job.id)).toEqual(["saved-c", "saved-d"]);
+    expect(cached2?.ids).toEqual(["saved-a", "saved-c", "saved-d"]);
+    expect(cached2?.total).toBe(3);
+
+    rejectUnsave?.(new ApiClientError(500, "save failed"));
+    await waitFor(() => {
+      const rolled1 = client.getQueryData<JobListPage>(["jobs-workspace", page1Params]);
+      const rolled2 = client.getQueryData<JobListPage>(["jobs-workspace", page2Params]);
+      expect(rolled1?.ids).toEqual(["saved-a", "saved-b", "saved-c", "saved-d"]);
+      expect(rolled1?.total).toBe(4);
+      expect(rolled1?.items.map((item) => item.job.id)).toEqual(["saved-a", "saved-b"]);
+      expect(rolled2?.ids).toEqual(["saved-a", "saved-b", "saved-c", "saved-d"]);
+      expect(rolled2?.total).toBe(4);
+      expect(rolled2?.items.map((item) => item.job.id)).toEqual(["saved-c", "saved-d"]);
+    });
+  });
 });

@@ -144,31 +144,32 @@ export function applySavedJobUnsave(
   jobId: string,
   selectedJobId: string | null,
 ): SavedUnsavePatch {
-  const index = page.items.findIndex((item) => item.job.id === jobId);
-  const removedItem = index >= 0 ? page.items[index] : undefined;
-  if (!removedItem) {
+  const visibleIndex = page.items.findIndex((item) => item.job.id === jobId);
+  const inIds = page.ids.includes(jobId);
+  if (visibleIndex < 0 && !inIds) {
     return { page, shouldStepBack: false, nextPage: page.page };
   }
-  const items = page.items.filter((item) => item.job.id !== jobId);
-  const ids = page.ids.filter((id) => id !== jobId);
-  const total = Math.max(0, page.total - 1);
+  const removedItem = visibleIndex >= 0 ? page.items[visibleIndex] : undefined;
+  const items = removedItem ? page.items.filter((item) => item.job.id !== jobId) : page.items;
+  const ids = inIds ? page.ids.filter((id) => id !== jobId) : page.ids;
+  const total = inIds ? Math.max(0, page.total - 1) : page.total;
   const nextPageData: JobListPage = {
     ...page,
     items,
     ids,
     total,
     verified_count:
-      removedItem.match?.score_kind === "verified"
+      removedItem?.match?.score_kind === "verified"
         ? Math.max(0, page.verified_count - 1)
         : page.verified_count,
     potential_count:
-      removedItem.match?.score_kind !== "verified"
+      removedItem && removedItem.match?.score_kind !== "verified"
         ? Math.max(0, page.potential_count - 1)
         : page.potential_count,
   };
   let nextSelected: string | null | undefined;
-  if (selectedJobId === jobId) {
-    const neighbor = items[index] ?? items[index - 1] ?? null;
+  if (removedItem && selectedJobId === jobId) {
+    const neighbor = items[visibleIndex] ?? items[visibleIndex - 1] ?? null;
     nextSelected = neighbor?.job.id ?? null;
   }
   const pageSize = Math.max(1, page.page_size || 1);
@@ -197,31 +198,39 @@ export function rollbackJobInCachedPage(
   jobId: string,
 ): JobListPage {
   const snapItem = snapshot.items.find((item) => item.job.id === jobId);
-  if (!snapItem) return current;
-  const currentIndex = current.items.findIndex((item) => item.job.id === jobId);
-  if (currentIndex >= 0) {
-    return {
-      ...current,
-      items: current.items.map((item) => (item.job.id === jobId ? snapItem : item)),
-    };
-  }
-  const insertAt = snapshot.items.findIndex((item) => item.job.id === jobId);
-  const items = [...current.items];
-  items.splice(Math.min(Math.max(insertAt, 0), items.length), 0, snapItem);
-  const ids = [...current.ids];
-  if (!ids.includes(jobId)) {
+  const snapHasId = snapshot.ids.includes(jobId);
+  if (!snapItem && !snapHasId) return current;
+
+  const currentHasItem = current.items.some((item) => item.job.id === jobId);
+  const currentHasId = current.ids.includes(jobId);
+
+  let ids = current.ids;
+  if (snapHasId && !currentHasId) {
+    ids = [...current.ids];
     const idAt = snapshot.ids.indexOf(jobId);
     ids.splice(Math.min(Math.max(idAt, 0), ids.length), 0, jobId);
   }
+
+  let items = current.items;
+  let verified_count = current.verified_count;
+  let potential_count = current.potential_count;
+  if (snapItem && currentHasItem) {
+    items = current.items.map((item) => (item.job.id === jobId ? snapItem : item));
+  } else if (snapItem && !currentHasItem) {
+    const insertAt = snapshot.items.findIndex((item) => item.job.id === jobId);
+    items = [...current.items];
+    items.splice(Math.min(Math.max(insertAt, 0), items.length), 0, snapItem);
+    if (snapItem.match?.score_kind === "verified") verified_count += 1;
+    else potential_count += 1;
+  }
+
   return {
     ...current,
     items,
     ids,
-    total: current.total + 1,
-    verified_count:
-      snapItem.match?.score_kind === "verified" ? current.verified_count + 1 : current.verified_count,
-    potential_count:
-      snapItem.match?.score_kind !== "verified" ? current.potential_count + 1 : current.potential_count,
+    total: snapHasId && !currentHasId ? current.total + 1 : current.total,
+    verified_count,
+    potential_count,
   };
 }
 

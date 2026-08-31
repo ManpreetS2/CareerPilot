@@ -176,6 +176,89 @@ describe("saved unsave cache patches", () => {
     expect(result.nextSelected).toBeNull();
   });
 
+  it("removes an unsaved job from every Saved page's ids and total even when it is not visible", () => {
+    const page1: JobListPage = {
+      items: [job("a", "A"), job("b", "B")],
+      total: 4,
+      page: 1,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b", "c", "d"],
+    };
+    const page2: JobListPage = {
+      items: [job("c", "C"), job("d", "D")],
+      total: 4,
+      page: 2,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b", "c", "d"],
+    };
+    const next1 = applySavedJobUnsave(page1, "b", "b");
+    const next2 = applySavedJobUnsave(page2, "b", "b");
+    expect(next1.page.items.map((item) => item.job.id)).toEqual(["a"]);
+    expect(next1.page.ids).toEqual(["a", "c", "d"]);
+    expect(next1.page.total).toBe(3);
+    expect(next1.nextSelected).toBe("a");
+    expect(next1.page.potential_count).toBe(1);
+    expect(next2.page.items.map((item) => item.job.id)).toEqual(["c", "d"]);
+    expect(next2.page.ids).toEqual(["a", "c", "d"]);
+    expect(next2.page.total).toBe(3);
+    expect(next2.nextSelected).toBeUndefined();
+    expect(next2.page.potential_count).toBe(2);
+    expect(next2.shouldStepBack).toBe(false);
+    expect(applySavedJobUnsave(next1.page, "b", "b").page.total).toBe(3);
+
+    const restored1 = rollbackJobInCachedPage(page1, next1.page, "b");
+    const restored2 = rollbackJobInCachedPage(page2, next2.page, "b");
+    expect(restored1.items.map((item) => item.job.id)).toEqual(["a", "b"]);
+    expect(restored1.ids).toEqual(["a", "b", "c", "d"]);
+    expect(restored1.total).toBe(4);
+    expect(restored2.items.map((item) => item.job.id)).toEqual(["c", "d"]);
+    expect(restored2.ids).toEqual(["a", "b", "c", "d"]);
+    expect(restored2.total).toBe(4);
+  });
+
+  it("rolls back only A when A fails after B was already unsaved from both Saved pages", () => {
+    const page1: JobListPage = {
+      items: [job("a", "A"), job("b", "B")],
+      total: 4,
+      page: 1,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b", "c", "d"],
+    };
+    const page2: JobListPage = {
+      items: [job("c", "C"), job("d", "D")],
+      total: 4,
+      page: 2,
+      page_size: 2,
+      verified_count: 0,
+      potential_count: 2,
+      ids: ["a", "b", "c", "d"],
+    };
+    const afterA1 = applySavedJobUnsave(page1, "a", "a").page;
+    const afterA2 = applySavedJobUnsave(page2, "a", "a").page;
+    const afterB1 = applySavedJobUnsave(afterA1, "b", "a").page;
+    const afterB2 = applySavedJobUnsave(afterA2, "b", "a").page;
+    expect(afterB1.ids).toEqual(["c", "d"]);
+    expect(afterB1.total).toBe(2);
+    expect(afterB2.ids).toEqual(["c", "d"]);
+
+    const restored1 = rollbackJobInCachedPage(page1, afterB1, "a");
+    const restored2 = rollbackJobInCachedPage(page2, afterB2, "a");
+    expect(restored1.items.map((item) => item.job.id)).toEqual(["a"]);
+    expect(restored1.ids).toEqual(["a", "c", "d"]);
+    expect(restored1.total).toBe(3);
+    expect(restored2.items.map((item) => item.job.id)).toEqual(["c", "d"]);
+    expect(restored2.ids).toEqual(["a", "c", "d"]);
+    expect(restored2.total).toBe(3);
+    expect(restored1.items.find((item) => item.job.id === "b")).toBeUndefined();
+    expect(restored2.ids).not.toContain("b");
+  });
+
   it("rolls back only the failed job inside a later cache snapshot", () => {
     const before: JobListPage = {
       items: [job("a", "A"), job("b", "B")],

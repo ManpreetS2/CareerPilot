@@ -5,7 +5,8 @@ Never compiles LLM/output into SQL. Catalog size is hundreds of rows, not millio
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import re
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -13,7 +14,12 @@ from backend.db.models import JobRecord, JobRequirementProfileRecord
 from backend.schemas.schemas import JobListItem, JobListPage, MatchScore
 from backend.services.analysis_service import list_stored_match_scores
 from backend.services.job_listing_metadata import JobListingMetadata, resolve_job_listing_metadata
-from backend.services.job_posting_time import discovery_datetime, job_posting_datetime
+from backend.services.job_posting_time import (
+    cutoff_for_date_posted_window,
+    discovery_datetime,
+    parse_posting_time,
+    posting_in_window,
+)
 from backend.services.job_search_parser import JobSearchIntent, JobsTab, SortMode
 from backend.services.job_service import record_to_job
 from backend.services.opportunity_type import matches_opportunity_filter
@@ -22,21 +28,7 @@ from backend.services.saved_job_service import list_saved_job_ids
 DEFAULT_PAGE_SIZE = 40
 MAX_PAGE_SIZE = 50
 
-
-def _posted_cutoff(window: str | None) -> datetime | None:
-    if not window:
-        return None
-    now = datetime.now(timezone.utc)
-    mapping = {
-        "past_24h": timedelta(hours=24),
-        "past_3d": timedelta(days=3),
-        "past_7d": timedelta(days=7),
-        "past_14d": timedelta(days=14),
-        "past_30d": timedelta(days=30),
-    }
-    delta = mapping.get(window)
-    return now - delta if delta else None
-
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 _BAY_CITIES = (
     "san francisco",
@@ -50,22 +42,126 @@ _BAY_CITIES = (
     "bay area",
 )
 
+# Token/boundary matching for USPS abbreviations. Not a geocoder.
+_US_STATE_NAMES = {
+    "al": "alabama",
+    "ak": "alaska",
+    "az": "arizona",
+    "ar": "arkansas",
+    "ca": "california",
+    "co": "colorado",
+    "ct": "connecticut",
+    "de": "delaware",
+    "fl": "florida",
+    "ga": "georgia",
+    "hi": "hawaii",
+    "id": "idaho",
+    "il": "illinois",
+    "in": "indiana",
+    "ia": "iowa",
+    "ks": "kansas",
+    "ky": "kentucky",
+    "la": "louisiana",
+    "me": "maine",
+    "md": "maryland",
+    "ma": "massachusetts",
+    "mi": "michigan",
+    "mn": "minnesota",
+    "ms": "mississippi",
+    "mo": "missouri",
+    "mt": "montana",
+    "ne": "nebraska",
+    "nv": "nevada",
+    "nh": "new hampshire",
+    "nj": "new jersey",
+    "nm": "new mexico",
+    "ny": "new york",
+    "nc": "north carolina",
+    "nd": "north dakota",
+    "oh": "ohio",
+    "ok": "oklahoma",
+    "or": "oregon",
+    "pa": "pennsylvania",
+    "ri": "rhode island",
+    "sc": "south carolina",
+    "sd": "south dakota",
+    "tn": "tennessee",
+    "tx": "texas",
+    "ut": "utah",
+    "vt": "vermont",
+    "va": "virginia",
+    "wa": "washington",
+    "wv": "west virginia",
+    "wi": "wisconsin",
+    "wy": "wyoming",
+    "dc": "district of columbia",
+}
+_US_NAME_TO_ABBR = {name: abbr for abbr, name in _US_STATE_NAMES.items()}
+
 
 def _text_blob(job: JobRecord) -> str:
     return f"{job.title} {job.company} {job.location or ''} {job.description or ''}".lower()
 
 
+def _tokens(text: str) -> list[str]:
+    return _TOKEN_RE.findall(text.lower())
+
+
+def _has_phrase(tokens: list[str], phrase: str) -> bool:
+    parts = _tokens(phrase)
+    if not parts:
+        return False
+    n = len(parts)
+    return any(tokens[i : i + n] == parts for i in range(len(tokens) - n + 1))
+
+
+def _matches_bay_area(loc: str) -> bool:
+    return any(city in loc for city in _BAY_CITIES)
+
+
+def _matches_new_york_city(tokens: list[str], loc: str) -> bool:
+    return (
+        "nyc" in tokens
+        or _has_phrase(tokens, "new york")
+        or "manhattan" in tokens
+        or "brooklyn" in tokens
+        or "new york" in loc
+    )
+
+
+def _matches_san_francisco(tokens: list[str], loc: str) -> bool:
+    return "sf" in tokens or _has_phrase(tokens, "san francisco") or "san francisco" in loc
+
+
+def _matches_state_abbrev(tokens: list[str], abbrev: str) -> bool:
+    name = _US_STATE_NAMES[abbrev]
+    return abbrev in tokens or _has_phrase(tokens, name)
+
+
+def _one_location_matches(loc: str, tokens: list[str], key: str) -> bool:
+    if not key:
+        return False
+    if "bay area" in key and _matches_bay_area(loc):
+        return True
+    if key in {"ny"}:
+        return "ny" in tokens or _matches_new_york_city(tokens, loc)
+    if key in {"nyc", "new york"}:
+        return _matches_new_york_city(tokens, loc)
+    if key in {"sf", "san francisco"}:
+        return _matches_san_francisco(tokens, loc)
+    if key in _US_STATE_NAMES:
+        return _matches_state_abbrev(tokens, key)
+    if key in _US_NAME_TO_ABBR:
+        return _matches_state_abbrev(tokens, _US_NAME_TO_ABBR[key]) or key in loc
+    if len(key) <= 2:
+        return key in tokens
+    return key in loc
+
+
 def _location_matches(location_text: str, wanted: list[str]) -> bool:
     loc = location_text.lower()
-    for label in wanted:
-        key = label.lower()
-        if key in loc:
-            return True
-        if "bay area" in key and any(city in loc for city in _BAY_CITIES):
-            return True
-        if key in {"new york"} and any(token in loc for token in ("new york", "nyc", "manhattan", "brooklyn")):
-            return True
-    return False
+    tokens = _tokens(loc)
+    return any(_one_location_matches(loc, tokens, label.lower().strip()) for label in wanted)
 
 
 def _role_match_tokens(bits: list[str]) -> list[str]:
@@ -129,15 +225,22 @@ def query_jobs(
     sort: SortMode = "best_match",
     page: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
+    now: datetime | None = None,
 ) -> JobListPage:
     size = min(max(page_size, 1), MAX_PAGE_SIZE)
     page = max(page, 1)
+    if now is None:
+        clock = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        clock = now.replace(tzinfo=timezone.utc)
+    else:
+        clock = now.astimezone(timezone.utc)
     records = db.query(JobRecord).all()
     scores = {item.job_id: item for item in list_stored_match_scores(db, user_id)}
     saved_ids = list_saved_job_ids(db, user_id)
     profiles = {row.job_id: row for row in db.query(JobRequirementProfileRecord).all()}
     wanted_opportunity = opportunity or (intent.opportunity_types[0] if len(intent.opportunity_types) == 1 else None)
-    cutoff = _posted_cutoff(intent.date_posted)
+    cutoff = cutoff_for_date_posted_window(intent.date_posted, clock)
     items: list[tuple[JobListItem, datetime | None, datetime | None]] = []
 
     for record in records:
@@ -146,7 +249,8 @@ def query_jobs(
         job = record_to_job(record, profile_row)
         job.saved = record.id in saved_ids
         match: MatchScore | None = scores.get(job.id or "")
-        posted_at = job_posting_datetime(record.date_posted, record.date_scraped)
+        posting = parse_posting_time(record.date_posted, now=clock)
+        posted_at = posting.value if posting else None
         discovered_at = discovery_datetime(record.date_scraped)
 
         if tab == "saved" and not job.saved:
@@ -174,7 +278,7 @@ def query_jobs(
         if intent.experience_levels and not _experience_matches(meta, intent.experience_levels):
             continue
         if cutoff:
-            if posted_at is None or posted_at < cutoff:
+            if posting is None or not posting_in_window(posting, cutoff, clock):
                 continue
         if intent.verified_state == "verified" and (match is None or match.score_kind != "verified"):
             continue

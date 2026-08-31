@@ -43,6 +43,23 @@ _JOB_FELLOW = re.compile(
     r"(?i)(?:this is (?:a |an )?fellow(?:ship)?\b|employment type:\s*fellow(?:ship)?\b|"
     r"\bfellowship (?:role|position|job)\b)"
 )
+_OCCUPATION = (
+    r"(?:software\s+)?(?:engineer(?:ing)?|developer|scientist|architect|designer|"
+    r"analyst|researcher|consultant|specialist|programmer|swe|data\s+analyst|"
+    r"product\s+manager)"
+)
+_TITLE_FULL_TIME = re.compile(r"(?i)\bfull[\s-]?time\b")
+_TITLE_PART_TIME = re.compile(r"(?i)\bpart[\s-]?time\b")
+_TITLE_CONTRACT = re.compile(
+    rf"(?i)(?:^contract\s+{_OCCUPATION}\b|"
+    rf"\b{_OCCUPATION}\b(?:\s+\([^)]+\))?\s*[—\-–|:]\s*contract\b|"
+    rf"\b{_OCCUPATION}\s+\(contract\))"
+)
+_TITLE_FELLOW = re.compile(
+    r"(?i)(?:\b(?:software\s+)?engineering\s+fellow(?:ship)?s?\b|"
+    r"\b(?:software\s+)?(?:engineer|developer|scientist|analyst|researcher)\s+fellow(?:ship)?\b|"
+    r"\bfellowship\s+(?:software\s+)?(?:engineer|developer|scientist|role|position)\b)"
+)
 _HYBRID = re.compile(r"\bhybrid\b", re.I)
 _REMOTE = re.compile(r"\bremote\b", re.I)
 _ONSITE = re.compile(r"\b(?:on-?site|in[\s-]?office)\b", re.I)
@@ -73,6 +90,17 @@ def infer_employment_type(title: str | None, description: str | None = None) -> 
         return "co_op"
     if _NEW_GRAD.search(title_text):
         return "new_grad"
+    title_found: list[EmploymentType] = []
+    if _TITLE_PART_TIME.search(title_text):
+        title_found.append("part_time")
+    if _TITLE_CONTRACT.search(title_text):
+        title_found.append("contract")
+    if _TITLE_FELLOW.search(title_text):
+        title_found.append("fellowship")
+    if _TITLE_FULL_TIME.search(title_text):
+        title_found.append("full_time")
+    if len(title_found) == 1:
+        return title_found[0]
     blob = (description or "")[:2500]
     found: list[EmploymentType] = []
     if _JOB_PART_TIME.search(blob):
