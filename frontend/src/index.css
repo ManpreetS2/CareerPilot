@@ -4,7 +4,7 @@
 
 :root {
   color-scheme: light;
-  --background: #f2ebe1;
+  --background: #f1e9de;
   --background-secondary: #ece3d6;
   --foreground: #29231e;
   --surface: #f7f1e8;
@@ -26,24 +26,20 @@
   --radius-sm: 9px;
   --radius-md: 16px;
   --radius-lg: 20px;
-  --shadow-floating: 0 18px 45px rgba(65, 50, 38, 0.08), 0 4px 12px rgba(65, 50, 38, 0.04);
-  --shadow-panel: 0 18px 45px rgba(65, 50, 38, 0.07), 0 4px 12px rgba(65, 50, 38, 0.04);
-  --glass-fill: rgba(255, 252, 247, 0.46);
-  --glass-floating-fill: rgba(255, 252, 247, 0.38);
+  --shadow-floating: 0 16px 38px rgba(70, 55, 42, 0.08), 0 3px 8px rgba(70, 55, 42, 0.04);
+  --shadow-panel: 0 16px 38px rgba(70, 55, 42, 0.07), 0 3px 8px rgba(70, 55, 42, 0.035);
+  --glass-fill: rgba(255, 252, 247, 0.3);
+  --glass-floating-fill: rgba(255, 255, 255, 0.32);
   --glass: var(--glass-fill);
-  --glass-border: rgba(255, 255, 255, 0.46);
-  --glass-highlight: rgba(255, 255, 255, 0.7);
-  --glass-inset-warm: inset 1px 0 0 rgba(255, 255, 255, 0.18);
-  --glass-inset-bottom: inset 0 -1px 0 rgba(90, 70, 50, 0.035);
-  --glass-blur: blur(28px) saturate(1.1);
-  --glass-floating-blur: blur(28px) saturate(1.08);
-  --glass-sheen: linear-gradient(145deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 44%, rgba(255, 255, 255, 0.08));
-  --glass-catch: radial-gradient(80% 55% at 8% 0%, rgba(255, 255, 255, 0.16), transparent 48%);
-  --glass-frost:
-    repeating-linear-gradient(26deg, rgba(90, 70, 50, 0.14) 0 0.4px, transparent 0.7px 2.8px),
-    repeating-linear-gradient(-18deg, rgba(255, 255, 255, 0.18) 0 0.4px, transparent 1.8px);
-  --atmosphere-a: rgba(255, 255, 255, 0.18);
-  --atmosphere-b: rgba(190, 165, 135, 0.028);
+  --glass-border: rgba(255, 255, 255, 0.28);
+  --glass-highlight: rgba(255, 255, 255, 0.65);
+  --glass-inset-warm: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  --glass-inset-bottom: inset 0 -1px 0 rgba(90, 70, 50, 0.03);
+  --glass-blur: blur(24px) saturate(1.08);
+  --glass-floating-blur: blur(24px) saturate(1.08);
+  --glass-catch: linear-gradient(to bottom, rgba(255, 255, 255, 0.18), transparent 18%);
+  --atmosphere-a: rgba(255, 255, 255, 0.16);
+  --atmosphere-b: rgba(170, 140, 105, 0.04);
   --line: var(--border);
   --bg: var(--background);
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -82,20 +78,16 @@
   --ring: #c4ae93;
   --shadow-floating: 0 18px 44px rgba(0, 0, 0, 0.28), 0 6px 14px rgba(0, 0, 0, 0.12);
   --shadow-panel: 0 16px 40px rgba(0, 0, 0, 0.24), 0 4px 12px rgba(0, 0, 0, 0.1);
-  --glass-fill: rgba(36, 31, 26, 0.42);
-  --glass-floating-fill: rgba(36, 31, 26, 0.3);
+  --glass-fill: rgba(36, 31, 26, 0.32);
+  --glass-floating-fill: rgba(36, 31, 26, 0.28);
   --glass: var(--glass-fill);
-  --glass-border: rgba(255, 252, 247, 0.12);
-  --glass-highlight: rgba(255, 252, 247, 0.2);
-  --glass-inset-warm: inset 1px 0 0 rgba(255, 252, 247, 0.06);
+  --glass-border: rgba(255, 252, 247, 0.1);
+  --glass-highlight: rgba(255, 252, 247, 0.18);
+  --glass-inset-warm: inset 0 0 0 1px rgba(255, 252, 247, 0.08);
   --glass-inset-bottom: inset 0 -1px 0 rgba(0, 0, 0, 0.22);
-  --glass-sheen: linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02) 45%, rgba(255, 255, 255, 0.04));
-  --glass-catch: radial-gradient(80% 55% at 8% 0%, rgba(255, 252, 247, 0.1), transparent 48%);
-  --glass-frost:
-    repeating-linear-gradient(26deg, rgba(255, 252, 247, 0.12) 0 0.4px, transparent 0.7px 2.8px),
-    repeating-linear-gradient(-18deg, rgba(255, 255, 255, 0.08) 0 0.4px, transparent 1.8px);
-  --atmosphere-a: rgba(255, 252, 247, 0.04);
-  --atmosphere-b: rgba(0, 0, 0, 0.035);
+  --glass-catch: linear-gradient(to bottom, rgba(255, 252, 247, 0.1), transparent 18%);
+  --atmosphere-a: rgba(255, 252, 247, 0.05);
+  --atmosphere-b: rgba(0, 0, 0, 0.045);
 }
 
 html,
@@ -159,7 +151,7 @@ body {
   position: relative;
   isolation: isolate;
   background-color: var(--glass-fill);
-  background-image: var(--glass-sheen);
+  background-image: none;
   border: 1px solid var(--glass-border);
   box-shadow:
     inset 0 1px 0 var(--glass-highlight),
@@ -168,16 +160,13 @@ body {
     var(--shadow-panel);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  transition:
-    box-shadow var(--motion-base) var(--ease-standard),
-    transform var(--motion-base) var(--ease-standard);
 }
 
 .glass-floating {
   position: relative;
   isolation: isolate;
   background-color: var(--glass-floating-fill);
-  background-image: var(--glass-sheen);
+  background-image: none;
   border: 1px solid var(--glass-border);
   box-shadow:
     inset 0 1px 0 var(--glass-highlight),
@@ -201,7 +190,7 @@ body {
   z-index: 0;
   border-radius: inherit;
   background: var(--glass-catch);
-  opacity: 0.7;
+  opacity: 0.45;
 }
 
 .glass-panel::after,
@@ -210,14 +199,7 @@ body {
 .glass-working::after,
 .glass-surface::after,
 .glass-floating::after {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  opacity: 0.032;
-  background-image: var(--glass-frost);
+  content: none;
 }
 
 .glass-panel > *,
@@ -306,8 +288,28 @@ body {
   inset: 0;
   overflow: hidden;
   pointer-events: none;
+  background-color: #f1e9de;
+  background-image:
+    radial-gradient(ellipse 120% 95% at 22% 18%, var(--atmosphere-a), transparent 64%),
+    radial-gradient(ellipse 115% 100% at 72% 68%, var(--atmosphere-b), transparent 68%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 58%);
+}
+
+.app-wash::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.02;
+  background-image:
+    radial-gradient(rgba(90, 70, 50, 0.55) 0.35px, transparent 0.7px),
+    radial-gradient(rgba(255, 255, 255, 0.35) 0.3px, transparent 0.65px);
+  background-size: 3px 3px, 5px 4px;
+  background-position: 0 0, 1.5px 1px;
+}
+
+.dark .app-wash {
   background-color: var(--background);
-  background-image: radial-gradient(140% 110% at 50% 42%, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02) 72%);
 }
 
 .app-wash-tone,
@@ -320,11 +322,7 @@ body {
 }
 
 .dashboard-wash {
-  position: absolute;
-  inset: -1.75rem -1rem -2.5rem;
-  overflow: hidden;
-  pointer-events: none;
-  background-image: none;
+  display: none;
 }
 
 .fixed.glass-atmosphere,
