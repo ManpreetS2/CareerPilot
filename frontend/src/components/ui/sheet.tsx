@@ -24,8 +24,8 @@ export function SheetContent({
       <DialogPrimitive.Overlay className="command-tunnel fixed inset-0 z-[70]" />
       <DialogPrimitive.Content
         className={cn(
-          "glass-floating fixed inset-y-0 z-[80] flex max-h-[100dvh] w-[min(20rem,100%)] flex-col border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]",
-          side === "left" ? "left-0 border-r" : "right-0 border-l",
+          "glass-floating fixed inset-y-0 z-[80] flex max-h-[100dvh] w-[min(20rem,100%)] flex-col overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]",
+          side === "left" ? "left-0" : "right-0",
           className,
         )}
       >
