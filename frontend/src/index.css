@@ -28,7 +28,7 @@
   --radius-lg: 20px;
   --shadow-floating: 0 18px 42px rgba(63, 48, 36, 0.09), 0 4px 10px rgba(63, 48, 36, 0.045);
   --shadow-panel: 0 18px 42px rgba(63, 48, 36, 0.08), 0 4px 10px rgba(63, 48, 36, 0.04);
-  --glass-fill: rgba(255, 255, 255, 0.18);
+  --glass-fill: rgba(255, 255, 255, 0.16);
   --glass-floating-fill: rgba(255, 255, 255, 0.24);
   --glass: var(--glass-fill);
   --glass-border: rgba(255, 255, 255, 0.52);
@@ -38,7 +38,8 @@
   --glass-blur: blur(18px) saturate(1.1) contrast(1.02);
   --glass-floating-blur: blur(18px) saturate(1.1) contrast(1.02);
   --glass-catch: linear-gradient(to bottom, rgba(255, 255, 255, 0.2), transparent 16%);
-  --glass-frost: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='3' seed='8' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --glass-frost: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='600'%3E%3Cfilter id='n' x='0' y='0' width='100%25' height='100%25' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.035 0.052' numOctaves='2' seed='8' stitchTiles='stitch' result='macro'/%3E%3CfeComponentTransfer in='macro' result='bold'%3E%3CfeFuncR type='linear' slope='2.15' intercept='-0.58'/%3E%3CfeFuncG type='linear' slope='2.15' intercept='-0.58'/%3E%3CfeFuncB type='linear' slope='2.15' intercept='-0.58'/%3E%3C/feComponentTransfer%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.22 0.26' numOctaves='2' seed='3' stitchTiles='stitch' result='micro'/%3E%3CfeColorMatrix in='micro' type='matrix' values='1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.18 0' result='microA'/%3E%3CfeBlend in='bold' in2='microA' mode='multiply' result='mix'/%3E%3CfeColorMatrix in='mix' type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --glass-frost-micro: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='m' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.24' numOctaves='2' seed='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23m)'/%3E%3C/svg%3E");
   --atmosphere-a: rgba(188, 154, 112, 0.2);
   --atmosphere-b: rgba(194, 164, 126, 0.13);
   --line: var(--border);
@@ -150,7 +151,6 @@ body {
 .glass-working,
 .glass-surface {
   position: relative;
-  isolation: isolate;
   background-color: var(--glass-fill);
   background-image: none;
   border: 1px solid var(--glass-border);
@@ -165,7 +165,6 @@ body {
 
 .glass-floating {
   position: relative;
-  isolation: isolate;
   background-color: var(--glass-floating-fill);
   background-image: none;
   border: 1px solid var(--glass-border);
@@ -206,10 +205,23 @@ body {
   inset: 0;
   z-index: 0;
   border-radius: inherit;
-  opacity: 0.055;
-  mix-blend-mode: soft-light;
+  opacity: 0.1;
+  mix-blend-mode: overlay;
+  background-color: #7a6248;
   background-image: var(--glass-frost);
-  background-size: 180px 180px;
+  background-size: 800px 600px;
+  background-repeat: repeat;
+}
+
+.dark .glass-panel::after,
+.dark .glass-atmosphere::after,
+.dark .glass-subtle::after,
+.dark .glass-working::after,
+.dark .glass-surface::after,
+.dark .glass-floating::after {
+  opacity: 0.08;
+  mix-blend-mode: soft-light;
+  background-color: #d9cbb8;
 }
 
 .glass-panel > *,
@@ -279,11 +291,11 @@ body {
   .app-wash {
     background-image:
       radial-gradient(
-        ellipse 90% 55% at 28% 42%,
-        rgba(188, 154, 112, 0.28) 0%,
-        rgba(194, 164, 126, 0.16) 28%,
-        rgba(205, 180, 149, 0.08) 50%,
-        rgba(242, 235, 225, 0) 74%
+        ellipse 88% 52% at 32% 40%,
+        rgba(181, 143, 98, 0.4) 0%,
+        rgba(191, 158, 118, 0.26) 26%,
+        rgba(208, 181, 148, 0.12) 48%,
+        rgba(242, 235, 225, 0) 72%
       );
   }
 
@@ -312,11 +324,11 @@ body {
   background-color: #f2ebe1;
   background-image:
     radial-gradient(
-      ellipse 60% 48% at 54% 38%,
-      rgba(188, 154, 112, 0.28) 0%,
-      rgba(194, 164, 126, 0.16) 28%,
-      rgba(205, 180, 149, 0.08) 50%,
-      rgba(242, 235, 225, 0) 74%
+      ellipse 52% 42% at 55% 38%,
+      rgba(181, 143, 98, 0.4) 0%,
+      rgba(191, 158, 118, 0.26) 26%,
+      rgba(208, 181, 148, 0.12) 48%,
+      rgba(242, 235, 225, 0) 72%
     );
 }
 
@@ -325,18 +337,18 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.018;
-  background-image: var(--glass-frost);
-  background-size: 220px 220px;
+  opacity: 0.014;
+  background-image: var(--glass-frost-micro);
+  background-size: 280px 280px;
 }
 
 .dark .app-wash {
   background-color: var(--background);
   background-image:
     radial-gradient(
-      ellipse 60% 45% at 55% 38%,
-      rgba(145, 115, 82, 0.12),
-      rgba(90, 70, 50, 0.05) 40%,
+      ellipse 52% 42% at 55% 38%,
+      rgba(145, 115, 82, 0.22),
+      rgba(90, 70, 50, 0.09) 40%,
       transparent 72%
     );
 }

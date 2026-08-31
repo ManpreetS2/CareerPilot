@@ -10,9 +10,21 @@
     <title>CareerPilot</title>
     <svg aria-hidden="true" width="0" height="0" style="position: absolute; overflow: hidden">
       <defs>
-        <filter id="cp-glass-displace" color-interpolation-filters="sRGB" x="0%" y="0%" width="100%" height="100%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="8" result="noise" />
-          <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.2" xChannelSelector="R" yChannelSelector="G" />
+        <filter id="cp-glass-displace" color-interpolation-filters="sRGB" x="-12%" y="-12%" width="124%" height="124%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.035 0.052" numOctaves="2" seed="8" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+        <filter id="cp-frost-surface" color-interpolation-filters="sRGB" x="0%" y="0%" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.035 0.052" numOctaves="2" seed="8" result="macro" />
+          <feComponentTransfer in="macro" result="bold">
+            <feFuncR type="linear" slope="2.15" intercept="-0.58" />
+            <feFuncG type="linear" slope="2.15" intercept="-0.58" />
+            <feFuncB type="linear" slope="2.15" intercept="-0.58" />
+          </feComponentTransfer>
+          <feTurbulence type="fractalNoise" baseFrequency="0.22 0.26" numOctaves="2" seed="3" result="micro" />
+          <feColorMatrix in="micro" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.18 0" result="microA" />
+          <feBlend in="bold" in2="microA" mode="multiply" result="mix" />
+          <feColorMatrix in="mix" type="saturate" values="0" />
         </filter>
       </defs>
     </svg>
