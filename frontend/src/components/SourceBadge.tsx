@@ -21,10 +21,10 @@ export function SourceBadge({ source }: { source: string }) {
   const label = LABELS[normalized] ?? source;
 
   const tone = ATS_SOURCES.has(normalized)
-    ? "bg-accent-100 text-accent-800 dark:bg-accent-900/40 dark:text-accent-200"
+    ? "bg-muted text-primary"
     : AGGREGATOR_SOURCES.has(normalized)
-      ? "bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-100"
-      : "bg-amber-100 text-warn-600 dark:bg-amber-950/40 dark:text-amber-200";
+      ? "bg-muted text-muted-foreground"
+      : "bg-muted text-warning";
 
   const Icon = ATS_SOURCES.has(normalized) ? Building2 : AGGREGATOR_SOURCES.has(normalized) ? Globe2 : Link2;
 

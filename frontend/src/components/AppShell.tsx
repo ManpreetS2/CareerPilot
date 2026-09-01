@@ -78,8 +78,8 @@ function navClass(isActive: boolean) {
   return cn(
     "relative flex min-h-10 items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-all",
     isActive
-      ? "bg-gradient-to-r from-primary/15 to-accent/10 text-white shadow-lg shadow-primary/20"
-      : "text-gray-400 hover:bg-white/5 hover:text-white",
+      ? "bg-primary/15 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--primary)_35%,transparent)]"
+      : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
   );
 }
 

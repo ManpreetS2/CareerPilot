@@ -38,14 +38,14 @@ export function JobCard({
       className={cn(
         "card w-full p-3 text-left transition",
         selected
-          ? "job-card-selected glass-refract border-primary/50 bg-primary/[0.07]"
-          : "hover:border-accent-400/50",
+          ? "job-card-selected border-primary/40 bg-primary/[0.08]"
+          : "hover:border-primary/30",
       )}
     >
       <div className="flex items-start gap-3">
         <button type="button" className="flex min-w-0 flex-1 items-start gap-3 text-left" onClick={onSelect} aria-pressed={selected}>
           <div
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-600/10 text-sm font-semibold text-accent-700 dark:text-accent-300"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-semibold text-primary"
             aria-hidden
           >
             {companyInitial(job.company)}
@@ -68,7 +68,7 @@ export function JobCard({
                 compact
               />
               {match?.eligibility_status === "likely_ineligible" ? (
-                <span className="text-xs text-danger-600 dark:text-rose-200">Likely ineligible</span>
+                <span className="text-xs text-danger">Likely ineligible</span>
               ) : null}
             </div>
           </div>

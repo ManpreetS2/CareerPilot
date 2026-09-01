@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { Link2, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
@@ -29,7 +29,8 @@ import {
   type JobsWorkspaceState,
 } from "../lib/jobs-workspace";
 import { chipLabel, parseSearchIntent, scoutTermsFromIntent } from "../lib/search-intent";
-import { saveSelectedJobId } from "../lib/session";
+import { queryKeys } from "../lib/query-keys";
+import { saveSelectedJobId, useCandidateSession } from "../lib/session";
 import type { JobListItem, JobListPage, JobQueryParams, ScoutJobsResponse } from "../lib/types";
 
 function isActiveJobsQuery(cached: unknown, active: JobQueryParams): boolean {
@@ -48,6 +49,8 @@ function pageFromQuery(data: JobListPage | undefined, previous?: JobListPage): J
 
 export function JobsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { candidate } = useCandidateSession();
   const [params, setParams] = useSearchParams();
   const state = readJobsWorkspace(params);
   const [draftSearch, setDraftSearch] = useState(state.search);
@@ -93,6 +96,14 @@ export function JobsPage() {
   }
 
   const queryParams = toJobQueryParams(state);
+  const profileQuery = useQuery({
+    queryKey: queryKeys.profile,
+    queryFn: ({ signal }) => api.getProfile({ signal }),
+    retry: false,
+  });
+  const liveCandidate = profileQuery.data?.candidate ?? candidate;
+  const profileIncomplete =
+    profileQuery.isSuccess && !liveCandidate?.name && !(liveCandidate?.skills?.length);
   const jobsQuery = useQuery({
     queryKey: ["jobs-workspace", queryParams],
     queryFn: ({ signal }) => api.queryJobs(queryParams, { signal }),
@@ -315,6 +326,10 @@ export function JobsPage() {
   }, [state]);
 
   function submitSearch() {
+    if (profileIncomplete) {
+      navigate("/profile");
+      return;
+    }
     const intent = parseSearchIntent(draftSearch);
     const terms = scoutTermsFromIntent(intent);
     patch({
@@ -427,6 +442,17 @@ export function JobsPage() {
       />
 
       <ErrorBanner error={error} heading={jobDiscoveryErrorHeading(error)} />
+      {profileIncomplete ? (
+        <Glass variant="atmosphere" className="rounded-[var(--radius-lg)] p-4" data-testid="jobs-profile-gate">
+          <p className="font-display text-base font-semibold tracking-tight">Build your profile first</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            CareerPilot needs a grounded profile before it can search for matching roles.
+          </p>
+          <Link to="/profile" className="btn-primary mt-3 inline-flex">
+            Open profile
+          </Link>
+        </Glass>
+      ) : null}
       {saveMutation.isError ? (
         <ErrorBanner error={saveMutation.error} heading="Couldn't update saved jobs" />
       ) : null}

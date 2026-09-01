@@ -14,7 +14,7 @@ export function SearchFilterChips({ chips }: { chips: FilterChip[] }) {
     <ul className="flex flex-wrap gap-2" aria-label="Active search filters">
       {chips.map((chip) => (
         <li key={chip.id}>
-          <span className="status-pill filter-chip inline-flex items-center gap-1 bg-primary/10 text-ink-800 dark:text-ink-100">
+          <span className="status-pill filter-chip inline-flex items-center gap-1 bg-primary/10 text-foreground">
             {chip.label}
             <button
               type="button"
