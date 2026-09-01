@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.mvp_helpers import TEST_USER_ID, ensure_user, insert_candidate
+from tests.mvp_helpers import TEST_USER_ID, ensure_user, insert_candidate, insert_target_preference
 
 from backend.db.models import (
     Candidate,
@@ -45,7 +45,9 @@ def _job(session, *, public_id: str = "job-interview") -> JobRecord:
 
 
 def _candidate(session):
-    return insert_candidate(session, user_id=TEST_USER_ID)
+    record = insert_candidate(session, user_id=TEST_USER_ID)
+    insert_target_preference(session, user_id=TEST_USER_ID, candidate_id=record.id)
+    return record
 
 
 
@@ -322,7 +324,9 @@ def test_answer_feedback_http_route_rejects_empty_answer(isolated_client) -> Non
 
 
 def test_answer_feedback_http_route_missing_job_404s(isolated_client) -> None:
-    client, _SessionLocal = isolated_client
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        _candidate(db)
     client.app.state.interview_answer_generator = _fake_feedback_generator
     response = client.post(
         "/api/jobs/does-not-exist/interview-prep/feedback",

@@ -36,7 +36,7 @@ from scripts.test_job_intelligence_real_descriptions import (
     _has_required_variety,
     _select_postings,
 )
-from tests.test_fit_scoring import TEST_USER_ID, _candidate, _intelligence
+from tests.test_fit_scoring import TEST_USER_ID, _candidate, _intelligence, _prefs
 from tests.test_job_intelligence import SequenceGenerator, _job, _payload
 
 
@@ -446,7 +446,8 @@ def test_score_api_maps_extraction_failures_without_fallback(
 ) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as session:
-        _candidate(session, skills=["Python"])
+        candidate = _candidate(session, skills=["Python"])
+        _prefs(session, candidate)
         job = _described_job(session)
     fake_client = Mock()
     fake_client.generate.side_effect = failure
@@ -467,7 +468,8 @@ def test_score_api_maps_extraction_failures_without_fallback(
 def test_score_api_maps_structured_failure_without_fallback(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as session:
-        _candidate(session, skills=["Python"])
+        candidate = _candidate(session, skills=["Python"])
+        _prefs(session, candidate)
         job = _described_job(session)
     fake_client = Mock()
     fake_client.generate.side_effect = ["invalid", "still invalid"]

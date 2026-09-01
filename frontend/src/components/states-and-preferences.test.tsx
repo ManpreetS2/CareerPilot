@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { EmptyState } from "../components/EmptyState";
@@ -36,5 +36,21 @@ describe("PreferenceForm", () => {
     await user.click(screen.getByRole("button", { name: /Save job preferences/i }));
     expect(await screen.findByText("Enter at least one target role.")).toBeInTheDocument();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("saves a custom role losslessly", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PreferenceForm preferences={null} onSave={onSave} saving={false} error={null} success={null} />,
+    );
+    const input = screen.getByRole("combobox", { name: "Target roles" });
+    await user.click(input);
+    await user.type(input, "Quant Researcher");
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: /Save job preferences/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const saved = onSave.mock.calls[0]?.[0];
+    expect(saved.target_roles).toEqual(["Quant Researcher"]);
   });
 });

@@ -177,7 +177,8 @@ describe("authenticated query cache isolation", () => {
         strengths: [],
         evidence_links: [],
       },
-      preferences: null,
+      preferences: { target_roles: ["Engineer"], preferred_locations: [], constraints: [] },
+      readiness: { ready: true, missing: [], code: null, next_route: null },
     });
     vi.mocked(api.queryJobs).mockResolvedValue(pageOf([aJob]));
     vi.mocked(api.getJobs).mockResolvedValue([aJob]);
@@ -224,6 +225,12 @@ describe("authenticated query cache isolation", () => {
         evidence_links: [],
       },
       preferences: null,
+      readiness: {
+        ready: false,
+        code: "profile_required",
+        missing: ["target_roles"],
+        next_route: "/profile",
+      },
     });
     vi.mocked(api.queryJobs).mockImplementation(async () => {
       await bNetwork;

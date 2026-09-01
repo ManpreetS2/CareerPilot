@@ -165,7 +165,8 @@ def _prefs(
 def test_unknown_job_returns_404(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _candidate(db)
+        candidate = _candidate(db)
+        _prefs(db, candidate)
         assert db.query(MatchScoreRecord).count() == 0
     response = client.post("/api/jobs/missing-job/score")
     assert response.status_code == 404
@@ -181,7 +182,9 @@ def test_missing_candidate_returns_409(isolated_client) -> None:
         assert db.query(MatchScoreRecord).count() == 0
     response = client.post("/api/jobs/job-fit-001/score")
     assert response.status_code == 409
-    assert "candidate profile" in response.json()["detail"].lower()
+    detail = response.json()["detail"]
+    assert detail["code"] == "profile_required"
+    assert "candidate_profile" in detail["missing"]
     with SessionLocal() as db:
         assert db.query(MatchScoreRecord).count() == 0
 
@@ -193,7 +196,8 @@ def test_empty_extraction_on_every_attempt_returns_502_without_persistence(
     grounding (409). Scoring weights and expected scores are unchanged."""
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _candidate(db)
+        candidate = _candidate(db)
+        _prefs(db, candidate)
         _job(db, description="Join a collaborative team working on interesting problems.")
         assert db.query(MatchScoreRecord).count() == 0
     fake_client = Mock()
@@ -596,7 +600,8 @@ def test_mock_hash_fake_skill_path_is_unreachable() -> None:
 def test_route_uses_request_scoped_database_session(isolated_client) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _candidate(db)
+        candidate = _candidate(db)
+        _prefs(db, candidate)
         job = _job(db, description="Requirements: Python.")
         _intelligence(
             db,
@@ -1081,7 +1086,8 @@ def test_api_commit_failure_is_sanitized_and_rolls_back(
 ) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        _candidate(db, skills=["Python"])
+        candidate = _candidate(db, skills=["Python"])
+        _prefs(db, candidate)
         job = _job(db, description="Requirements: Python.")
         _intelligence(
             db,

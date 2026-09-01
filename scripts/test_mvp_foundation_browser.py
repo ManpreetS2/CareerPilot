@@ -371,6 +371,7 @@ def run_browser_workflow() -> dict[str, int]:
         interview_posts: list[str] = []
         interview_gets: list[str] = []
         score_posts: list[str] = []
+        scout_posts: list[str] = []
         intelligence_posts: list[str] = []
         materials_posts: list[str] = []
         resume_posts: list[str] = []
@@ -426,6 +427,8 @@ def run_browser_workflow() -> dict[str, int]:
                         interview_gets.append(url)
                     if method == "POST" and path.endswith("/score"):
                         score_posts.append(url)
+                    if method == "POST" and path.endswith("/scout-jobs"):
+                        scout_posts.append(url)
                     if method == "POST" and path.endswith("/intelligence"):
                         intelligence_posts.append(url)
                     if method == "POST" and path.endswith("/generate-materials"):
@@ -444,11 +447,34 @@ def run_browser_workflow() -> dict[str, int]:
 
                 _signup(page, base, USER_A_EMAIL, USER_PASSWORD)
                 expect(page.get_by_role("heading", name="Dashboard", exact=True)).to_be_visible()
-                expect(page.get_by_test_id("dashboard-next-action")).to_be_visible()
+                expect(page.get_by_test_id("dashboard-next-action")).to_have_text("Complete your profile")
                 expect(_metric(page, "Jobs discovered")).to_have_text("0")
                 _assert_no_horizontal_overflow(page, "/dashboard")
                 checks += 1
 
+                page.goto(f"{base}/jobs")
+                expect(page.get_by_test_id("jobs-profile-gate")).to_be_visible()
+                expect(page.get_by_test_id("find-jobs-button")).to_be_disabled()
+                expect(page.get_by_text("We couldn't find jobs matching all of those filters.")).to_have_count(0)
+                page.get_by_role("link", name="Continue profile").focus()
+                expect(page.get_by_role("link", name="Continue profile")).to_be_focused()
+                page.get_by_role("button", name="Appearance").click()
+                page.get_by_role("menuitem", name="Light").click()
+                expect(page.get_by_test_id("jobs-profile-gate")).to_be_visible()
+                page.get_by_role("button", name="Appearance").click()
+                page.get_by_role("menuitem", name="Dark").click()
+                expect(page.get_by_test_id("jobs-profile-gate")).to_be_visible()
+                for width, height in ((1440, 900), (390, 844)):
+                    page.set_viewport_size({"width": width, "height": height})
+                    expect(page.get_by_test_id("jobs-profile-gate")).to_be_visible()
+                    _assert_no_horizontal_overflow(page, f"/jobs-gate@{width}x{height}")
+                page.evaluate("() => { document.documentElement.style.zoom = '2'; }")
+                expect(page.get_by_test_id("jobs-profile-gate")).to_be_visible()
+                page.evaluate("() => { document.documentElement.style.zoom = '1'; }")
+                page.set_viewport_size({"width": 1280, "height": 720})
+                checks += 1
+
+                page.goto(f"{base}/dashboard")
                 with SessionLocal() as session:
                     job = _seed_shared_job(session)
                     _seed_user_private_rows(session, email=USER_A_EMAIL, job=job)
@@ -457,12 +483,12 @@ def run_browser_workflow() -> dict[str, int]:
                 expect(_metric(page, "Jobs discovered")).to_have_text("1")
                 page.goto(f"{base}/profile")
                 expect(page.get_by_text("Synthetic Browser Candidate")).to_be_visible()
-                expect(page.get_by_text("Harbor Robotics Intern")).to_be_visible()
+                expect(page.get_by_text("Harbor Robotics Intern").first).to_be_visible()
                 _logout(page)
                 _login(page, base, USER_A_EMAIL, USER_PASSWORD)
                 page.goto(f"{base}/profile")
                 expect(page.get_by_text("Synthetic Browser Candidate")).to_be_visible()
-                expect(page.get_by_text("Harbor Robotics Intern")).to_be_visible()
+                expect(page.get_by_text("Harbor Robotics Intern").first).to_be_visible()
                 checks += 1
 
                 before_score_posts = len(score_posts)
@@ -471,6 +497,8 @@ def run_browser_workflow() -> dict[str, int]:
                 before_resume_posts = len(resume_posts)
                 page.goto(f"{base}/jobs")
                 expect(page.get_by_role("heading", name="Jobs", exact=True)).to_be_visible()
+                expect(page.get_by_test_id("jobs-profile-gate")).to_have_count(0)
+                expect(page.get_by_test_id("find-jobs-button")).to_be_enabled()
                 expect(page.get_by_role("button", name=JOB_TITLE)).to_be_visible()
                 _assert_no_horizontal_overflow(page, "/jobs")
                 if len(score_posts) != before_score_posts:
@@ -595,7 +623,13 @@ def run_browser_workflow() -> dict[str, int]:
                 expect(page.get_by_text("Harbor Robotics Intern")).to_have_count(0)
                 page.goto(f"{base}/dashboard")
                 expect(page.get_by_text("Loading dashboard…")).to_have_count(0)
+                expect(page.get_by_test_id("dashboard-next-action")).to_have_text("Complete your profile")
+                expect(page.get_by_text("Synthetic Browser Candidate")).to_have_count(0)
                 expect(_metric(page, "Skills")).to_have_text("0")
+                page.goto(f"{base}/jobs")
+                expect(page.get_by_test_id("jobs-profile-gate")).to_be_visible()
+                expect(page.get_by_test_id("find-jobs-button")).to_be_disabled()
+                expect(page.get_by_text("Harbor Robotics Intern")).to_have_count(0)
                 page.goto(f"{base}/resume")
                 expect(page.get_by_text("No resume versions")).to_be_visible()
                 page.goto(f"{base}/jobs/{JOB_PUBLIC_ID}/prepare")
@@ -612,7 +646,7 @@ def run_browser_workflow() -> dict[str, int]:
                 _login(page, base, USER_A_EMAIL, USER_PASSWORD)
                 page.goto(f"{base}/profile")
                 expect(page.get_by_text("Synthetic Browser Candidate")).to_be_visible()
-                expect(page.get_by_text("Harbor Robotics Intern")).to_be_visible()
+                expect(page.get_by_text("Harbor Robotics Intern").first).to_be_visible()
                 with SessionLocal() as session:
                     user_a = session.query(User).filter(User.email == USER_A_EMAIL).one()
                     package = (
@@ -696,6 +730,11 @@ def run_browser_workflow() -> dict[str, int]:
                     )
                 checks += 1
 
+                if scout_posts:
+                    raise AssertionError(
+                        "Incomplete-profile workflow issued a scout POST count="
+                        + str(len(scout_posts))
+                    )
                 if blocked_external:
                     unique = sorted(set(blocked_external))
                     raise AssertionError(

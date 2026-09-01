@@ -65,7 +65,10 @@ def main() -> int:
         print("browser_checks=0 result=blocked reason=playwright_unavailable")
         return 2
 
-    with tempfile.TemporaryDirectory(prefix="careerpilot-intelligence-browser-") as temp_dir:
+    with tempfile.TemporaryDirectory(
+        prefix="careerpilot-intelligence-browser-",
+        ignore_cleanup_errors=True,
+    ) as temp_dir:
         database_path = Path(temp_dir) / "requirements.sqlite"
         if database_path.resolve() == (ROOT / "data" / "careerpilot.db").resolve():
             raise RuntimeError("Refusing to use the production database.")

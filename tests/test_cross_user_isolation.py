@@ -155,22 +155,17 @@ def test_user_without_candidate_cannot_read_another_users_score_or_interview(iso
 
     profile = client.get("/api/profile")
     assert profile.status_code == 200
-    assert profile.json() == {"candidate": None, "preferences": None}
+    assert profile.json()["candidate"] is None
+    assert profile.json()["preferences"] is None
+    assert profile.json()["readiness"]["ready"] is False
+    assert profile.json()["readiness"]["code"] == "profile_required"
 
     stored = client.get(f"/api/jobs/{job_id}/interview-prep")
     assert stored.status_code == 404
 
     generated = client.post(f"/api/jobs/{job_id}/prepare-interview")
-    assert generated.status_code == 200
-    generated_blob = json.dumps(generated.json())
-    assert UNIQUE_MATCHED_SKILL not in generated_blob
-    assert UNIQUE_MISSING_SKILL not in generated_blob
-
-    stored_after = client.get(f"/api/jobs/{job_id}/interview-prep")
-    assert stored_after.status_code == 200
-    stored_blob = json.dumps(stored_after.json())
-    assert UNIQUE_MATCHED_SKILL not in stored_blob
-    assert UNIQUE_MISSING_SKILL not in stored_blob
+    assert generated.status_code == 409
+    assert generated.json()["detail"]["code"] == "profile_required"
     with SessionLocal() as db:
         assert db.query(Candidate).filter(Candidate.user_id == b_id).first() is None
 
@@ -204,7 +199,14 @@ def test_profile_get_is_user_scoped_read_only(isolated_client) -> None:
     _signup(client, "profile-b@example.com")
     other = client.get("/api/profile")
     assert other.status_code == 200
-    assert other.json() == {"candidate": None, "preferences": None}
+    assert other.json()["candidate"] is None
+    assert other.json()["preferences"] is None
+    assert other.json()["readiness"]["ready"] is False
+    assert other.json()["readiness"]["missing"] == [
+        "candidate_profile",
+        "candidate_evidence",
+        "target_roles",
+    ]
 
     client.cookies.clear()
     anonymous = client.get("/api/profile")

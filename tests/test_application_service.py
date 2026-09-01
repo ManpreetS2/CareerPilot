@@ -622,7 +622,9 @@ def test_full_decision_lifecycle_preserves_expected_state(isolated_session) -> N
 
 
 def test_generate_materials_route_404s_for_unknown_job(isolated_client) -> None:
-    client, _SessionLocal = isolated_client
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        seed_materials_prerequisites(db, public_id="exists-for-readiness")
     response = client.post("/api/jobs/does-not-exist/generate-materials")
     assert response.status_code == 404
 
