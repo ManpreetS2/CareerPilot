@@ -328,7 +328,7 @@ export function JobDetailPage() {
 
   if (loading) return <LoadingState label="Loading job…" />;
   if (error) return <ErrorBanner error={error} />;
-  if (!job) return <p className="text-sm text-ink-500">Job not found.</p>;
+  if (!job) return <p className="text-sm text-muted-foreground">Job not found.</p>;
 
   return (
     <div className="space-y-6">
@@ -365,9 +365,9 @@ export function JobDetailPage() {
         <div className="flex min-w-0 items-start gap-4">
           <ScoreOrb score={match?.score_kind === "verified" ? match.overall_score : null} />
           <div className="min-w-0">
-            <p className="wrap-anywhere text-sm text-ink-500">{job.company}</p>
+            <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
             <h1 className="wrap-anywhere font-display text-4xl font-semibold">{job.title}</h1>
-            <p className="mt-2 text-ink-600 dark:text-ink-300">
+            <p className="mt-2 text-muted-foreground">
               {[
                 job.location || "Location n/a",
                 job.salary,
@@ -383,10 +383,10 @@ export function JobDetailPage() {
               <StatusBadge status={job.status} />
               <SourceBadge source={job.source} />
               {job.content_status ? (
-                <span className="text-xs text-ink-500">Posting: {job.content_status}</span>
+                <span className="text-xs text-muted-foreground">Posting: {job.content_status}</span>
               ) : null}
               {scoutedTimeAgo(job.date_scraped) ? (
-                <span className="text-xs text-ink-500">{scoutedTimeAgo(job.date_scraped)}</span>
+                <span className="text-xs text-muted-foreground">{scoutedTimeAgo(job.date_scraped)}</span>
               ) : null}
               <MatchBadge
                 score={match?.overall_score}
@@ -449,7 +449,7 @@ export function JobDetailPage() {
               verifiedAt={job.verified_at}
               status={job.status}
             />
-            <p className="mt-4 wrap-anywhere whitespace-pre-wrap text-sm leading-relaxed text-ink-700 dark:text-ink-200">
+            <p className="mt-4 wrap-anywhere whitespace-pre-wrap text-sm leading-relaxed text-foreground">
               {job.description}
             </p>
           </section>
@@ -522,18 +522,18 @@ export function JobDetailPage() {
             </button>
           </div>
           <ErrorBanner error={verifyError} />
-          <p className="mt-3 text-sm text-ink-600 dark:text-ink-300">
+          <p className="mt-3 text-sm text-muted-foreground">
             Current status: <span className="font-semibold capitalize">{job.status}</span>
           </p>
           {job.verification_notes ? (
-            <p className="mt-2 text-sm text-ink-500">{job.verification_notes}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{job.verification_notes}</p>
           ) : (
-            <p className="mt-2 text-sm text-ink-500">
+            <p className="mt-2 text-sm text-muted-foreground">
               Not verified yet — run "still open" and suspicious-posting checks with Verify.
             </p>
           )}
           {job.verified_at ? (
-            <p className="mt-2 text-xs text-ink-500">
+            <p className="mt-2 text-xs text-muted-foreground">
               Last checked {new Date(job.verified_at).toLocaleString()}
             </p>
           ) : null}

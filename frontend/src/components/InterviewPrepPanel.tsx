@@ -7,10 +7,10 @@ import type { InterviewAnswerFeedback, InterviewPrep } from "../lib/types";
 
 function TextList({ items, empty }: { items: string[]; empty: string }) {
   if (items.length === 0) {
-    return <p className="mt-2 text-sm text-ink-500">{empty}</p>;
+    return <p className="mt-2 text-sm text-muted-foreground">{empty}</p>;
   }
   return (
-    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-600 dark:text-ink-300">
+    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
       {items.map((item) => (
         <li key={item}>{item}</li>
       ))}
@@ -48,14 +48,14 @@ function AnswerPractice({ jobId, questions }: { jobId: string; questions: string
         <Sparkles className="h-4 w-4 text-accent-600 dark:text-accent-300" aria-hidden />
         Practice an answer
       </h3>
-      <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+      <p className="mt-1 text-sm text-muted-foreground">
         Pick one of the questions above, type how you'd answer it, and get brief feedback on how
         it's delivered. Feedback is generated fresh each time and never saved.
       </p>
 
       <div className="mt-3 space-y-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-500">Question</span>
+          <span className="text-muted-foreground">Question</span>
           <select
             className="input"
             value={question}
@@ -73,7 +73,7 @@ function AnswerPractice({ jobId, questions }: { jobId: string; questions: string
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-ink-500">Your answer</span>
+          <span className="text-muted-foreground">Your answer</span>
           <textarea
             className="input min-h-[6rem] resize-y"
             value={answer}
@@ -133,7 +133,7 @@ export function InterviewPrepPanel({
           <h2 id="interview-prep-heading" className="font-display text-2xl font-semibold">
             Interview prep
           </h2>
-          <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+          <p className="mt-1 text-sm text-muted-foreground">
             Uses stored Job Intelligence, fit-score gaps, and candidate evidence. Generation runs
             only when you ask — this page never calls a provider automatically.
           </p>
@@ -158,7 +158,7 @@ export function InterviewPrepPanel({
       ) : null}
 
       {!loading && !prep ? (
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-muted-foreground">
           No interview prep stored yet. Prepare interview to generate a grounded baseline.
         </p>
       ) : null}

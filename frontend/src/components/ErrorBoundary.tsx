@@ -44,10 +44,10 @@ export class ErrorBoundary extends Component<Props, State> {
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-danger-600 dark:bg-rose-900/40 dark:text-rose-200">
             <AlertTriangle className="h-6 w-6" aria-hidden />
           </span>
-          <h2 className="font-display text-xl font-semibold text-ink-950 dark:text-ink-50">
+          <h2 className="font-display text-xl font-semibold text-foreground">
             {this.props.scope} hit an unexpected error
           </h2>
-          <p className="max-w-md text-sm text-ink-600 dark:text-ink-300">
+          <p className="max-w-md text-sm text-muted-foreground">
             Nothing was submitted or lost — your saved data is safe. Try again, and if it keeps
             happening, refresh the page.
           </p>

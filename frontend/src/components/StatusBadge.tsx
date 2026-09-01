@@ -4,14 +4,12 @@ export function StatusBadge({ status }: { status: string }) {
   const normalized = status.toLowerCase();
   const tone =
     normalized === "verified" || normalized === "approved" || normalized === "offer"
-      ? "bg-accent-100 text-accent-800 dark:bg-accent-900/40 dark:text-accent-200"
+      ? "border border-primary/25 bg-primary/10 text-primary"
       : normalized === "rejected" || normalized === "flagged" || normalized === "withdrawn"
-        ? "bg-rose-100 text-danger-600 dark:bg-rose-950/40 dark:text-rose-200"
+        ? "border border-danger/25 bg-danger/10 text-danger"
         : normalized === "pending_review" || normalized === "discovered" || normalized === "interviewing"
-          ? "bg-amber-100 text-warn-600 dark:bg-amber-950/40 dark:text-amber-200"
-          : normalized === "stale"
-            ? "bg-ink-100 text-ink-500 dark:bg-ink-800 dark:text-ink-300"
-            : "bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-100";
+          ? "border border-warning/25 bg-warning/10 text-warning"
+          : "border border-border/70 bg-muted/80 text-muted-foreground";
 
   const Icon =
     normalized === "verified" || normalized === "approved"

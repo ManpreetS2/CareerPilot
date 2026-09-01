@@ -100,7 +100,7 @@ export function ResumeVersionPanel({
           <h2 id="resume-versions-heading" className="font-display text-2xl font-semibold">
             Resume versions
           </h2>
-          <p className="mt-2 text-sm text-ink-600 dark:text-ink-300">
+          <p className="mt-2 text-sm text-muted-foreground">
             Versions are immutable snapshots of tailored resume bullets. Saving a
             version does not generate new materials and does not submit an application.
           </p>
@@ -118,7 +118,7 @@ export function ResumeVersionPanel({
             {saving ? "Saving…" : "Save resume version"}
           </button>
         ) : (
-          <p className="text-sm text-ink-500">Pass review on this package to save a resume version.</p>
+          <p className="text-sm text-muted-foreground">Pass review on this package to save a resume version.</p>
         )}
       </div>
 
@@ -134,7 +134,7 @@ export function ResumeVersionPanel({
       {loading ? (
         <LoadingState label="Loading resume versions…" />
       ) : versions.length === 0 ? (
-        <p className="text-sm text-ink-500" data-testid="resume-versions-empty">
+        <p className="text-sm text-muted-foreground" data-testid="resume-versions-empty">
           No resume versions saved yet.
         </p>
       ) : (
@@ -148,7 +148,7 @@ export function ResumeVersionPanel({
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <p className="text-sm font-semibold">
                   Version {version.version_number}
-                  <span className="ml-2 font-normal text-ink-500">
+                  <span className="ml-2 font-normal text-muted-foreground">
                     {formatCreatedAt(version.created_at)}
                   </span>
                 </p>
@@ -171,7 +171,7 @@ export function ResumeVersionPanel({
                   })}
                 </div>
               </div>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-700 dark:text-ink-200">
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-foreground">
                 {version.tailored_bullets.map((bullet, index) => (
                   <li key={`${version.id}:${index}`}>{bullet}</li>
                 ))}

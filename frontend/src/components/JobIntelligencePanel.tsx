@@ -9,7 +9,7 @@ function ChipList({ items }: { items: string[] }) {
       {items.map((item) => (
         <span
           key={item}
-          className="rounded-lg bg-ink-100 px-2.5 py-1 text-xs font-medium text-ink-700 dark:bg-ink-800 dark:text-ink-100"
+          className="rounded-lg bg-muted px-2.5 py-1 text-xs font-medium text-foreground"
         >
           {item}
         </span>
@@ -20,7 +20,7 @@ function ChipList({ items }: { items: string[] }) {
 
 function TextList({ items }: { items: string[] }) {
   return (
-    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-600 dark:text-ink-300">
+    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
       {items.map((item) => (
         <li key={item}>{item}</li>
       ))}
@@ -54,7 +54,7 @@ export function JobIntelligencePanel({
           <h2 id="job-intelligence-heading" className="font-display text-2xl font-semibold">
             Extracted requirements
           </h2>
-          <p className="mt-1 text-sm text-ink-500">
+          <p className="mt-1 text-sm text-muted-foreground">
             Generate grounded requirements from the stored posting only when you choose.
           </p>
         </div>
@@ -83,7 +83,7 @@ export function JobIntelligencePanel({
       ) : null}
 
       {!loading && !intelligence ? (
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-muted-foreground">
           Requirements have not been extracted for this job.
         </p>
       ) : null}

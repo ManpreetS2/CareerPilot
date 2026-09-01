@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { Link2, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
@@ -10,6 +10,7 @@ import { JobPreviewPanel } from "../components/JobPreviewPanel";
 import { JobsFilterPanel } from "../components/JobsFilterPanel";
 import { LoadingState } from "../components/LoadingState";
 import { NaturalSearchBar, type FilterChip } from "../components/NaturalSearchBar";
+import { DashboardAtmosphere } from "../components/DashboardAtmosphere";
 import { Glass } from "../components/ui/glass";
 import { PageHeader } from "../components/ui/page-header";
 import { api } from "../lib/api";
@@ -29,7 +30,9 @@ import {
   type JobsWorkspaceState,
 } from "../lib/jobs-workspace";
 import { chipLabel, parseSearchIntent, scoutTermsFromIntent } from "../lib/search-intent";
-import { saveSelectedJobId } from "../lib/session";
+import { queryKeys } from "../lib/query-keys";
+import { canScoutJobs, resolveProfileGate } from "../lib/profile-gate";
+import { saveSelectedJobId, useCandidateSession } from "../lib/session";
 import type { JobListItem, JobListPage, JobQueryParams, ScoutJobsResponse } from "../lib/types";
 
 function isActiveJobsQuery(cached: unknown, active: JobQueryParams): boolean {
@@ -48,6 +51,8 @@ function pageFromQuery(data: JobListPage | undefined, previous?: JobListPage): J
 
 export function JobsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { candidate } = useCandidateSession();
   const [params, setParams] = useSearchParams();
   const state = readJobsWorkspace(params);
   const [draftSearch, setDraftSearch] = useState(state.search);
@@ -93,6 +98,19 @@ export function JobsPage() {
   }
 
   const queryParams = toJobQueryParams(state);
+  const profileQuery = useQuery({
+    queryKey: queryKeys.profile,
+    queryFn: ({ signal }) => api.getProfile({ signal }),
+    retry: false,
+  });
+  const profileStatus = profileQuery.isPending ? "pending" : profileQuery.isError ? "error" : "success";
+  const profileGate = resolveProfileGate({
+    cached: candidate,
+    status: profileStatus,
+    remote: profileQuery.data?.candidate,
+  });
+  const profileIncomplete = profileGate.kind === "incomplete";
+  const scoutBlocked = !canScoutJobs(profileGate);
   const jobsQuery = useQuery({
     queryKey: ["jobs-workspace", queryParams],
     queryFn: ({ signal }) => api.queryJobs(queryParams, { signal }),
@@ -315,6 +333,11 @@ export function JobsPage() {
   }, [state]);
 
   function submitSearch() {
+    if (profileGate.kind === "incomplete") {
+      navigate("/profile");
+      return;
+    }
+    if (scoutBlocked) return;
     const intent = parseSearchIntent(draftSearch);
     const terms = scoutTermsFromIntent(intent);
     patch({
@@ -394,7 +417,9 @@ export function JobsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      <DashboardAtmosphere showGlobe={false} />
+      <div className="relative z-[1]">
       <PageHeader
         title="Jobs"
         description="Discover what's available, then open Matches for your personal ranking. Verified Fit appears only after CareerPilot reads the complete posting."
@@ -404,7 +429,7 @@ export function JobsPage() {
               type="button"
               className="btn-primary btn-stable"
               onClick={() => submitSearch()}
-              disabled={scouting}
+              disabled={scouting || profileGate.kind === "pending" || profileGate.kind === "error"}
               aria-busy={scouting}
               data-testid="find-jobs-button"
             >
@@ -427,6 +452,28 @@ export function JobsPage() {
       />
 
       <ErrorBanner error={error} heading={jobDiscoveryErrorHeading(error)} />
+      {profileIncomplete ? (
+        <Glass variant="atmosphere" className="rounded-[var(--radius-lg)] p-4" data-testid="jobs-profile-gate">
+          <p className="font-display text-base font-semibold tracking-tight">Build your profile first</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            CareerPilot needs a grounded profile before it can search for matching roles.
+          </p>
+          <Link to="/profile" className="btn-primary mt-3 inline-flex">
+            Open profile
+          </Link>
+        </Glass>
+      ) : null}
+      {profileGate.kind === "error" ? (
+        <Glass variant="atmosphere" className="rounded-[var(--radius-lg)] p-4" data-testid="jobs-profile-error">
+          <p className="font-display text-base font-semibold tracking-tight">Couldn't load your profile</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Job search is paused until CareerPilot can read your profile.
+          </p>
+          <button type="button" className="btn-primary mt-3 inline-flex" onClick={() => void profileQuery.refetch()}>
+            Retry profile
+          </button>
+        </Glass>
+      ) : null}
       {saveMutation.isError ? (
         <ErrorBanner error={saveMutation.error} heading="Couldn't update saved jobs" />
       ) : null}
@@ -458,6 +505,7 @@ export function JobsPage() {
             onChange={setDraftSearch}
             onSubmit={submitSearch}
             chips={chips}
+            disabled={profileGate.kind === "pending" || profileGate.kind === "error"}
           />
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -489,14 +537,23 @@ export function JobsPage() {
         </Glass>
       ) : null}
 
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Jobs workspace">
+      <div
+        className="inline-flex flex-wrap gap-1 rounded-2xl border border-border/80 bg-foreground/[0.03] p-1 backdrop-blur-md"
+        role="tablist"
+        aria-label="Jobs workspace"
+      >
         {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
             role="tab"
             aria-selected={state.tab === tab.id}
-            className={cn("btn-secondary", state.tab === tab.id && "btn-primary")}
+            className={cn(
+              "rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors",
+              state.tab === tab.id
+                ? "bg-gradient-to-r from-primary to-accent text-primary-foreground shadow-md shadow-primary/25"
+                : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+            )}
             onClick={() => patch({ tab: tab.id, page: 1, selected: isDesktop ? state.selected : null })}
           >
             {tab.label}
@@ -553,7 +610,7 @@ export function JobsPage() {
                 Clear filters
               </button>
             ) : (
-              <button type="button" className="btn-primary" onClick={() => submitSearch()} disabled={scouting}>
+              <button type="button" className="btn-primary" onClick={() => submitSearch()} disabled={scouting || profileGate.kind === "pending" || profileGate.kind === "error"}>
                 Search broader
               </button>
             )
@@ -634,6 +691,7 @@ export function JobsPage() {
       <p className="sr-only" aria-live="polite">
         {navIds.length} jobs in the current result set.
       </p>
+      </div>
     </div>
   );
 }

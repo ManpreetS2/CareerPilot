@@ -21,7 +21,7 @@ export function AuthFrame({
           </Link>
           <p className="mt-1 text-sm text-muted-foreground">{APP_TAGLINE}</p>
         </div>
-        <Glass variant="floating" refract className="space-y-5 rounded-[var(--radius-lg)] p-6">
+        <Glass variant="floating" className="space-y-5 rounded-[var(--radius-lg)] p-6">
           <h1 className="font-display text-xl font-semibold">{title}</h1>
           {children}
         </Glass>
