@@ -16,7 +16,7 @@ export function EncryptionSection() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-[#0B0818]/80 to-[#070511]/90 px-6 py-20 sm:px-12 sm:py-28">
+    <section className="glass-floating relative overflow-hidden rounded-3xl px-6 py-20 sm:px-12 sm:py-28">
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div
           className="absolute inset-0 opacity-5"
@@ -32,7 +32,7 @@ export function EncryptionSection() {
             {ENCRYPTION_TEXT.map((text, index) => (
               <div
                 key={index}
-                className="absolute whitespace-nowrap font-mono text-xs text-purple-300/20"
+                className="absolute whitespace-nowrap font-mono text-xs text-primary/25"
                 style={{
                   top: `${index * 12 + 5}%`,
                   left: `-${index % 3 * 10}%`,
@@ -60,10 +60,10 @@ export function EncryptionSection() {
         <div className="mb-6 inline-flex rounded-2xl border border-purple-400/20 bg-purple-500/10 p-4">
           <Shield className="h-10 w-10 text-purple-300" strokeWidth={1.5} />
         </div>
-        <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+        <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
           Your resume stays protected
         </h2>
-        <p className="mt-5 text-lg leading-relaxed text-gray-300">
+        <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
           Grounded insights. Private by design. Your documents and profile data stay secure with
           end-to-end encryption. We never share your information with employers until you choose to
           apply.

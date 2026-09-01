@@ -38,22 +38,22 @@ export function LandingPage() {
       <header className="safe-pad relative z-10 mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
-            <span className="text-sm font-bold text-white">CP</span>
+            <span className="text-sm font-bold text-primary-foreground">CP</span>
           </div>
-          <span className="font-display text-lg font-semibold tracking-tight text-white">
+          <span className="font-display text-lg font-semibold tracking-tight text-foreground">
             {APP_NAME}
           </span>
         </div>
         <div className="flex gap-3">
           <Link
             to="/login"
-            className="rounded-xl px-4 py-2 text-sm font-medium text-white/90 transition-colors hover:text-white"
+            className="rounded-xl px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             Sign In
           </Link>
           <Link
             to="/signup"
-            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30"
+            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-5 py-2 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30"
           >
             Get Started
             <ArrowRight className="h-4 w-4" />
@@ -69,14 +69,14 @@ export function LandingPage() {
               initial={reduce ? false : { opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5 }}
-              className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 backdrop-blur-sm"
+              className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-foreground/5 px-4 py-2 backdrop-blur-sm"
             >
               <Sparkles className="h-4 w-4 text-accent" />
-              <span className="text-sm font-medium text-white/90">AI-Powered Career Navigation</span>
+              <span className="text-sm font-medium text-foreground/90">AI-Powered Career Navigation</span>
             </motion.div>
 
             <motion.h1
-              className="text-5xl font-bold leading-tight tracking-tight text-white sm:text-6xl lg:text-7xl"
+              className="text-5xl font-bold leading-tight tracking-tight text-foreground sm:text-6xl lg:text-7xl"
               initial={reduce ? false : { opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: reduce ? 0 : 0.1 }}
@@ -88,7 +88,7 @@ export function LandingPage() {
             </motion.h1>
 
             <motion.p
-              className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-gray-300 sm:text-xl"
+              className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground sm:text-xl"
               initial={reduce ? false : { opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: reduce ? 0 : 0.2 }}
@@ -105,14 +105,14 @@ export function LandingPage() {
             >
               <Link
                 to="/signup"
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-8 py-4 text-base font-semibold text-white shadow-2xl shadow-primary/40 transition-all hover:scale-105 hover:shadow-primary/50"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-8 py-4 text-base font-semibold text-primary-foreground shadow-2xl shadow-primary/40 transition-all hover:scale-105 hover:shadow-primary/50"
               >
                 Get Started Free
                 <ArrowRight className="h-5 w-5" />
               </Link>
               <Link
                 to="/login"
-                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-8 py-4 text-base font-semibold text-white backdrop-blur-sm transition-all hover:bg-white/10"
+                className="inline-flex items-center gap-2 rounded-xl border border-border bg-foreground/5 px-8 py-4 text-base font-semibold text-foreground backdrop-blur-sm transition-all hover:bg-foreground/10"
               >
                 Sign In
               </Link>
@@ -130,7 +130,7 @@ export function LandingPage() {
                     <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
                       <CheckCircle2 className="h-7 w-7 text-primary" />
                     </div>
-                    <h3 className="font-semibold text-white">Real Data Only</h3>
+                    <h3 className="font-semibold text-foreground">Real Data Only</h3>
                     <p className="mt-2 text-sm text-muted-foreground">
                       Parse resume experience that actually exists
                     </p>
@@ -139,7 +139,7 @@ export function LandingPage() {
                     <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
                       <Sparkles className="h-7 w-7 text-primary" />
                     </div>
-                    <h3 className="font-semibold text-white">Smart Matching</h3>
+                    <h3 className="font-semibold text-foreground">Smart Matching</h3>
                     <p className="mt-2 text-sm text-muted-foreground">
                       Explainable fit scores you can review
                     </p>
@@ -148,7 +148,7 @@ export function LandingPage() {
                     <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
                       <Lock className="h-7 w-7 text-primary" />
                     </div>
-                    <h3 className="font-semibold text-white">You're in Control</h3>
+                    <h3 className="font-semibold text-foreground">You're in Control</h3>
                     <p className="mt-2 text-sm text-muted-foreground">
                       Review and approve before anything is sent
                     </p>
@@ -165,10 +165,10 @@ export function LandingPage() {
 
         <section className="py-16">
           <div className="mx-auto max-w-3xl text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
               Opportunities across every industry
             </h2>
-            <p className="mt-4 text-lg text-gray-300">
+            <p className="mt-4 text-lg text-muted-foreground">
               Helping job seekers everywhere navigate their next career move with confidence
             </p>
             <div className="mt-12">
@@ -177,9 +177,9 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="border-t border-white/10 py-20">
+        <section className="border-t border-border py-20">
           <div className="mx-auto max-w-5xl">
-            <h2 className="mb-12 text-center text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            <h2 className="mb-12 text-center text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
               How CareerPilot works
             </h2>
             <div className="space-y-8">
@@ -193,12 +193,12 @@ export function LandingPage() {
                 >
                   <Glass variant="surface" className="rounded-2xl p-6">
                     <div className="flex items-start gap-4">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent font-semibold text-white">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent font-semibold text-primary-foreground">
                         {index + 1}
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-white">{item.title}</h3>
-                        <p className="mt-2 leading-relaxed text-gray-300">{item.body}</p>
+                        <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
+                        <p className="mt-2 leading-relaxed text-muted-foreground">{item.body}</p>
                       </div>
                     </div>
                   </Glass>
@@ -211,15 +211,15 @@ export function LandingPage() {
         <section className="py-20">
           <Glass variant="floating" className="rounded-3xl p-12 text-center">
             <div className="mx-auto max-w-2xl">
-              <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+              <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
                 Ready to navigate your next role?
               </h2>
-              <p className="mt-4 text-lg text-gray-300">
+              <p className="mt-4 text-lg text-muted-foreground">
                 Join CareerPilot today and start making smarter career decisions
               </p>
               <Link
                 to="/signup"
-                className="mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-10 py-5 text-lg font-semibold text-white shadow-2xl shadow-primary/40 transition-all hover:scale-105 hover:shadow-primary/50"
+                className="mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-10 py-5 text-lg font-semibold text-primary-foreground shadow-2xl shadow-primary/40 transition-all hover:scale-105 hover:shadow-primary/50"
               >
                 Get Started Free
                 <ArrowRight className="h-5 w-5" />
@@ -229,8 +229,8 @@ export function LandingPage() {
         </section>
       </main>
 
-      <footer className="safe-pad relative z-10 border-t border-white/10 py-8">
-        <div className="mx-auto max-w-7xl px-4 text-center text-sm text-gray-400 sm:px-6 lg:px-8">
+      <footer className="safe-pad relative z-10 border-t border-border py-8">
+        <div className="mx-auto max-w-7xl px-4 text-center text-sm text-muted-foreground sm:px-6 lg:px-8">
           <p>&copy; {new Date().getFullYear()} {APP_NAME}. All rights reserved.</p>
         </div>
       </footer>

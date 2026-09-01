@@ -17,6 +17,7 @@ vi.mock("../lib/api", async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
+      getProfile: vi.fn().mockRejectedValue(new Error("unmocked profile")),
       getJobs: vi.fn(),
       queryJobs: vi.fn(),
       scoutJobs: vi.fn(),
@@ -76,6 +77,7 @@ function renderJobs(route = "/jobs", queryClient = createTestQueryClient()) {
 
 describe("JobsPage workspace", () => {
   beforeEach(() => {
+    vi.mocked(api.getProfile).mockRejectedValue(new Error("unmocked profile"));
     vi.mocked(api.queryJobs).mockResolvedValue(pageOf([existingJob]));
     vi.mocked(api.getStoredScores).mockResolvedValue([]);
     vi.mocked(api.scoutJobs).mockReset();
@@ -582,5 +584,16 @@ describe("JobsPage workspace", () => {
       expect(rolled2?.total).toBe(4);
       expect(rolled2?.items.map((item) => item.job.id)).toEqual(["saved-c", "saved-d"]);
     });
+  });
+
+  it("does not scout jobs when the profile is incomplete", async () => {
+    vi.mocked(api.getProfile).mockResolvedValue({
+      candidate: null,
+      preferences: null,
+    });
+    renderJobs();
+    expect(await screen.findByTestId("jobs-profile-gate")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("find-jobs-button"));
+    expect(api.scoutJobs).not.toHaveBeenCalled();
   });
 });

@@ -29,7 +29,7 @@ export function EmptyState({
           <Sparkles className="h-4 w-4 text-primary" aria-hidden />
           {title}
         </h2>
-        <p className="mt-2 max-w-xl text-ink-600 dark:text-ink-300">{description}</p>
+        <p className="mt-2 max-w-xl text-muted-foreground">{description}</p>
       </div>
       {action}
     </div>

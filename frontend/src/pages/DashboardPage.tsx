@@ -5,7 +5,7 @@ import { ReadinessPath } from "../components/signature/ReadinessPath";
 import { ScoreOrb } from "../components/signature/ScoreOrb";
 import { WorkflowPath } from "../components/signature/WorkflowPath";
 import { Glass } from "../components/ui/glass";
-import { PageHeader } from "../components/ui/page-header";
+import { DashboardAtmosphere } from "../components/DashboardAtmosphere";
 import { Skeleton } from "../components/ui/skeleton";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -97,25 +97,23 @@ export function DashboardPage() {
   ].filter((item) => item.value > 0);
 
   return (
-    <div className="space-y-8">
-      <div className="relative">
-        <div className="pointer-events-none absolute -top-40 left-1/2 h-64 w-96 -translate-x-1/2 rounded-full bg-primary/20 blur-3xl" />
-        <div className="relative">
-          <h1 className="text-3xl font-bold tracking-tight text-white">
-            Welcome back, {greetingName}
-          </h1>
-          <p className="mt-2 text-muted-foreground">
-            {searchFocus
-              ? `Current search focus: ${searchFocus}`
-              : "Your next opportunities are ready"}
-          </p>
-        </div>
+    <div className="relative space-y-8">
+      <DashboardAtmosphere />
+      <div className="relative z-[1]">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">
+          Welcome back, {greetingName}
+        </h1>
+        <p className="mt-2 text-muted-foreground">
+          {searchFocus
+            ? `Current search focus: ${searchFocus}`
+            : "Your next opportunities are ready"}
+        </p>
       </div>
 
       <ErrorBanner error={error} />
 
       {loading ? (
-        <div className="space-y-4" aria-busy>
+        <div className="relative z-[1] space-y-4" aria-busy>
           <Skeleton className="h-36 w-full" />
           <div className="grid gap-4 lg:grid-cols-2">
             <Skeleton className="h-40 w-full" />
@@ -124,13 +122,13 @@ export function DashboardPage() {
         </div>
       ) : (
         <>
-          <Glass variant="floating" className="rounded-2xl p-8">
+          <Glass variant="floating" className="relative z-[1] rounded-2xl p-8">
             <p className="text-sm font-medium text-primary">Next Action</p>
-            <h2 className="mt-3 text-2xl font-bold tracking-tight text-white">{next.title}</h2>
-            <p className="mt-3 max-w-2xl leading-relaxed text-gray-300">{next.description}</p>
+            <h2 className="mt-3 text-2xl font-bold tracking-tight text-foreground">{next.title}</h2>
+            <p className="mt-3 max-w-2xl leading-relaxed text-muted-foreground">{next.description}</p>
             <Link
               to={next.to}
-              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-6 py-3 font-semibold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30"
+              className="btn-primary mt-6 inline-flex"
               data-testid="dashboard-next-action"
             >
               {next.cta}
@@ -146,20 +144,22 @@ export function DashboardPage() {
             ) : null}
           </Glass>
 
-          <WorkflowPath
-            nodes={[
-              { id: "profile", label: "Profile", state: liveCandidate?.name ? "complete" : "current" },
-              { id: "discover", label: "Discover", state: jobs.length ? "complete" : "upcoming" },
-              { id: "analyze", label: "Analyze", state: scores.length ? "complete" : jobs.length ? "current" : "upcoming" },
-              { id: "prepare", label: "Prepare", state: versions.length ? "complete" : "upcoming" },
-              { id: "track", label: "Track", state: pipelineBits.length ? "current" : "upcoming" },
-            ]}
-          />
+          <div className="relative z-[1]">
+            <WorkflowPath
+              nodes={[
+                { id: "profile", label: "Profile", state: liveCandidate?.name ? "complete" : "current" },
+                { id: "discover", label: "Discover", state: jobs.length ? "complete" : "upcoming" },
+                { id: "analyze", label: "Analyze", state: scores.length ? "complete" : jobs.length ? "current" : "upcoming" },
+                { id: "prepare", label: "Prepare", state: versions.length ? "complete" : "upcoming" },
+                { id: "track", label: "Track", state: pipelineBits.length ? "current" : "upcoming" },
+              ]}
+            />
+          </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="relative z-[1] grid gap-4 lg:grid-cols-2">
             <Glass variant="panel" className="rounded-2xl p-6">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-white">Top Matches</h2>
+                <h2 className="text-lg font-semibold text-foreground">Top Matches</h2>
                 <Link to="/jobs?tab=matches" className="text-sm font-medium text-primary hover:text-primary-hover">
                   View All
                 </Link>
@@ -174,10 +174,10 @@ export function DashboardPage() {
                     const job = jobs.find((item) => item.id === score.job_id);
                     return (
                       <li key={score.job_id}>
-                        <Link to={`/jobs/${score.job_id}`} className="group flex items-start gap-4 rounded-xl border border-white/5 bg-white/[0.02] p-3 transition-all hover:border-white/10 hover:bg-white/[0.04]">
+                        <Link to={`/jobs/${score.job_id}`} className="group flex items-start gap-4 rounded-xl border border-border/70 bg-foreground/[0.03] p-3 transition-colors hover:border-primary/30 hover:bg-foreground/[0.05]">
                           <ScoreOrb score={score.overall_score} compact />
                           <div className="min-w-0">
-                            <p className="font-semibold text-white group-hover:text-primary">{job?.title ?? "Role"}</p>
+                            <p className="font-semibold text-foreground group-hover:text-primary">{job?.title ?? "Role"}</p>
                             <p className="mt-1 text-sm text-muted-foreground">{job?.company ?? "Company"}</p>
                           </div>
                         </Link>
@@ -189,33 +189,33 @@ export function DashboardPage() {
             </Glass>
 
             <Glass variant="panel" className="rounded-2xl p-6">
-              <h2 className="text-lg font-semibold text-white">Profile Readiness</h2>
+              <h2 className="text-lg font-semibold text-foreground">Profile Readiness</h2>
               <div className="mt-4">
                 <ReadinessPath flags={readinessFlags} />
               </div>
               <dl className="mt-6 grid grid-cols-2 gap-4">
                 <div>
                   <dt className="text-sm text-muted-foreground">Skills</dt>
-                  <dd className="mt-1 text-2xl font-bold tabular text-white">{liveCandidate?.skills.length ?? 0}</dd>
+                  <dd className="mt-1 text-2xl font-bold tabular text-foreground">{liveCandidate?.skills.length ?? 0}</dd>
                 </div>
                 <div>
                   <dt className="text-sm text-muted-foreground">Jobs Found</dt>
-                  <dd className="mt-1 text-2xl font-bold tabular text-white">{jobs.length}</dd>
+                  <dd className="mt-1 text-2xl font-bold tabular text-foreground">{jobs.length}</dd>
                 </div>
               </dl>
             </Glass>
 
             <Glass variant="panel" className="rounded-2xl p-6">
-              <h2 className="text-lg font-semibold text-white">Recent Versions</h2>
+              <h2 className="text-lg font-semibold text-foreground">Recent Versions</h2>
               {versions.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">No resume versions yet.</p>
               ) : (
                 <ul className="mt-4 space-y-3">
                   {versions.slice(0, 3).map((version) => (
                     <li key={version.id}>
-                      <Link to={`/resume/${version.id}`} className="group flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-white/[0.02] p-3 transition-all hover:border-white/10 hover:bg-white/[0.04]">
+                      <Link to={`/resume/${version.id}`} className="group flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-foreground/[0.03] p-3 transition-colors hover:border-primary/30 hover:bg-foreground/[0.05]">
                         <span className="min-w-0 text-sm">
-                          <span className="font-medium text-white group-hover:text-primary">
+                          <span className="font-medium text-foreground group-hover:text-primary">
                             Version {version.version_number}
                           </span>
                           <span className="text-muted-foreground"> · {version.company}</span>
@@ -231,7 +231,7 @@ export function DashboardPage() {
             </Glass>
 
             <Glass variant="panel" className="rounded-2xl p-6">
-              <h2 className="text-lg font-semibold text-white">Application Pipeline</h2>
+              <h2 className="text-lg font-semibold text-foreground">Application Pipeline</h2>
               {pipelineBits.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">
                   Nothing in your tracker yet.
@@ -239,9 +239,9 @@ export function DashboardPage() {
               ) : (
                 <dl className="mt-4 space-y-3">
                   {pipelineBits.map((item) => (
-                    <div key={item.label} className="flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] p-3">
+                    <div key={item.label} className="flex items-center justify-between rounded-lg border border-border/70 bg-foreground/[0.03] p-3">
                       <dt className="text-sm text-muted-foreground">{item.label}</dt>
-                      <dd className="text-xl font-bold tabular text-white">{item.value}</dd>
+                      <dd className="text-xl font-bold tabular text-foreground">{item.value}</dd>
                     </div>
                   ))}
                 </dl>
