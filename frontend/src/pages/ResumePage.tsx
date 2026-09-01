@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion, useReducedMotion, LayoutGroup } from "motion/react";
+import { Download } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
@@ -146,6 +147,8 @@ export function ResumePage() {
   const { versionId } = useParams();
   const navigate = useNavigate();
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<unknown>(null);
   const reduce = useReducedMotion();
 
   const listQuery = useQuery({
@@ -166,6 +169,19 @@ export function ResumePage() {
     () => versions.find((item) => item.id === selectedId) ?? null,
     [versions, selectedId],
   );
+
+  async function downloadVersion(format: "pdf" | "docx") {
+    if (!selectedId || downloading) return;
+    setDownloading(format);
+    setDownloadError(null);
+    try {
+      await api.downloadResumeVersion(selectedId, format);
+    } catch (err) {
+      setDownloadError(err);
+    } finally {
+      setDownloading(null);
+    }
+  }
 
   if (listQuery.isPending) {
     return (
@@ -219,7 +235,7 @@ export function ResumePage() {
             key={version.id}
             to={`/resume/${version.id}`}
             className={cn(
-              "block rounded-[var(--radius-sm)] border px-3 py-2.5 text-sm",
+              "block min-h-11 rounded-[var(--radius-sm)] border px-3 py-3 text-sm",
               active ? "border-primary/40 bg-primary/10" : "border-transparent hover:bg-muted",
             )}
             aria-current={active ? "page" : undefined}
@@ -248,7 +264,7 @@ export function ResumePage() {
   );
 
   const preview = (
-    <Surface className="p-6">
+    <Surface className="paper-surface p-6">
       {selected ? (
         <motion.div layoutId={reduce ? undefined : `resume-meta-${selected.id}`} className="mb-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -259,6 +275,7 @@ export function ResumePage() {
           </p>
         </motion.div>
       ) : null}
+      <ErrorBanner error={downloadError} />
       {detailQuery.isPending ? (
         <LoadingState label="Loading resume…" />
       ) : missingDetail ? (
@@ -268,9 +285,23 @@ export function ResumePage() {
       ) : detailQuery.data ? (
         <ResumePreview detail={detailQuery.data} />
       ) : null}
-      <button type="button" className="btn-secondary mt-6" onClick={() => setDetailsOpen(true)}>
-        Version details
-      </button>
+      <div className="mt-6 flex flex-wrap gap-2">
+        {(["pdf", "docx"] as const).map((format) => (
+          <button
+            key={format}
+            type="button"
+            className="btn-secondary"
+            disabled={!selectedId || downloading !== null || Boolean(missingDetail) || Boolean(detailQuery.error)}
+            onClick={() => void downloadVersion(format)}
+          >
+            <Download className="h-4 w-4" aria-hidden />
+            {downloading === format ? "Downloading…" : `Export ${format.toUpperCase()}`}
+          </button>
+        ))}
+        <button type="button" className="btn-secondary" onClick={() => setDetailsOpen(true)}>
+          Version details
+        </button>
+      </div>
     </Surface>
   );
 
@@ -290,7 +321,7 @@ export function ResumePage() {
           {versionId ? (
             <button
               type="button"
-              className="btn-ghost mb-3 px-0 lg:hidden"
+              className="btn-ghost mb-3 min-h-11 px-3 lg:hidden"
               onClick={() => navigate("/resume")}
             >
               Back to versions

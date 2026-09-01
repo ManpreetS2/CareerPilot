@@ -100,7 +100,7 @@ export function DashboardPage() {
     <div className="relative space-y-8">
       <DashboardAtmosphere />
       <div className="relative z-[1]">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">Overview</h1>
         <p className="mt-2 text-lg text-foreground">Welcome back, {greetingName}</p>
         <p className="mt-2 text-muted-foreground">
           {searchFocus

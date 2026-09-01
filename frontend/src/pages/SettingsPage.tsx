@@ -27,24 +27,6 @@ export function SettingsPage() {
     <div className="space-y-6">
       <PageHeader title="Settings" description="Appearance, account, privacy, and accessibility." />
 
-      <Surface className="space-y-4 p-6">
-        <h2 className="font-display text-xl font-semibold">Appearance</h2>
-        <div className="grid gap-2 sm:grid-cols-3">
-          {THEMES.map((theme) => (
-            <button
-              key={theme.id}
-              type="button"
-              className={`btn-secondary justify-start ${preference === theme.id ? "ring-2 ring-[var(--ring)]" : ""}`}
-              aria-pressed={preference === theme.id}
-              onClick={() => setPreference(theme.id)}
-            >
-              <theme.icon className="h-4 w-4" aria-hidden />
-              {theme.label}
-            </button>
-          ))}
-        </div>
-      </Surface>
-
       <Surface className="space-y-3 p-6">
         <h2 className="font-display text-xl font-semibold">Account</h2>
         {user ? (
@@ -63,6 +45,24 @@ export function SettingsPage() {
         )}
       </Surface>
 
+      <Surface className="space-y-4 p-6">
+        <h2 className="font-display text-xl font-semibold">Appearance</h2>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {THEMES.map((theme) => (
+            <button
+              key={theme.id}
+              type="button"
+              className={`btn-secondary justify-start min-h-11 ${preference === theme.id ? "ring-2 ring-[var(--ring)]" : ""}`}
+              aria-pressed={preference === theme.id}
+              onClick={() => setPreference(theme.id)}
+            >
+              <theme.icon className="h-4 w-4" aria-hidden />
+              {theme.label}
+            </button>
+          ))}
+        </div>
+      </Surface>
+
       <Surface className="space-y-3 p-6">
         <h2 className="font-display text-xl font-semibold">Privacy & Safety</h2>
         <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground">
@@ -75,7 +75,7 @@ export function SettingsPage() {
 
       <Surface className="space-y-4 p-6">
         <h2 className="font-display text-xl font-semibold">Accessibility</h2>
-        <label className="flex items-center justify-between gap-4 text-sm">
+        <label className="flex min-h-11 items-center justify-between gap-4 text-sm">
           <span>Reduce motion (also follows the operating system)</span>
           <Switch
             checked={appReducedMotion}

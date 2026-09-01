@@ -148,7 +148,7 @@ export function GuidedCombobox({
             <span className="truncate">{value}</span>
             <button
               type="button"
-              className="rounded-full p-0.5 hover:bg-foreground/10"
+              className="min-h-8 min-w-8 rounded-full p-0.5 hover:bg-foreground/10"
               aria-label={`Remove ${value}`}
               onClick={() => remove(value)}
             >

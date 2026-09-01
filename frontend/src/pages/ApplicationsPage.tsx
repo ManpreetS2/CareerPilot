@@ -64,7 +64,7 @@ function TrackerCard({
   onReminderChange: (jobId: string, date: string | null) => void;
 }) {
   return (
-    <article className="rounded-[var(--radius-md)] border border-border/80 bg-background/70 p-4">
+    <article className="paper-surface p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="wrap-anywhere font-display text-base font-semibold leading-snug">{item.title}</h2>
@@ -119,7 +119,7 @@ function TrackerCard({
             />
           </label>
         </div>
-        <Link to={`/jobs/${item.job_id}/prepare`} className="btn-ghost px-2 py-1.5 text-primary">
+        <Link to={`/jobs/${item.job_id}/prepare`} className="btn-ghost min-h-11 px-3 text-primary">
           Open application
           <ArrowUpRight className="h-4 w-4" aria-hidden />
         </Link>
@@ -231,7 +231,7 @@ export function ApplicationsPage() {
           <div className="flex rounded-[var(--radius-sm)] border border-border p-1" role="group" aria-label="Tracker view">
             <button
               type="button"
-              className={cn("btn-ghost h-9 px-3", view === "kanban" && "bg-primary/10 text-foreground")}
+              className={cn("btn-ghost min-h-11 px-3", view === "kanban" && "bg-primary/10 text-foreground")}
               aria-pressed={view === "kanban"}
               onClick={() => setPersistedView("kanban")}
             >
@@ -240,7 +240,7 @@ export function ApplicationsPage() {
             </button>
             <button
               type="button"
-              className={cn("btn-ghost h-9 px-3", view === "list" && "bg-primary/10 text-foreground")}
+              className={cn("btn-ghost min-h-11 px-3", view === "list" && "bg-primary/10 text-foreground")}
               aria-pressed={view === "list"}
               onClick={() => setPersistedView("list")}
             >

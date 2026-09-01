@@ -1,56 +1,60 @@
-/* CareerPilot extension tokens — mirrored from frontend/src/index.css.
-   Graphite / charcoal, indigo-violet, electric blue, glass layers. */
+/* CareerPilot extension tokens — mirrored from the web app v1 freeze:
+   midnight / white / violet, translucent glass, no cyan cursor accents. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
   color-scheme: light;
-  --background: #f3f5f8;
-  --foreground: #14161c;
+  --background: #f7f6fb;
+  --foreground: #1c1826;
   --surface: #ffffff;
-  --muted-foreground: #5a6270;
-  --border: #d7dce6;
-  --primary: #4f46e5;
-  --accent: #2563eb;
-  --success: #059669;
-  --warning: #d97706;
-  --danger: #e11d48;
-  --glass-surface: color-mix(in srgb, #ffffff 86%, transparent);
-  --glass-border: color-mix(in srgb, var(--primary) 28%, rgba(255, 255, 255, 0.55));
-  --glass-highlight: rgba(255, 255, 255, 0.78);
-  --atmosphere-a: rgba(79, 70, 229, 0.22);
-  --atmosphere-b: rgba(14, 165, 233, 0.14);
-  --shadow-floating: 0 22px 50px -24px rgba(28, 32, 48, 0.28), 0 8px 18px -12px rgba(79, 70, 229, 0.18);
+  --muted-foreground: #5a5568;
+  --border: rgba(92, 72, 120, 0.14);
+  --primary: #7c3aed;
+  --accent: #8b5cf6;
+  --success: #047857;
+  --warning: #b45309;
+  --danger: #be123c;
+  --danger-foreground: #faf7ff;
+  --glass-surface: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.86);
+  --glass-highlight: rgba(255, 255, 255, 0.82);
+  --atmosphere-a: rgba(167, 139, 250, 0.28);
+  --atmosphere-b: rgba(196, 181, 253, 0.16);
+  --shadow-floating: 0 24px 56px -28px rgba(62, 48, 86, 0.22), 0 0 0 1px rgba(124, 58, 237, 0.1);
   --bg: var(--background);
   --fg: var(--foreground);
   --card: var(--glass-surface);
   --line: var(--border);
+  --paper: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --background: #0b0c11;
-    --foreground: #e7eaf1;
-    --surface: #141722;
-    --muted-foreground: #97a0b3;
-    --border: #2a3142;
-    --primary: #818cf8;
-    --accent: #38bdf8;
+    --background: #070511;
+    --foreground: #f5f7ff;
+    --surface: #100b22;
+    --muted-foreground: #bbb7d3;
+    --border: rgba(255, 255, 255, 0.12);
+    --primary: #8b5cf6;
+    --accent: #c084fc;
     --success: #34d399;
     --warning: #fbbf24;
     --danger: #fb7185;
-    --glass-surface: color-mix(in srgb, #151925 84%, transparent);
-    --glass-border: color-mix(in srgb, var(--accent) 32%, rgba(255, 255, 255, 0.08));
-    --glass-highlight: rgba(255, 255, 255, 0.12);
-    --atmosphere-a: rgba(99, 102, 241, 0.28);
-    --atmosphere-b: rgba(56, 189, 248, 0.16);
-    --shadow-floating: 0 28px 70px -34px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(129, 140, 248, 0.08);
+    --danger-foreground: #fff5f7;
+    --glass-surface: rgba(18, 14, 32, 0.62);
+    --glass-border: rgba(255, 255, 255, 0.16);
+    --glass-highlight: rgba(255, 255, 255, 0.16);
+    --atmosphere-a: rgba(139, 92, 246, 0.32);
+    --atmosphere-b: rgba(168, 85, 247, 0.16);
+    --shadow-floating: 0 32px 80px -28px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(139, 92, 246, 0.12);
     --bg: var(--background);
     --fg: var(--foreground);
     --card: var(--glass-surface);
     --line: var(--border);
+    --paper: #141022;
   }
 }
 
@@ -96,19 +100,20 @@ body {
 
 @layer components {
   .btn {
-    @apply inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn text-white hover:opacity-95;
-    background: linear-gradient(135deg, #4f46e5, #2563eb);
+    @apply btn;
+    color: #faf7ff;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
   }
   .btn-secondary {
-    @apply btn border bg-white/80 text-ink-900 hover:bg-white dark:text-ink-50;
+    @apply btn border text-ink-900 hover:bg-white dark:text-ink-50;
     border-color: var(--glass-border);
-    background: color-mix(in srgb, var(--surface) 80%, transparent);
+    background: color-mix(in srgb, var(--surface) 86%, transparent);
   }
   .btn-ghost {
-    @apply btn min-h-8 text-xs font-semibold text-ink-600 dark:text-ink-300;
+    @apply btn min-h-11 text-xs font-semibold text-ink-600 dark:text-ink-300;
     background: transparent;
   }
   .card {
@@ -128,6 +133,13 @@ body {
 
 .dark .btn-primary,
 :root.dark .btn-primary {
-  background: linear-gradient(135deg, #818cf8, #38bdf8);
-  color: #0b0c11;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: #faf7ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-primary {
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    color: #faf7ff;
+  }
 }

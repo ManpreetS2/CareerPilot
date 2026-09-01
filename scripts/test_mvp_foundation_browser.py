@@ -446,7 +446,7 @@ def run_browser_workflow() -> dict[str, int]:
                 checks += 1
 
                 _signup(page, base, USER_A_EMAIL, USER_PASSWORD)
-                expect(page.get_by_role("heading", name="Dashboard", exact=True)).to_be_visible()
+                expect(page.get_by_role("heading", name="Overview", exact=True)).to_be_visible()
                 expect(page.get_by_test_id("dashboard-next-action")).to_have_text("Complete your profile")
                 expect(_metric(page, "Jobs discovered")).to_have_text("0")
                 _assert_no_horizontal_overflow(page, "/dashboard")

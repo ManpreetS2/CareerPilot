@@ -77,7 +77,7 @@ function FactorRow({
     <div
       className={cn(
         "flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2",
-        factor.hard_blocker && "border-rose-300/70 bg-rose-50/50 dark:border-rose-800 dark:bg-rose-950/20",
+        factor.hard_blocker && "notice-danger",
         factor.status === "unknown" && "border-border",
       )}
       data-testid={`factor-${factor.id}`}

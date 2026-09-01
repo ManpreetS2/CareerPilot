@@ -76,7 +76,7 @@ function isNavActive(item: NavItem, pathname: string): boolean {
 
 function navClass(isActive: boolean) {
   return cn(
-    "relative flex min-h-10 items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-all",
+    "relative flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-all",
     isActive
       ? "bg-primary/15 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--primary)_35%,transparent)]"
       : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
@@ -143,7 +143,7 @@ function ThemeMenu() {
   ];
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="btn-ghost h-10 min-h-10 w-full justify-start px-2.5 text-[13px]" aria-label="Appearance">
+      <DropdownMenuTrigger className="btn-ghost h-11 min-h-11 w-full justify-start px-2.5 text-[13px]" aria-label="Appearance">
         {preference === "dark" ? (
           <Moon className="h-4 w-4" aria-hidden />
         ) : preference === "light" ? (
@@ -197,7 +197,7 @@ function AccountFooter() {
       </p>
       <button
         type="button"
-        className="btn-ghost h-10 min-h-10 w-full justify-start px-2.5 text-[13px]"
+        className="btn-ghost h-11 min-h-11 w-full justify-start px-2.5 text-[13px]"
         onClick={() => void onLogout()}
         disabled={loggingOut}
         aria-label="Log out"

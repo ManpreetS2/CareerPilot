@@ -39,9 +39,9 @@ export class ErrorBoundary extends Component<Props, State> {
       return this.props.children;
     }
     return (
-      <div className="glass-working mx-auto my-8 flex max-w-xl flex-col items-start gap-4 border-rose-300/70 p-8 text-center dark:border-rose-800">
+      <div className="notice-danger mx-auto my-8 flex max-w-xl flex-col items-start gap-4 rounded-[var(--radius-lg)] p-8 text-center">
         <div className="flex w-full flex-col items-center gap-3 text-center">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-danger-600 dark:bg-rose-900/40 dark:text-rose-200">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-danger/10 text-danger">
             <AlertTriangle className="h-6 w-6" aria-hidden />
           </span>
           <h2 className="font-display text-xl font-semibold text-foreground">

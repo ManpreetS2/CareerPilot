@@ -29,7 +29,7 @@ export function ErrorBanner({ error, heading }: { error: unknown; heading?: stri
   return (
     <div
       role="alert"
-      className="card mb-4 border-rose-300/70 bg-rose-50/80 p-4 text-danger dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200"
+      className="notice-danger mb-4 rounded-[var(--radius-md)] p-4 text-danger"
     >
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
