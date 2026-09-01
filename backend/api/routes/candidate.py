@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from backend.api.dependencies import get_current_user
 from backend.db.database import get_db
 from backend.db.models import Candidate, TargetPreference, User
-from backend.schemas.schemas import CurrentProfile, ParseResumeResponse, TargetPreferences
+from backend.schemas.schemas import CurrentProfile, ParseResumeResponse, ProfileReadinessPayload, TargetPreferences
+from backend.services.profile_readiness import evaluate_profile_readiness
 from backend.services.application_materials_agent import (
     candidate_record_to_profile,
     preference_record_to_schema,
@@ -50,9 +51,13 @@ def get_current_profile(
         .order_by(TargetPreference.id.desc())
         .first()
     )
+    profile = candidate_record_to_profile(candidate) if candidate is not None else None
+    prefs = preference_record_to_schema(preference) if preference is not None else None
+    readiness = evaluate_profile_readiness(candidate, preference)
     return CurrentProfile(
-        candidate=candidate_record_to_profile(candidate) if candidate is not None else None,
-        preferences=preference_record_to_schema(preference) if preference is not None else None,
+        candidate=profile,
+        preferences=prefs,
+        readiness=ProfileReadinessPayload.model_validate(readiness.as_dict()),
     )
 
 
@@ -178,11 +183,32 @@ def save_preferences(
         academic_year=getattr(preferences, "academic_year", None),
         work_mode_preferences=list(getattr(preferences, "work_mode_preferences", None) or []),
         relocation_willingness=getattr(preferences, "relocation_willingness", None),
+        field_of_study=getattr(preferences, "field_of_study", None),
+        industry_preferences=list(getattr(preferences, "industry_preferences", None) or []),
+        opportunity_preference=getattr(preferences, "opportunity_preference", None),
+        experience_levels=list(getattr(preferences, "experience_levels", None) or []),
+        skill_preferences=list(getattr(preferences, "skill_preferences", None) or []),
         gender=preferences.gender,
         race_ethnicity=preferences.race_ethnicity,
         veteran_status=preferences.veteran_status,
         disability_status=preferences.disability_status,
     )
+    extra_skills = [
+        str(item).strip()
+        for item in (getattr(preferences, "skill_preferences", None) or [])
+        if str(item).strip()
+    ]
+    if candidate is not None and extra_skills:
+        existing = [str(item).strip() for item in (candidate.skills or []) if str(item).strip()]
+        seen = {item.lower() for item in existing}
+        merged = list(existing)
+        for skill in extra_skills:
+            key = skill.lower()
+            if key not in seen:
+                merged.append(skill)
+                seen.add(key)
+        candidate.skills = merged
+
     try:
         db.add(record)
         db.commit()

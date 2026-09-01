@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { Link2, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
@@ -13,7 +13,6 @@ import { NaturalSearchBar, type FilterChip } from "../components/NaturalSearchBa
 import { DashboardAtmosphere } from "../components/DashboardAtmosphere";
 import { Glass } from "../components/ui/glass";
 import { PageHeader } from "../components/ui/page-header";
-import { api } from "../lib/api";
 import { cn } from "../lib/cn";
 import { jobDiscoveryErrorHeading } from "../lib/job-discovery-error";
 import {
@@ -31,7 +30,8 @@ import {
 } from "../lib/jobs-workspace";
 import { chipLabel, parseSearchIntent, scoutTermsFromIntent } from "../lib/search-intent";
 import { queryKeys } from "../lib/query-keys";
-import { canScoutJobs, resolveProfileGate } from "../lib/profile-gate";
+import { api } from "../lib/api";
+import { canScoutJobs, missingRequirementLabel, resolveProfileGate } from "../lib/profile-gate";
 import { saveSelectedJobId, useCandidateSession } from "../lib/session";
 import type { JobListItem, JobListPage, JobQueryParams, ScoutJobsResponse } from "../lib/types";
 
@@ -51,8 +51,7 @@ function pageFromQuery(data: JobListPage | undefined, previous?: JobListPage): J
 
 export function JobsPage() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const { candidate } = useCandidateSession();
+  const { sessionUserId } = useCandidateSession();
   const [params, setParams] = useSearchParams();
   const state = readJobsWorkspace(params);
   const [draftSearch, setDraftSearch] = useState(state.search);
@@ -99,15 +98,14 @@ export function JobsPage() {
 
   const queryParams = toJobQueryParams(state);
   const profileQuery = useQuery({
-    queryKey: queryKeys.profile,
+    queryKey: queryKeys.profile(sessionUserId),
     queryFn: ({ signal }) => api.getProfile({ signal }),
     retry: false,
   });
   const profileStatus = profileQuery.isPending ? "pending" : profileQuery.isError ? "error" : "success";
   const profileGate = resolveProfileGate({
-    cached: candidate,
     status: profileStatus,
-    remote: profileQuery.data?.candidate,
+    readiness: profileQuery.data?.readiness,
   });
   const profileIncomplete = profileGate.kind === "incomplete";
   const scoutBlocked = !canScoutJobs(profileGate);
@@ -333,10 +331,6 @@ export function JobsPage() {
   }, [state]);
 
   function submitSearch() {
-    if (profileGate.kind === "incomplete") {
-      navigate("/profile");
-      return;
-    }
     if (scoutBlocked) return;
     const intent = parseSearchIntent(draftSearch);
     const terms = scoutTermsFromIntent(intent);
@@ -429,7 +423,7 @@ export function JobsPage() {
               type="button"
               className="btn-primary btn-stable"
               onClick={() => submitSearch()}
-              disabled={scouting || profileGate.kind === "pending" || profileGate.kind === "error"}
+              disabled={scouting || scoutBlocked}
               aria-busy={scouting}
               data-testid="find-jobs-button"
             >
@@ -454,12 +448,20 @@ export function JobsPage() {
       <ErrorBanner error={error} heading={jobDiscoveryErrorHeading(error)} />
       {profileIncomplete ? (
         <Glass variant="atmosphere" className="rounded-[var(--radius-lg)] p-4" data-testid="jobs-profile-gate">
-          <p className="font-display text-base font-semibold tracking-tight">Build your profile first</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            CareerPilot needs a grounded profile before it can search for matching roles.
+          <p className="font-display text-base font-semibold tracking-tight">
+            Complete your profile before CareerPilot searches for matches.
           </p>
-          <Link to="/profile" className="btn-primary mt-3 inline-flex">
-            Open profile
+          <p className="mt-1 text-sm text-muted-foreground">Still needed:</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {profileGate.readiness.missing.map((item) => (
+              <li key={item}>{missingRequirementLabel(item)}</li>
+            ))}
+          </ul>
+          <Link
+            to={profileGate.readiness.next_route || "/profile"}
+            className="btn-primary mt-3 inline-flex min-h-11"
+          >
+            Continue profile
           </Link>
         </Glass>
       ) : null}
@@ -505,7 +507,7 @@ export function JobsPage() {
             onChange={setDraftSearch}
             onSubmit={submitSearch}
             chips={chips}
-            disabled={profileGate.kind === "pending" || profileGate.kind === "error"}
+            disabled={scoutBlocked}
           />
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -577,7 +579,7 @@ export function JobsPage() {
             savePending={Boolean(selectedItem.job.id && pendingSaveIds.has(selectedItem.job.id))}
           />
         </div>
-      ) : listed.length === 0 && !scouting ? (
+      ) : listed.length === 0 && !scouting && !profileIncomplete ? (
         <EmptyState
           title={emptyCopy().title}
           description={emptyCopy().description}

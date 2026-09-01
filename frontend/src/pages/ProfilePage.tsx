@@ -18,9 +18,9 @@ const MAX_CLIENT_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 export function ProfilePage() {
   const queryClient = useQueryClient();
-  const { candidate, preferences, setCandidateProfile, setJobPreferences } = useCandidateSession();
+  const { candidate, preferences, setCandidateProfile, setJobPreferences, sessionUserId } = useCandidateSession();
   const profileQuery = useQuery({
-    queryKey: queryKeys.profile,
+    queryKey: queryKeys.profile(sessionUserId),
     queryFn: ({ signal }) => api.getProfile({ signal }),
   });
 
@@ -77,7 +77,7 @@ export function ProfilePage() {
     try {
       const parsed = await api.parseResume(file);
       setCandidateProfile(parsed.candidate);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.profile });
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
     } catch (err) {
       setProfileError(err);
     } finally {
@@ -93,7 +93,7 @@ export function ProfilePage() {
       const saved = await api.savePreferences(next);
       setJobPreferences(saved);
       setPrefsSuccess("Job preferences saved.");
-      await queryClient.invalidateQueries({ queryKey: queryKeys.profile });
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
     } catch (err) {
       setPrefsError(err);
     } finally {

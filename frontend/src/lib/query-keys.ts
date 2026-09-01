@@ -1,7 +1,7 @@
 export const queryKeys = {
   me: ["me"] as const,
   health: ["health"] as const,
-  profile: ["profile"] as const,
+  profile: (userId?: number | null) => ["profile", userId ?? "anon"] as const,
   jobs: ["jobs"] as const,
   job: (jobId: string) => ["job", jobId] as const,
   jobIntelligence: (jobId: string) => ["job-intelligence", jobId] as const,

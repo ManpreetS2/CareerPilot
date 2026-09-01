@@ -1,7 +1,7 @@
-import type { CandidateProfile, Job, MatchScore, ResumeVersionSummary, TargetPreferences } from "./types";
+import type { Job, MatchScore, ProfileReadiness, ResumeVersionSummary } from "./types";
 
 export type NextAction = {
-  id: "profile" | "preferences" | "jobs" | "matches" | "resume";
+  id: "profile" | "jobs" | "matches" | "resume";
   title: string;
   description: string;
   to: string;
@@ -9,28 +9,19 @@ export type NextAction = {
 };
 
 export function resolveNextAction(input: {
-  candidate: CandidateProfile | null;
-  preferences: TargetPreferences | null;
+  readiness?: ProfileReadiness | null;
   jobs: Job[];
   scores: MatchScore[];
   resumeVersions: ResumeVersionSummary[];
 }): NextAction {
-  if (!input.candidate) {
+  if (!input.readiness?.ready) {
     return {
       id: "profile",
-      title: "Build your profile",
-      description: "Upload a resume so CareerPilot can ground every later recommendation in your real experience.",
-      to: "/profile",
-      cta: "Open profile",
-    };
-  }
-  if (!input.preferences?.target_roles?.length) {
-    return {
-      id: "preferences",
-      title: "Finish setup",
-      description: "Add target roles and locations so job search and fit scoring know what you want.",
-      to: "/onboarding",
-      cta: "Continue setup",
+      title: "Complete your profile",
+      description:
+        "CareerPilot needs a grounded profile and at least one target role before it can search for matches.",
+      to: input.readiness?.next_route || "/profile",
+      cta: "Complete your profile",
     };
   }
   if (input.jobs.length === 0) {

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user, get_extension_user
+from backend.api.profile_gate import enforce_grounded_candidate
 from backend.db.database import get_db
 from backend.db.models import User
 from backend.schemas.schemas import (
@@ -102,6 +103,7 @@ def generate_materials(
     not remembered between requests, so applying to a stretch role cannot
     quietly become the default for every later application.
     """
+    enforce_grounded_candidate(db, user.id)
     generator = getattr(request.app.state, "application_materials_generator", None)
     return get_or_generate_application_package(
         db,
@@ -343,6 +345,7 @@ def extension_verified_fit(
     """Run full-job Verified Fit. The panel must not call this on open."""
     from backend.api.routes.scoring import _http_for_intelligence_error, _http_for_scoring_error, _is_intelligence_pipeline_error
 
+    enforce_grounded_candidate(db, user.id)
     try:
         score_job_with_intelligence(db, job_id, user.id)
         job = load_job(db, job_id)

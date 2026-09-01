@@ -62,15 +62,28 @@ export type TargetPreferences = {
   academic_year?: string | null;
   work_mode_preferences?: string[];
   relocation_willingness?: string | null;
+  field_of_study?: string | null;
+  industry_preferences?: string[];
+  opportunity_preference?: string | null;
+  experience_levels?: string[];
+  skill_preferences?: string[];
   gender?: string | null;
   race_ethnicity?: string | null;
   veteran_status?: string | null;
   disability_status?: string | null;
 };
 
+export type ProfileReadiness = {
+  ready: boolean;
+  code?: string | null;
+  missing: string[];
+  next_route?: string | null;
+};
+
 export type CurrentProfile = {
   candidate: CandidateProfile | null;
   preferences: TargetPreferences | null;
+  readiness: ProfileReadiness;
 };
 
 export type JobStatus = "discovered" | "verified" | "flagged" | "stale";

@@ -110,6 +110,7 @@ export function getSelectedJobId(): string | null {
 }
 
 export function useCandidateSession() {
+  const [sessionUserId, setSessionUserId] = useState<number | null>(() => getActiveSessionUserId());
   const [candidate, setCandidate] = useState<CandidateProfile | null>(() =>
     readJson<CandidateProfile>(scopedKey(CANDIDATE_KEY)),
   );
@@ -119,6 +120,7 @@ export function useCandidateSession() {
 
   useEffect(() => {
     const onChange = () => {
+      setSessionUserId(getActiveSessionUserId());
       setCandidate(readJson<CandidateProfile>(scopedKey(CANDIDATE_KEY)));
       setPreferences(
         sanitizeStoredPreferences(readJson<TargetPreferences>(scopedKey(PREFERENCES_KEY))),
@@ -133,6 +135,7 @@ export function useCandidateSession() {
   }, []);
 
   return {
+    sessionUserId,
     candidate,
     preferences,
     setCandidateProfile: (next: CandidateProfile) => {

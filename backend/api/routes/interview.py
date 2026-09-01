@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user
+from backend.api.profile_gate import enforce_grounded_candidate
 from backend.db.database import get_db
 from backend.db.models import User
 from backend.schemas.schemas import InterviewAnswerFeedback, InterviewAnswerRequest, InterviewPrep
@@ -76,6 +77,7 @@ def prepare_interview(
     user: User = Depends(get_current_user),
 ) -> InterviewPrep:
     """Explicit deterministic interview-prep generation. Does not call a provider."""
+    enforce_grounded_candidate(db, user.id)
     try:
         return generate_and_store_interview_prep(db, job_id, user.id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
@@ -91,6 +93,7 @@ def answer_interview_question(
     user: User = Depends(get_current_user),
 ) -> InterviewAnswerFeedback:
     """Explicit mock-interview practice round. Calls a provider; not persisted."""
+    enforce_grounded_candidate(db, user.id)
     generate_fn = getattr(request.app.state, "interview_answer_generator", None)
     try:
         return get_interview_answer_feedback(
