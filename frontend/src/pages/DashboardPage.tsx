@@ -100,9 +100,8 @@ export function DashboardPage() {
     <div className="relative space-y-8">
       <DashboardAtmosphere />
       <div className="relative z-[1]">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">
-          Welcome back, {greetingName}
-        </h1>
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
+        <p className="mt-2 text-lg text-foreground">Welcome back, {greetingName}</p>
         <p className="mt-2 text-muted-foreground">
           {searchFocus
             ? `Current search focus: ${searchFocus}`
@@ -199,7 +198,7 @@ export function DashboardPage() {
                   <dd className="mt-1 text-2xl font-bold tabular text-foreground">{liveCandidate?.skills.length ?? 0}</dd>
                 </div>
                 <div>
-                  <dt className="text-sm text-muted-foreground">Jobs Found</dt>
+                  <dt className="text-sm text-muted-foreground">Jobs discovered</dt>
                   <dd className="mt-1 text-2xl font-bold tabular text-foreground">{jobs.length}</dd>
                 </div>
               </dl>

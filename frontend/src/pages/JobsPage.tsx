@@ -31,6 +31,7 @@ import {
 } from "../lib/jobs-workspace";
 import { chipLabel, parseSearchIntent, scoutTermsFromIntent } from "../lib/search-intent";
 import { queryKeys } from "../lib/query-keys";
+import { canScoutJobs, resolveProfileGate } from "../lib/profile-gate";
 import { saveSelectedJobId, useCandidateSession } from "../lib/session";
 import type { JobListItem, JobListPage, JobQueryParams, ScoutJobsResponse } from "../lib/types";
 
@@ -102,9 +103,14 @@ export function JobsPage() {
     queryFn: ({ signal }) => api.getProfile({ signal }),
     retry: false,
   });
-  const liveCandidate = profileQuery.data?.candidate ?? candidate;
-  const profileIncomplete =
-    profileQuery.isSuccess && !liveCandidate?.name && !(liveCandidate?.skills?.length);
+  const profileStatus = profileQuery.isPending ? "pending" : profileQuery.isError ? "error" : "success";
+  const profileGate = resolveProfileGate({
+    cached: candidate,
+    status: profileStatus,
+    remote: profileQuery.data?.candidate,
+  });
+  const profileIncomplete = profileGate.kind === "incomplete";
+  const scoutBlocked = !canScoutJobs(profileGate);
   const jobsQuery = useQuery({
     queryKey: ["jobs-workspace", queryParams],
     queryFn: ({ signal }) => api.queryJobs(queryParams, { signal }),
@@ -327,10 +333,11 @@ export function JobsPage() {
   }, [state]);
 
   function submitSearch() {
-    if (profileIncomplete) {
+    if (profileGate.kind === "incomplete") {
       navigate("/profile");
       return;
     }
+    if (scoutBlocked) return;
     const intent = parseSearchIntent(draftSearch);
     const terms = scoutTermsFromIntent(intent);
     patch({
@@ -422,7 +429,7 @@ export function JobsPage() {
               type="button"
               className="btn-primary btn-stable"
               onClick={() => submitSearch()}
-              disabled={scouting}
+              disabled={scouting || profileGate.kind === "pending" || profileGate.kind === "error"}
               aria-busy={scouting}
               data-testid="find-jobs-button"
             >
@@ -456,6 +463,17 @@ export function JobsPage() {
           </Link>
         </Glass>
       ) : null}
+      {profileGate.kind === "error" ? (
+        <Glass variant="atmosphere" className="rounded-[var(--radius-lg)] p-4" data-testid="jobs-profile-error">
+          <p className="font-display text-base font-semibold tracking-tight">Couldn't load your profile</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Job search is paused until CareerPilot can read your profile.
+          </p>
+          <button type="button" className="btn-primary mt-3 inline-flex" onClick={() => void profileQuery.refetch()}>
+            Retry profile
+          </button>
+        </Glass>
+      ) : null}
       {saveMutation.isError ? (
         <ErrorBanner error={saveMutation.error} heading="Couldn't update saved jobs" />
       ) : null}
@@ -487,6 +505,7 @@ export function JobsPage() {
             onChange={setDraftSearch}
             onSubmit={submitSearch}
             chips={chips}
+            disabled={profileGate.kind === "pending" || profileGate.kind === "error"}
           />
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -591,7 +610,7 @@ export function JobsPage() {
                 Clear filters
               </button>
             ) : (
-              <button type="button" className="btn-primary" onClick={() => submitSearch()} disabled={scouting}>
+              <button type="button" className="btn-primary" onClick={() => submitSearch()} disabled={scouting || profileGate.kind === "pending" || profileGate.kind === "error"}>
                 Search broader
               </button>
             )

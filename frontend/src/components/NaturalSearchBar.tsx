@@ -36,14 +36,17 @@ export function NaturalSearchBar({
   onChange,
   onSubmit,
   chips,
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
   chips: FilterChip[];
+  disabled?: boolean;
 }) {
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (disabled) return;
     onSubmit();
   }
 

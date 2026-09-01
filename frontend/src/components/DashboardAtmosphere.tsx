@@ -23,7 +23,7 @@ export function DashboardAtmosphere({ showGlobe = true }: { showGlobe?: boolean 
         }}
       />
       {showGlobe ? (
-        <div className="pointer-events-none absolute -right-8 top-10 hidden w-[20rem] opacity-90 lg:block xl:w-[24rem]">
+        <div className="pointer-events-none absolute right-0 top-16 hidden h-48 w-56 overflow-hidden opacity-45 lg:block">
           <WorldPulseGlobe compact />
         </div>
       ) : null}

@@ -34,3 +34,5 @@ class ResizeObserverMock {
   disconnect() {}
 }
 global.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+
+HTMLCanvasElement.prototype.getContext = () => null;

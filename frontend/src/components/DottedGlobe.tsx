@@ -1,80 +1,182 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { CometArc } from "./CometArc";
+import { useEffect, useRef } from "react";
+import {
+  GLOBE_HOLD_MS,
+  GLOBE_LATITUDES,
+  GLOBE_MERIDIANS,
+  GLOBE_REV_MS,
+  GLOBE_SETTLE_MS,
+  GLOBE_TRAVEL_MS,
+  activeNodeIndex,
+  advanceCometPhase,
+  buildGlobeDots,
+  cometTrailPoints,
+  createHoldPhase,
+  globeLayout,
+  isFrontFacing,
+  projectNodes,
+  projectSphere,
+  type CometPhase,
+  type GlobeDot,
+} from "../lib/globe-engine";
 import { useTheme } from "../lib/theme";
 
-type Dot = { x: number; y: number; z: number; opacity: number };
-type GeoNode = { lat: number; lon: number };
+type LoopHandles = {
+  frame: number;
+  observer: IntersectionObserver | null;
+};
 
-const FULL = { size: 560, radius: 208, lonSteps: 42, latSteps: 22 };
-const COMPACT = { size: 300, radius: 112, lonSteps: 28, latSteps: 16 };
-const HOLD_MS = 4600;
-const TRAVEL_MS = 1600;
-const REV_MS = 140000;
+function cssColor(name: string, fallback: string) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
 
-const NODES: GeoNode[] = [
-  { lat: 40.7, lon: -74 },
-  { lat: 51.5, lon: -0.1 },
-  { lat: 35.7, lon: 139.7 },
-  { lat: -33.9, lon: 151.2 },
-  { lat: 1.3, lon: 103.8 },
-  { lat: 19.1, lon: 72.9 },
-  { lat: -23.5, lon: -46.6 },
-  { lat: 52.5, lon: 13.4 },
-];
-
-function project(
-  latDeg: number,
-  lonDeg: number,
+function drawGlobe(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
   lonOffset: number,
-  cx: number,
-  radius: number,
+  phase: CometPhase,
+  dots: GlobeDot[],
+  compact: boolean,
+  reducedMotion: boolean,
 ) {
-  const lat = (latDeg * Math.PI) / 180;
-  const lon = ((lonDeg + lonOffset) * Math.PI) / 180;
-  const x = cx + radius * Math.cos(lat) * Math.sin(lon);
-  const y = cx - radius * Math.sin(lat) * 0.94;
-  const z = radius * Math.cos(lat) * Math.cos(lon);
-  return { x, y, z };
-}
+  const { diameter, radius, cx, cy } = globeLayout(width, height, compact);
+  const accent = cssColor("--accent", "#c084fc");
+  const core = cssColor("--hole-core", "#ffffff");
 
-function projectDots(lonOffset: number, size: number, radius: number, lonSteps: number, latSteps: number): Dot[] {
-  const cx = size / 2;
-  const dots: Dot[] = [];
-  for (let i = 0; i < lonSteps; i++) {
-    for (let j = 0; j < latSteps; j++) {
-      const lat = (j / (latSteps - 1)) * 140 - 70;
-      const lon = (i / lonSteps) * 360 - 180;
-      const point = project(lat, lon, lonOffset, cx, radius);
-      if (point.z < radius * 0.02) continue;
-      dots.push({
-        ...point,
-        opacity: 0.22 + ((point.z + radius) / (radius * 2)) * 0.7,
-      });
-    }
+  ctx.clearRect(0, 0, width, height);
+
+  ctx.save();
+  ctx.globalAlpha = compact ? 0.18 : 0.28;
+  ctx.fillStyle = core;
+  for (let i = 0; i < 28; i++) {
+    const x = ((i * 97) % width) + 8;
+    const y = ((i * 53) % Math.max(24, height * 0.45)) + 6;
+    ctx.beginPath();
+    ctx.arc(x, y, i % 4 === 0 ? 1.1 : 0.55, 0, Math.PI * 2);
+    ctx.fill();
   }
-  return dots;
-}
+  ctx.restore();
 
-function latitudeRings(lonOffset: number, size: number, radius: number) {
-  const cx = size / 2;
-  const rings: string[] = [];
-  for (const lat of [-48, -24, 0, 24, 48]) {
-    let segment: string[] = [];
-    for (let i = 0; i <= 48; i++) {
-      const lon = (i / 48) * 360 - 180;
-      const point = project(lat, lon, lonOffset, cx, radius);
-      if (point.z > radius * 0.04) {
-        segment.push(`${point.x.toFixed(1)},${point.y.toFixed(1)}`);
-      } else if (segment.length > 1) {
-        rings.push(segment.join(" "));
-        segment = [];
-      } else {
-        segment = [];
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.clip();
+
+  const glow = ctx.createRadialGradient(cx, cy - radius * 0.42, radius * 0.08, cx, cy, radius);
+  glow.addColorStop(0, "rgba(192, 132, 252, 0.22)");
+  glow.addColorStop(1, "rgba(192, 132, 252, 0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(cx - radius, cy - radius, diameter, diameter);
+
+  ctx.strokeStyle = core;
+  ctx.globalAlpha = compact ? 0.18 : 0.28;
+  ctx.lineWidth = compact ? 0.8 : 1.15;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, Math.PI + 0.22, -0.22, false);
+  ctx.stroke();
+
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = compact ? 0.45 : 0.7;
+  for (const lat of GLOBE_LATITUDES) {
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= 72; i++) {
+      const lon = (i / 72) * 360 - 180;
+      const point = projectSphere(lat, lon, lonOffset, radius);
+      if (!isFrontFacing(point.z, radius, 0.02)) {
+        started = false;
+        continue;
       }
+      const x = cx + point.x;
+      const y = cy + point.y;
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else ctx.lineTo(x, y);
     }
-    if (segment.length > 1) rings.push(segment.join(" "));
+    ctx.globalAlpha = 0.16;
+    ctx.stroke();
   }
-  return rings;
+
+  for (const lon of GLOBE_MERIDIANS) {
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= 40; i++) {
+      const lat = 6 + (i / 40) * 80;
+      const point = projectSphere(lat, lon, lonOffset, radius);
+      if (!isFrontFacing(point.z, radius, 0.02)) {
+        started = false;
+        continue;
+      }
+      const x = cx + point.x;
+      const y = cy + point.y;
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else ctx.lineTo(x, y);
+    }
+    ctx.globalAlpha = 0.1;
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = compact ? accent : core;
+  for (const dot of dots) {
+    const point = projectSphere(dot.lat, dot.lon, lonOffset, radius);
+    if (!isFrontFacing(point.z, radius, 0.02)) continue;
+    const depth = (point.z / radius + 1) / 2;
+    ctx.globalAlpha = (compact ? 0.12 : 0.2) + depth * (compact ? 0.4 : 0.72);
+    const size = dot.size * (compact ? 0.62 : 1) * (0.62 + depth * 0.55);
+    ctx.beginPath();
+    ctx.arc(cx + point.x, cy + point.y, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const nodes = projectNodes(lonOffset, radius);
+  const active = activeNodeIndex(phase);
+  for (const node of nodes) {
+    if (!node.visible) continue;
+    const isActive = node.index === active;
+    const fading = phase.kind === "settle" && node.index === phase.from;
+    if (compact && !isActive) continue;
+    ctx.beginPath();
+    ctx.arc(cx + node.x, cy + node.y, isActive ? (compact ? 3 : 4.4) : 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = isActive ? core : accent;
+    ctx.globalAlpha = isActive ? 1 : fading ? 0.28 : 0.2;
+    ctx.fill();
+    if (isActive) {
+      ctx.beginPath();
+      ctx.arc(cx + node.x, cy + node.y, compact ? 6 : 8, 0, Math.PI * 2);
+      ctx.globalAlpha = compact ? 0.14 : 0.22;
+      ctx.fill();
+    }
+  }
+
+  if (!reducedMotion && !compact && phase.kind === "travel") {
+    const from = nodes[phase.from];
+    const to = nodes[phase.to];
+    if (from?.visible && to?.visible) {
+      const trail = cometTrailPoints(
+        { x: cx + from.x, y: cy + from.y },
+        { x: cx + to.x, y: cy + to.y },
+        phase.progress,
+      );
+      for (const spark of trail.trail) {
+        ctx.beginPath();
+        ctx.arc(spark.x, spark.y, spark.r, 0, Math.PI * 2);
+        ctx.fillStyle = core;
+        ctx.globalAlpha = spark.o;
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(trail.head.x, trail.head.y, 3.1, 0, Math.PI * 2);
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = core;
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
 }
 
 export function WorldPulseGlobe({
@@ -85,159 +187,124 @@ export function WorldPulseGlobe({
   compact?: boolean;
 }) {
   const { reducedMotion } = useTheme();
-  const uid = useId().replace(/:/g, "");
-  const spec = compact ? COMPACT : FULL;
-  const [lonOffset, setLonOffset] = useState(18);
-  const [active, setActive] = useState(0);
-  const [previous, setPrevious] = useState(0);
-  const [progress, setProgress] = useState(1);
-  const travelRef = useRef<number | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dotsRef = useRef<GlobeDot[]>(buildGlobeDots(compact));
 
   useEffect(() => {
-    if (reducedMotion) return;
-    let frame = 0;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const handles: LoopHandles = { frame: 0, observer: null };
+    let visible = true;
+    let pageVisible = typeof document === "undefined" ? true : document.visibilityState !== "hidden";
+    let lonOffset = compact ? 28 : 18;
+    let phase: CometPhase = createHoldPhase(0);
     let last = 0;
-    const tick = (now: number) => {
-      if (!last) last = now;
-      if (now - last > 90) {
-        setLonOffset((value) => (value + ((now - last) / REV_MS) * 360) % 360);
-        last = now;
+    const dots = dotsRef.current;
+
+    const cssSize = () => {
+      const parent = canvas.parentElement;
+      return {
+        width: parent?.clientWidth || (compact ? 280 : 1100),
+        height: parent?.clientHeight || (compact ? 220 : 576),
+      };
+    };
+
+    const paint = () => {
+      const { width, height } = cssSize();
+      drawGlobe(ctx, width, height, lonOffset, phase, dots, compact, reducedMotion);
+    };
+
+    const resize = () => {
+      const { width, height } = cssSize();
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      canvas.width = Math.max(1, Math.floor(width * dpr));
+      canvas.height = Math.max(1, Math.floor(height * dpr));
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      paint();
+    };
+
+    const stop = () => {
+      if (handles.frame) {
+        cancelAnimationFrame(handles.frame);
+        handles.frame = 0;
       }
-      frame = requestAnimationFrame(tick);
+      last = 0;
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [reducedMotion]);
 
-  useEffect(() => {
-    if (reducedMotion || NODES.length < 2) return;
-    const interval = window.setInterval(() => {
-      setActive((current) => {
-        const next = (current + 1) % NODES.length;
-        setPrevious(current);
-        setProgress(0);
-        const started = performance.now();
-        if (travelRef.current) cancelAnimationFrame(travelRef.current);
-        const step = (now: number) => {
-          const t = Math.min(1, (now - started) / TRAVEL_MS);
-          setProgress(t);
-          if (t < 1) travelRef.current = requestAnimationFrame(step);
-        };
-        travelRef.current = requestAnimationFrame(step);
-        return next;
+    const tick = (now: number) => {
+      handles.frame = 0;
+      if (!visible || !pageVisible || reducedMotion) {
+        paint();
+        return;
+      }
+      if (!last) last = now;
+      const dt = Math.min(48, now - last);
+      last = now;
+      lonOffset = (lonOffset + (dt / GLOBE_REV_MS) * 360) % 360;
+      if (!compact) {
+        const { radius } = globeLayout(cssSize().width, cssSize().height, compact);
+        const nodes = projectNodes(lonOffset, radius);
+        phase = advanceCometPhase(phase, dt, nodes, {
+          holdMs: GLOBE_HOLD_MS,
+          travelMs: GLOBE_TRAVEL_MS,
+          settleMs: GLOBE_SETTLE_MS,
+        });
+      }
+      paint();
+      handles.frame = requestAnimationFrame(tick);
+    };
+
+    const start = () => {
+      if (reducedMotion || handles.frame) return;
+      last = 0;
+      handles.frame = requestAnimationFrame(tick);
+    };
+
+    const syncLoop = () => {
+      if (visible && pageVisible && !reducedMotion) start();
+      else {
+        stop();
+        paint();
+      }
+    };
+
+    resize();
+    const onResize = () => resize();
+    window.addEventListener("resize", onResize);
+    const onVisibility = () => {
+      pageVisible = document.visibilityState !== "hidden";
+      syncLoop();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    if (typeof IntersectionObserver !== "undefined") {
+      handles.observer = new IntersectionObserver((entries) => {
+        visible = entries.some((entry) => entry.isIntersecting);
+        syncLoop();
       });
-    }, HOLD_MS);
-    return () => {
-      window.clearInterval(interval);
-      if (travelRef.current) cancelAnimationFrame(travelRef.current);
-    };
-  }, [reducedMotion]);
+      handles.observer.observe(canvas);
+    }
+    syncLoop();
 
-  const dots = useMemo(
-    () => projectDots(lonOffset, spec.size, spec.radius, spec.lonSteps, spec.latSteps),
-    [lonOffset, spec.latSteps, spec.lonSteps, spec.radius, spec.size],
-  );
-  const rings = useMemo(
-    () => latitudeRings(lonOffset, spec.size, spec.radius),
-    [lonOffset, spec.radius, spec.size],
-  );
-  const cx = spec.size / 2;
-  const projectedNodes = NODES.map((node) => {
-    const point = project(node.lat, node.lon, lonOffset, cx, spec.radius);
-    return { ...point, visible: point.z > spec.radius * 0.08 };
-  });
-  const from = projectedNodes[previous];
-  const to = projectedNodes[active];
-  const traveling =
-    !reducedMotion && progress < 1 && from && to && from.z > -spec.radius * 0.18 && to.z > -spec.radius * 0.18;
+    return () => {
+      window.removeEventListener("resize", onResize);
+      document.removeEventListener("visibilitychange", onVisibility);
+      stop();
+      handles.observer?.disconnect();
+    };
+  }, [compact, reducedMotion]);
 
   return (
-    <div className={`relative flex h-full w-full items-center justify-center ${className}`} aria-hidden>
+    <div className={`relative h-full w-full overflow-hidden ${className}`} aria-hidden data-testid="dotted-globe">
       <div
-        className="pointer-events-none absolute inset-[8%] opacity-80 blur-3xl"
-        style={{
-          background: "radial-gradient(circle at 50% 58%, var(--halo), transparent 64%)",
-        }}
+        className="pointer-events-none absolute inset-x-[10%] bottom-[-20%] h-[80%] opacity-70 blur-3xl"
+        style={{ background: "radial-gradient(circle at 50% 40%, var(--halo), transparent 68%)" }}
       />
-      <svg
-        viewBox={`0 0 ${spec.size} ${spec.size}`}
-        className={
-          compact
-            ? "relative h-[18rem] w-[18rem] text-accent"
-            : "relative mx-auto aspect-square h-auto w-full max-h-full max-w-[40rem] text-accent"
-        }
-      >
-        <defs>
-          <radialGradient id={`cp-globe-limb-${uid}`} cx="38%" cy="34%" r="62%">
-            <stop offset="0%" stopColor="currentColor" stopOpacity="0.08" />
-            <stop offset="70%" stopColor="currentColor" stopOpacity="0.02" />
-            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-          </radialGradient>
-          <linearGradient id={`cp-comet-stroke-${uid}`} x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#c084fc" stopOpacity="0" />
-            <stop offset="50%" stopColor="#f5e9ff" stopOpacity="0.9" />
-            <stop offset="100%" stopColor="#ffffff" stopOpacity="0.2" />
-          </linearGradient>
-          <radialGradient id={`cp-comet-head-${uid}`} cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="1" />
-            <stop offset="55%" stopColor="#e9d5ff" stopOpacity="0.7" />
-            <stop offset="100%" stopColor="#a855f7" stopOpacity="0" />
-          </radialGradient>
-        </defs>
-        <circle cx={cx} cy={cx} r={spec.radius} fill={`url(#cp-globe-limb-${uid})`} />
-        <ellipse
-          cx={cx}
-          cy={cx}
-          rx={spec.radius}
-          ry={spec.radius * 0.26}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="0.45"
-          opacity="0.22"
-        />
-        <circle cx={cx} cy={cx} r={spec.radius} fill="none" stroke="currentColor" strokeWidth="0.4" opacity="0.18" />
-        {rings.map((points, index) => (
-          <polyline
-            key={`ring-${index}`}
-            points={points}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="0.35"
-            strokeDasharray="1.6 3.4"
-            opacity="0.28"
-          />
-        ))}
-        {dots.map((dot, index) => (
-          <circle key={index} cx={dot.x} cy={dot.y} r={compact ? 1.05 : 1.4} fill="currentColor" opacity={dot.opacity} />
-        ))}
-        {projectedNodes.map((node, index) => {
-          if (!node.visible) return null;
-          const isActive = index === active;
-          const isPrev = index === previous && traveling;
-          return (
-            <circle
-              key={`node-${index}`}
-              cx={node.x}
-              cy={node.y}
-              r={isActive ? 4.1 : 2.3}
-              fill={isActive ? "#ffffff" : "currentColor"}
-              opacity={isActive ? 1 : isPrev ? 0.28 : 0.22}
-              style={{
-                filter: isActive ? "drop-shadow(0 0 8px var(--halo))" : undefined,
-              }}
-            />
-          );
-        })}
-        {traveling && from && to ? (
-          <CometArc
-            from={from}
-            to={to}
-            progress={progress}
-            strokeId={`cp-comet-stroke-${uid}`}
-            headId={`cp-comet-head-${uid}`}
-          />
-        ) : null}
-      </svg>
+      <canvas ref={canvasRef} className="relative h-full w-full" />
     </div>
   );
 }
