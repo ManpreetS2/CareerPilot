@@ -37,7 +37,7 @@ export function JobPreviewPanel({
   return (
     <Glass variant="floating" className="sticky top-6 min-w-0 space-y-4 rounded-[var(--radius-lg)] p-6">
       <div className="flex min-w-0 items-start gap-4">
-        <ScoreOrb score={verified ? match?.overall_score : null} />
+        <ScoreOrb compact score={verified ? match?.overall_score : null} />
         <div className="min-w-0">
           <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
           <h2 className="wrap-anywhere font-display text-2xl font-semibold">{job.title}</h2>
@@ -62,7 +62,7 @@ export function JobPreviewPanel({
         </div>
       </div>
 
-      <section className="rounded-[var(--radius-md)] border border-border/70 bg-surface/80 p-4">
+      <section className="paper-surface p-4">
         <p className="cp-kicker">CareerPilot verdict</p>
         {verified && match ? (
           <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">

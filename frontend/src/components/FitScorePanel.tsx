@@ -48,7 +48,9 @@ export function FitScorePanel({
             Fit score
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-        description="Scoring uses the stored candidate profile and a complete JobRequirementProfile when one exists. Find Jobs ranks with a fast preliminary score. Calculate Fit produces Verified Fit after the full posting is read."
+            Scoring uses the stored candidate profile and a complete requirement profile when one
+            exists. Discover ranks with a fast preliminary score. Calculate Fit produces Verified
+            Fit after the full posting is read.
           </p>
         </div>
         <button
@@ -66,7 +68,7 @@ export function FitScorePanel({
       {missingProfile ? (
         <div
           role="alert"
-          className="card mb-4 border-amber-300/70 bg-amber-50/80 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
+          className="notice-warning mb-4 rounded-[var(--radius-md)] p-4"
         >
           <p className="font-semibold">Build a candidate profile before calculating fit.</p>
           <Link className="mt-2 inline-flex font-semibold underline" to="/profile">

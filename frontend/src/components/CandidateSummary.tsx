@@ -129,7 +129,7 @@ function ChipSection({ title, items }: { title: string; items: string[] }) {
           {items.map((item) => (
             <span
               key={item}
-              className="rounded-lg bg-accent-50 px-2.5 py-1 text-xs font-semibold text-accent-800 dark:bg-accent-900/30 dark:text-accent-200"
+              className="chip"
             >
               {item}
             </span>

@@ -333,28 +333,28 @@ export function JobDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <Link to={jobsListPath()} className="btn-ghost h-9 px-2">
+        <Link to={jobsListPath()} className="btn-ghost min-h-11 px-3">
           Back to Jobs
         </Link>
         <div className="flex flex-wrap items-center gap-2">
         {neighbors.prev ? (
-          <Link to={`/jobs/${neighbors.prev}`} className="btn-ghost h-9 px-2">
+          <Link to={`/jobs/${neighbors.prev}`} className="btn-ghost min-h-11 px-3">
             <ChevronLeft className="h-4 w-4" aria-hidden />
             Previous job
           </Link>
         ) : (
-          <button type="button" className="btn-ghost h-9 px-2" disabled>
+          <button type="button" className="btn-ghost min-h-11 px-3" disabled>
             <ChevronLeft className="h-4 w-4" aria-hidden />
             Previous job
           </button>
         )}
         {neighbors.next ? (
-          <Link to={`/jobs/${neighbors.next}`} className="btn-ghost h-9 px-2">
+          <Link to={`/jobs/${neighbors.next}`} className="btn-ghost min-h-11 px-3">
             Next job
             <ChevronRight className="h-4 w-4" aria-hidden />
           </Link>
         ) : (
-          <button type="button" className="btn-ghost h-9 px-2" disabled>
+          <button type="button" className="btn-ghost min-h-11 px-3" disabled>
             Next job
             <ChevronRight className="h-4 w-4" aria-hidden />
           </button>
@@ -362,8 +362,11 @@ export function JobDetailPage() {
         </div>
       </div>
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-4">
-          <ScoreOrb score={match?.score_kind === "verified" ? match.overall_score : null} />
+        <div className="flex min-w-0 items-start gap-3">
+          <ScoreOrb
+            compact
+            score={match?.score_kind === "verified" ? match.overall_score : null}
+          />
           <div className="min-w-0">
             <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
             <h1 className="wrap-anywhere font-display text-4xl font-semibold">{job.title}</h1>
@@ -441,7 +444,7 @@ export function JobDetailPage() {
           <TabsTrigger value="evidence">Evidence</TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="mt-4 space-y-4">
-          <section className="rounded-[var(--radius-lg)] border border-border/70 bg-surface/90 p-6">
+          <section className="paper-surface p-6">
             <h2 className="font-display text-2xl font-semibold">Employer posting</h2>
             <JobFreshnessBadge
               datePosted={job.date_posted}
@@ -457,7 +460,7 @@ export function JobDetailPage() {
         </TabsContent>
         <TabsContent value="match" className="mt-4 space-y-4">
           {profile ? (
-            <section className="rounded-[var(--radius-lg)] border border-border/70 bg-surface/90 p-6 space-y-4">
+            <section className="paper-surface space-y-4 p-6">
               <h2 className="font-display text-2xl font-semibold">What they&apos;re looking for</h2>
               <JobRequirementSection
                 title="Must have"
@@ -513,7 +516,7 @@ export function JobDetailPage() {
             <h2 className="font-display text-2xl font-semibold">Verification</h2>
             <button
               type="button"
-              className="btn-ghost px-2 py-1.5 text-accent-700 dark:text-accent-300"
+              className="btn-ghost px-3 text-primary"
               onClick={() => void handleVerify()}
               disabled={verifying}
             >
