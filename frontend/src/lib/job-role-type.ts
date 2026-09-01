@@ -1,3 +1,5 @@
+import { TARGET_ROLES } from "./profile-taxonomy";
+
 export type RoleTypeFilter = "internships" | "full_time" | "both";
 
 const ROLE_TYPE_PREFIX = "role_type:";
@@ -36,18 +38,4 @@ export function writeRoleType(
   return [...rest, `${ROLE_TYPE_PREFIX}${roleType}`];
 }
 
-export const CURATED_ROLES = [
-  "Software Engineer Intern",
-  "Software Engineer",
-  "Frontend Engineer",
-  "Backend Engineer",
-  "Full-Stack Engineer",
-  "Data Analyst Intern",
-  "Data Analyst",
-  "Data Scientist",
-  "Machine Learning Engineer",
-  "Product Manager Intern",
-  "Product Manager",
-  "UX Designer",
-  "Security Engineer",
-];
+export const CURATED_ROLES = TARGET_ROLES.map((option) => option.value);

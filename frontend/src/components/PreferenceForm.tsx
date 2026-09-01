@@ -1,8 +1,9 @@
 import { useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Save } from "lucide-react";
 import { ErrorBanner } from "./ErrorBanner";
+import { GuidedCombobox } from "./GuidedCombobox";
 import { LockIn } from "./signature/LockIn";
 import {
   formToPreferences,
@@ -10,7 +11,18 @@ import {
   preferencesToForm,
   type PreferenceFormValues,
 } from "../lib/preferences-schema";
-import { CURATED_ROLES } from "../lib/job-role-type";
+import {
+  ACADEMIC_YEARS,
+  DEGREE_TYPES,
+  EXPERIENCE_LEVELS,
+  FIELDS_OF_STUDY,
+  INDUSTRIES,
+  OPPORTUNITY_PREFERENCES,
+  SUGGESTED_LOCATIONS,
+  SUGGESTED_SKILLS,
+  TARGET_ROLES,
+  WORK_SETUPS,
+} from "../lib/profile-taxonomy";
 import { isLegacyHourlySalary } from "../lib/session";
 import type { TargetPreferences } from "../lib/types";
 
@@ -61,7 +73,7 @@ export function PreferenceForm({
 
   return (
     <form
-      className="space-y-4"
+      className="space-y-5"
       onSubmit={form.handleSubmit(async (values) => {
         await onSave(formToPreferences(values, preferences));
       })}
@@ -82,51 +94,176 @@ export function PreferenceForm({
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="md:col-span-2">
-          <label>
-            <span className="label">Target roles</span>
-            <input className="input" {...form.register("targetRoles")} placeholder="Add a role, then press a suggestion or type your own" />
-          </label>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {CURATED_ROLES.map((role) => (
-              <button
-                key={role}
-                type="button"
-                className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-muted"
-                onClick={() => {
-                  const current = form.getValues("targetRoles");
-                  const parts = current.split(",").map((item) => item.trim()).filter(Boolean);
-                  if (!parts.some((item) => item.toLowerCase() === role.toLowerCase())) {
-                    form.setValue("targetRoles", [...parts, role].join(", "), { shouldValidate: true });
-                  }
-                }}
-              >
-                {role}
-              </button>
-            ))}
-          </div>
+          <Controller
+            control={form.control}
+            name="targetRoles"
+            render={({ field }) => (
+              <GuidedCombobox
+                id="pref-target-roles"
+                label="Target roles"
+                values={field.value}
+                onChange={field.onChange}
+                options={TARGET_ROLES}
+                placeholder="Search roles or add your own"
+              />
+            )}
+          />
+        </div>
+        <Controller
+          control={form.control}
+          name="fieldOfStudy"
+          render={({ field }) => (
+            <GuidedCombobox
+              id="pref-major"
+              label="Major / field of study"
+              values={field.value ? [field.value] : []}
+              onChange={(next) => field.onChange(next[0] ?? "")}
+              options={FIELDS_OF_STUDY}
+              multiple={false}
+              placeholder="Search majors or add your own"
+            />
+          )}
+        />
+        <Controller
+          control={form.control}
+          name="degreePursuing"
+          render={({ field }) => (
+            <GuidedCombobox
+              id="pref-degree"
+              label="Degree type"
+              values={field.value ? [field.value] : []}
+              onChange={(next) => field.onChange(next[0] ?? "")}
+              options={DEGREE_TYPES}
+              multiple={false}
+              placeholder="Search degrees or add your own"
+            />
+          )}
+        />
+        <Controller
+          control={form.control}
+          name="industries"
+          render={({ field }) => (
+            <GuidedCombobox
+              id="pref-industries"
+              label="Industries"
+              values={field.value}
+              onChange={field.onChange}
+              options={INDUSTRIES}
+              placeholder="Search industries or add your own"
+            />
+          )}
+        />
+        <Controller
+          control={form.control}
+          name="experienceLevels"
+          render={({ field }) => (
+            <GuidedCombobox
+              id="pref-experience"
+              label="Experience level"
+              values={field.value}
+              onChange={field.onChange}
+              options={EXPERIENCE_LEVELS}
+              placeholder="Search levels or add your own"
+            />
+          )}
+        />
+        <Controller
+          control={form.control}
+          name="workModes"
+          render={({ field }) => (
+            <GuidedCombobox
+              id="pref-work-setup"
+              label="Work setup"
+              values={field.value}
+              onChange={field.onChange}
+              options={WORK_SETUPS}
+              placeholder="Remote, hybrid, or onsite"
+            />
+          )}
+        />
+        <Controller
+          control={form.control}
+          name="opportunityPreference"
+          render={({ field }) => (
+            <GuidedCombobox
+              id="pref-opportunity"
+              label="Opportunity preference"
+              values={field.value ? [field.value] : []}
+              onChange={(next) => field.onChange((next[0] as PreferenceFormValues["opportunityPreference"]) || "both")}
+              options={OPPORTUNITY_PREFERENCES}
+              multiple={false}
+              allowCustom={false}
+              placeholder="Internships, roles, or both"
+            />
+          )}
+        />
+        <Controller
+          control={form.control}
+          name="academicYear"
+          render={({ field }) => (
+            <GuidedCombobox
+              id="pref-academic-year"
+              label="Academic year"
+              values={field.value ? [field.value] : []}
+              onChange={(next) => field.onChange(next[0] ?? "")}
+              options={ACADEMIC_YEARS}
+              multiple={false}
+              placeholder="Year in program"
+            />
+          )}
+        />
+        <label>
+          <span className="label">Expected graduation</span>
+          <input
+            className="input min-h-11"
+            {...form.register("expectedGraduation")}
+            placeholder="2027 or 2027-05"
+          />
+        </label>
+        <div className="md:col-span-2">
+          <Controller
+            control={form.control}
+            name="locations"
+            render={({ field }) => (
+              <GuidedCombobox
+                id="pref-locations"
+                label="Locations"
+                values={field.value}
+                onChange={field.onChange}
+                options={SUGGESTED_LOCATIONS}
+                placeholder="Search cities or add any location"
+                description="Suggestions are optional. You can add any city or region."
+              />
+            )}
+          />
+        </div>
+        <div className="md:col-span-2">
+          <Controller
+            control={form.control}
+            name="skills"
+            render={({ field }) => (
+              <GuidedCombobox
+                id="pref-skills"
+                label="Skills"
+                values={field.value}
+                onChange={field.onChange}
+                options={SUGGESTED_SKILLS}
+                placeholder="Add a skill"
+                description="Suggestions are a short CareerPilot list, not every possible skill."
+              />
+            )}
+          />
         </div>
         <label>
-          <span className="label">Preferred location</span>
-          <input className="input" {...form.register("location")} placeholder="City, state, or Remote" />
-        </label>
-        <label>
-          <span className="label">Role type</span>
-          <select className="input" {...form.register("roleType")}>
-            <option value="both">Internships and full-time</option>
-            <option value="internships">Internships</option>
-            <option value="full_time">Full-time roles</option>
-          </select>
-        </label>
-        <label>
           <span className="label">Minimum base salary (annual USD)</span>
-          <input className="input tabular" type="number" min={10000} max={1000000} step={5000} {...form.register("salaryMin")} />
+          <input className="input min-h-11 tabular" type="number" min={10000} max={1000000} step={5000} {...form.register("salaryMin")} />
           <span className="mt-1 block text-xs text-muted-foreground">
             {salaryPreview ?? "Enter an annual amount (for example 100000)."}
           </span>
         </label>
         <label>
           <span className="label">Work authorization</span>
-          <select className="input" {...form.register("workAuth")}>
+          <select className="input min-h-11" {...form.register("workAuth")}>
             <option value="">Select work authorization…</option>
             <option value="US Citizen">US Citizen</option>
             <option value="US Permanent Resident">US Permanent Resident</option>
@@ -135,50 +272,32 @@ export function PreferenceForm({
           </select>
         </label>
         <label>
-          <span className="label">Remote preference</span>
-          <select className="input" {...form.register("remotePreference")}>
-            <option value="">No preference selected…</option>
-            <option value="remote">Remote</option>
-            <option value="hybrid_or_remote">Hybrid or remote</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="onsite">Onsite</option>
-          </select>
-        </label>
-        <label>
           <span className="label">Legal name (if different)</span>
-          <input className="input" {...form.register("legalName")} />
+          <input className="input min-h-11" {...form.register("legalName")} />
         </label>
         <label>
           <span className="label">LinkedIn URL</span>
-          <input className="input" {...form.register("linkedinUrl")} />
+          <input className="input min-h-11" {...form.register("linkedinUrl")} />
         </label>
         <label>
           <span className="label">GitHub URL</span>
-          <input className="input" {...form.register("githubUrl")} />
+          <input className="input min-h-11" {...form.register("githubUrl")} />
         </label>
         <label>
           <span className="label">Portfolio / website URL</span>
-          <input className="input" {...form.register("portfolioUrl")} />
+          <input className="input min-h-11" {...form.register("portfolioUrl")} />
         </label>
         <label>
           <span className="label">Earliest start date</span>
-          <input className="input" {...form.register("earliestStartDate")} />
+          <input className="input min-h-11" {...form.register("earliestStartDate")} />
         </label>
         <label>
           <span className="label">Currently enrolled in a program?</span>
-          <select className="input" {...form.register("currentlyEnrolled")}>
+          <select className="input min-h-11" {...form.register("currentlyEnrolled")}>
             <option value="">Select…</option>
             <option value="Yes">Yes</option>
             <option value="No">No</option>
           </select>
-        </label>
-        <label>
-          <span className="label">Expected graduation</span>
-          <input className="input" {...form.register("expectedGraduation")} />
-        </label>
-        <label>
-          <span className="label">Degree currently pursuing</span>
-          <input className="input" {...form.register("degreePursuing")} />
         </label>
       </div>
 
@@ -186,11 +305,12 @@ export function PreferenceForm({
         <h3 className="font-display text-lg font-semibold">Voluntary self-identification</h3>
         <p className="mt-1 text-sm text-muted-foreground">
           Optional. Saved answers stay private to you and are not required to use CareerPilot.
+          These fields are never inferred.
         </p>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <label>
             <span className="label">Gender</span>
-            <select className="input" {...form.register("gender")}>
+            <select className="input min-h-11" {...form.register("gender")}>
               <option value="">Prefer not to say</option>
               <option value="Male">Male</option>
               <option value="Female">Female</option>
@@ -199,7 +319,7 @@ export function PreferenceForm({
           </label>
           <label>
             <span className="label">Hispanic or Latino</span>
-            <select className="input" {...form.register("raceEthnicity")}>
+            <select className="input min-h-11" {...form.register("raceEthnicity")}>
               <option value="">Prefer not to say</option>
               <option value="Yes">Yes</option>
               <option value="No">No</option>
@@ -207,7 +327,7 @@ export function PreferenceForm({
           </label>
           <label>
             <span className="label">Veteran status</span>
-            <select className="input" {...form.register("veteranStatus")}>
+            <select className="input min-h-11" {...form.register("veteranStatus")}>
               <option value="">I don&apos;t wish to answer</option>
               <option value="I am not a protected veteran">I am not a protected veteran</option>
               <option value="I identify as one or more of the classifications of a protected veteran">
@@ -217,7 +337,7 @@ export function PreferenceForm({
           </label>
           <label>
             <span className="label">Disability status</span>
-            <select className="input" {...form.register("disabilityStatus")}>
+            <select className="input min-h-11" {...form.register("disabilityStatus")}>
               <option value="">I do not want to answer</option>
               <option value="Yes, I have a disability, or have had one in the past">
                 Yes, I have (or have had) a disability
@@ -230,7 +350,7 @@ export function PreferenceForm({
         </div>
       </div>
 
-      <button type="submit" className="btn-secondary" disabled={saving}>
+      <button type="submit" className="btn-secondary min-h-11" disabled={saving}>
         <Save className="h-4 w-4" aria-hidden />
         {saving ? "Saving…" : "Save job preferences"}
       </button>
