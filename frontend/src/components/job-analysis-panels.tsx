@@ -4,7 +4,7 @@ import { chipLabel } from "../lib/search-intent";
 
 export function PotentialMatchBadge() {
   return (
-    <span className="status-pill bg-ink-100 text-ink-700 dark:bg-ink-800 dark:text-ink-200">Potential Match</span>
+    <span className="status-pill bg-muted text-foreground">Potential Match</span>
   );
 }
 
@@ -112,7 +112,7 @@ export function JobRequirementSection({
   return (
     <div>
       <h3 className="text-sm font-semibold">{title}</h3>
-      <ul className="mt-2 space-y-1 text-sm text-ink-700 dark:text-ink-200">
+      <ul className="mt-2 space-y-1 text-sm text-foreground">
         {items.map((item) => (
           <li key={typeof item === "string" ? item : item.id}>
             {typeof item === "string" ? item : item.text}

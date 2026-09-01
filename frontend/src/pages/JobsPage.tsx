@@ -10,6 +10,7 @@ import { JobPreviewPanel } from "../components/JobPreviewPanel";
 import { JobsFilterPanel } from "../components/JobsFilterPanel";
 import { LoadingState } from "../components/LoadingState";
 import { NaturalSearchBar, type FilterChip } from "../components/NaturalSearchBar";
+import { DashboardAtmosphere } from "../components/DashboardAtmosphere";
 import { Glass } from "../components/ui/glass";
 import { PageHeader } from "../components/ui/page-header";
 import { api } from "../lib/api";
@@ -409,7 +410,9 @@ export function JobsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      <DashboardAtmosphere showGlobe={false} />
+      <div className="relative z-[1]">
       <PageHeader
         title="Jobs"
         description="Discover what's available, then open Matches for your personal ranking. Verified Fit appears only after CareerPilot reads the complete posting."
@@ -515,14 +518,23 @@ export function JobsPage() {
         </Glass>
       ) : null}
 
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Jobs workspace">
+      <div
+        className="inline-flex flex-wrap gap-1 rounded-2xl border border-border/80 bg-foreground/[0.03] p-1 backdrop-blur-md"
+        role="tablist"
+        aria-label="Jobs workspace"
+      >
         {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
             role="tab"
             aria-selected={state.tab === tab.id}
-            className={cn("btn-secondary", state.tab === tab.id && "btn-primary")}
+            className={cn(
+              "rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors",
+              state.tab === tab.id
+                ? "bg-gradient-to-r from-primary to-accent text-primary-foreground shadow-md shadow-primary/25"
+                : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+            )}
             onClick={() => patch({ tab: tab.id, page: 1, selected: isDesktop ? state.selected : null })}
           >
             {tab.label}
@@ -660,6 +672,7 @@ export function JobsPage() {
       <p className="sr-only" aria-live="polite">
         {navIds.length} jobs in the current result set.
       </p>
+      </div>
     </div>
   );
 }

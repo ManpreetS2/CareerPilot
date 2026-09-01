@@ -47,7 +47,7 @@ export function FitScorePanel({
           <h2 id="fit-score-heading" className="font-display text-2xl font-semibold">
             Fit score
           </h2>
-          <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+          <p className="mt-1 text-sm text-muted-foreground">
         description="Scoring uses the stored candidate profile and a complete JobRequirementProfile when one exists. Find Jobs ranks with a fast preliminary score. Calculate Fit produces Verified Fit after the full posting is read."
           </p>
         </div>
@@ -83,7 +83,7 @@ export function FitScorePanel({
       ) : null}
 
       {!loading && !match ? (
-        <p className="text-sm text-ink-500">No fit score yet. Calculate fit to generate one.</p>
+        <p className="text-sm text-muted-foreground">No fit score yet. Calculate fit to generate one.</p>
       ) : null}
 
       {match && !loading ? <ScoreAssembly match={match} assembling={assembling} /> : null}

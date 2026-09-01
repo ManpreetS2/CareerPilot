@@ -57,8 +57,8 @@ export function EncryptionSection() {
       />
 
       <div className="relative z-10 mx-auto max-w-2xl text-center">
-        <div className="mb-6 inline-flex rounded-2xl border border-purple-400/20 bg-purple-500/10 p-4">
-          <Shield className="h-10 w-10 text-purple-300" strokeWidth={1.5} />
+        <div className="mb-6 inline-flex rounded-2xl border border-primary/25 bg-primary/10 p-4">
+          <Shield className="h-10 w-10 text-primary" strokeWidth={1.5} />
         </div>
         <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
           Your resume stays protected

@@ -37,7 +37,7 @@ export function MatchBadge({
 }) {
   if (score == null) {
     return (
-      <span className="status-pill bg-muted text-muted-foreground">
+      <span className="status-pill border border-border/70 bg-muted/80 text-muted-foreground">
         Not scored
       </span>
     );
@@ -47,7 +47,7 @@ export function MatchBadge({
   const verified = scoreKind === "verified";
   if (!verified) {
     return (
-      <span className="status-pill bg-muted text-muted-foreground">
+      <span className="status-pill border border-border/70 bg-muted/80 text-muted-foreground">
         Potential Match
         {!compact && apply ? ` · ${apply}` : ""}
       </span>
@@ -56,10 +56,10 @@ export function MatchBadge({
 
   const tone =
     score >= 80
-      ? "bg-muted text-primary"
+      ? "border-primary/30 bg-primary/10 text-primary"
       : score >= 65
-        ? "bg-muted text-warning"
-        : "bg-muted text-danger";
+        ? "border-warning/30 bg-warning/10 text-warning"
+        : "border-danger/30 bg-danger/10 text-danger";
 
   const tier = matchTier ? TIER_LABEL[matchTier] : null;
   const confidence = confidenceLevel ? CONFIDENCE_LABEL[confidenceLevel] : null;

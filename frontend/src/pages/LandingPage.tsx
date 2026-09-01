@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowRight, CheckCircle2, Lock, Sparkles } from "lucide-react";
-import { HeroGlow } from "../components/HeroGlow";
+import { HeroAtmosphere } from "../components/HeroAtmosphere";
+import { HeroBlackHole } from "../components/HeroBlackHole";
 import { EncryptionSection } from "../components/EncryptionSection";
 import { DottedGlobe } from "../components/DottedGlobe";
 import { Glass } from "../components/ui/glass";
@@ -61,10 +62,13 @@ export function LandingPage() {
         </div>
       </header>
 
-      <main className="safe-pad relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <section className="relative py-16 sm:py-24">
-          <HeroGlow />
-          <div className="relative mx-auto max-w-4xl text-center">
+      <main className="relative z-10">
+        <section className="relative h-[100svh] min-h-[40rem] overflow-hidden pt-8 sm:pt-12">
+          <HeroAtmosphere />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[52vh] min-h-[16rem]">
+            <HeroBlackHole />
+          </div>
+          <div className="safe-pad relative z-10 mx-auto max-w-4xl px-4 pb-8 text-center sm:px-6 lg:px-8">
             <motion.div
               initial={reduce ? false : { opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -76,7 +80,7 @@ export function LandingPage() {
             </motion.div>
 
             <motion.h1
-              className="text-5xl font-bold leading-tight tracking-tight text-foreground sm:text-6xl lg:text-7xl"
+              className="hero-fluid font-bold leading-tight tracking-tight text-foreground"
               initial={reduce ? false : { opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: reduce ? 0 : 0.1 }}
@@ -119,12 +123,12 @@ export function LandingPage() {
             </motion.div>
 
             <motion.div
-              className="mt-16"
+              className="mt-10"
               initial={reduce ? false : { opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: reduce ? 0 : 0.4 }}
             >
-              <Glass variant="floating" className="rounded-3xl p-8 sm:p-12">
+              <Glass variant="floating" className="rounded-3xl p-6 sm:p-8">
                 <div className="grid gap-6 sm:grid-cols-3">
                   <div className="text-center">
                     <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
@@ -159,79 +163,85 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="py-16">
-          <EncryptionSection />
-        </section>
+        <div className="safe-pad mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <section className="py-8 sm:py-12">
+            <EncryptionSection />
+          </section>
+        </div>
 
-        <section className="py-16">
-          <div className="mx-auto max-w-3xl text-center">
+        <section className="relative overflow-hidden py-16 sm:py-20">
+          <div className="safe-pad mx-auto max-w-3xl px-4 text-center sm:px-6">
             <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
               Opportunities across every industry
             </h2>
             <p className="mt-4 text-lg text-muted-foreground">
               Helping job seekers everywhere navigate their next career move with confidence
             </p>
-            <div className="mt-12">
-              <DottedGlobe />
-            </div>
+          </div>
+          <div className="relative mx-auto mt-4 flex h-[26rem] w-full max-w-5xl items-center justify-center sm:h-[34rem] lg:h-[40rem]">
+            <DottedGlobe />
           </div>
         </section>
 
-        <section className="border-t border-border py-20">
-          <div className="mx-auto max-w-5xl">
-            <h2 className="mb-12 text-center text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-              How CareerPilot works
-            </h2>
-            <div className="space-y-8">
-              {capabilities.map((item, index) => (
-                <motion.div
-                  key={item.title}
-                  initial={reduce ? false : { opacity: 0, x: -20 }}
-                  whileInView={{ opacity: 1, x: 0 }}
-                  viewport={{ once: true, margin: "-100px" }}
-                  transition={{ duration: 0.5, delay: index * 0.1 }}
-                >
-                  <Glass variant="surface" className="rounded-2xl p-6">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent font-semibold text-primary-foreground">
-                        {index + 1}
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
-                        <p className="mt-2 leading-relaxed text-muted-foreground">{item.body}</p>
-                      </div>
-                    </div>
-                  </Glass>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="py-20">
-          <Glass variant="floating" className="rounded-3xl p-12 text-center">
-            <div className="mx-auto max-w-2xl">
-              <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                Ready to navigate your next role?
+        <div className="safe-pad mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <section className="border-t border-border py-20">
+            <div className="mx-auto max-w-5xl">
+              <h2 className="mb-12 text-center text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+                How CareerPilot works
               </h2>
-              <p className="mt-4 text-lg text-muted-foreground">
-                Join CareerPilot today and start making smarter career decisions
-              </p>
-              <Link
-                to="/signup"
-                className="mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-10 py-5 text-lg font-semibold text-primary-foreground shadow-2xl shadow-primary/40 transition-all hover:scale-105 hover:shadow-primary/50"
-              >
-                Get Started Free
-                <ArrowRight className="h-5 w-5" />
-              </Link>
+              <div className="space-y-8">
+                {capabilities.map((item, index) => (
+                  <motion.div
+                    key={item.title}
+                    initial={reduce ? false : { opacity: 0, x: -20 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    viewport={{ once: true, margin: "-100px" }}
+                    transition={{ duration: 0.5, delay: index * 0.1 }}
+                  >
+                    <Glass variant="surface" className="rounded-2xl p-6">
+                      <div className="flex items-start gap-4">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent font-semibold text-primary-foreground">
+                          {index + 1}
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
+                          <p className="mt-2 leading-relaxed text-muted-foreground">{item.body}</p>
+                        </div>
+                      </div>
+                    </Glass>
+                  </motion.div>
+                ))}
+              </div>
             </div>
-          </Glass>
-        </section>
+          </section>
+
+          <section className="py-20">
+            <Glass variant="floating" className="rounded-3xl p-12 text-center">
+              <div className="mx-auto max-w-2xl">
+                <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+                  Ready to navigate your next role?
+                </h2>
+                <p className="mt-4 text-lg text-muted-foreground">
+                  Join CareerPilot today and start making smarter career decisions
+                </p>
+                <Link
+                  to="/signup"
+                  className="mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-10 py-5 text-lg font-semibold text-primary-foreground shadow-2xl shadow-primary/40 transition-all hover:scale-105 hover:shadow-primary/50"
+                >
+                  Get Started Free
+                  <ArrowRight className="h-5 w-5" />
+                </Link>
+              </div>
+            </Glass>
+          </section>
+        </div>
       </main>
 
       <footer className="safe-pad relative z-10 border-t border-border py-8">
         <div className="mx-auto max-w-7xl px-4 text-center text-sm text-muted-foreground sm:px-6 lg:px-8">
-          <p>&copy; {new Date().getFullYear()} {APP_NAME}. All rights reserved.</p>
+          <p>
+            &copy; {new Date().getFullYear()} {APP_NAME}. All rights reserved.
+          </p>
         </div>
       </footer>
     </div>

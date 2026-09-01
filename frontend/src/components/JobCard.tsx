@@ -38,7 +38,7 @@ export function JobCard({
       className={cn(
         "card w-full p-3 text-left transition",
         selected
-          ? "job-card-selected border-primary/40 bg-primary/[0.08]"
+          ? "job-card-selected border-primary/45 bg-primary/[0.1] shadow-[0_0_24px_-12px_color-mix(in_srgb,var(--primary)_55%,transparent)]"
           : "hover:border-primary/30",
       )}
     >

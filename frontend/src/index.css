@@ -4,16 +4,16 @@
 
 :root {
   color-scheme: light;
-  --background: #f4efe6;
-  --background-elevated: #faf6ef;
-  --foreground: #2a221c;
-  --surface: #f7f2ea;
-  --surface-secondary: #efe8dc;
-  --surface-elevated: #fffdf8;
-  --muted: #e8dfd2;
-  --muted-foreground: #6b6158;
-  --border: rgba(62, 48, 36, 0.12);
-  --border-strong: rgba(62, 48, 36, 0.2);
+  --background: #f6f3fb;
+  --background-elevated: #fbf9ff;
+  --foreground: #2a2433;
+  --surface: #f8f5fc;
+  --surface-secondary: #efeaf8;
+  --surface-elevated: #fffcff;
+  --muted: #ebe4f4;
+  --muted-foreground: #5c5568;
+  --border: rgba(92, 72, 120, 0.14);
+  --border-strong: rgba(92, 72, 120, 0.22);
   --primary: #7c3aed;
   --primary-hover: #6d28d9;
   --primary-foreground: #faf7ff;
@@ -26,23 +26,23 @@
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 18px;
-  --shadow-floating: 0 24px 56px -28px rgba(62, 48, 36, 0.28), 0 0 0 1px rgba(124, 58, 237, 0.08);
+  --shadow-floating: 0 24px 56px -28px rgba(62, 48, 86, 0.22), 0 0 0 1px rgba(124, 58, 237, 0.1);
   --shadow-atmosphere: 0 36px 80px -48px rgba(124, 58, 237, 0.22);
   --shadow-glow: 0 0 48px -10px rgba(139, 92, 246, 0.28);
-  --glass-fill: rgba(255, 252, 247, 0.4);
-  --glass-fill-elevated: rgba(255, 253, 249, 0.5);
-  --glass-subtle: rgba(255, 252, 247, 0.42);
+  --glass-fill: rgba(255, 252, 255, 0.62);
+  --glass-fill-elevated: rgba(255, 253, 255, 0.74);
+  --glass-subtle: rgba(255, 252, 255, 0.5);
   --glass-surface: var(--glass-fill);
   --glass-floating: var(--glass-fill-elevated);
   --glass: var(--glass-fill);
-  --glass-border: rgba(255, 255, 255, 0.62);
-  --glass-border-strong: rgba(255, 255, 255, 0.78);
-  --glass-highlight: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.78);
+  --glass-border-strong: rgba(255, 255, 255, 0.9);
+  --glass-highlight: rgba(255, 255, 255, 0.82);
   --glass-blur: blur(22px) saturate(1.28);
-  --atmosphere-a: rgba(167, 139, 250, 0.28);
-  --atmosphere-b: rgba(196, 181, 253, 0.18);
-  --atmosphere-c: rgba(233, 213, 255, 0.22);
-  --halo: rgba(139, 92, 246, 0.34);
+  --atmosphere-a: rgba(167, 139, 250, 0.32);
+  --atmosphere-b: rgba(196, 181, 253, 0.22);
+  --atmosphere-c: rgba(233, 213, 255, 0.28);
+  --halo: rgba(139, 92, 246, 0.28);
   --line: var(--border);
   --bg: var(--background);
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -84,8 +84,8 @@
   --shadow-floating: 0 32px 80px -28px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(139, 92, 246, 0.12), 0 0 28px -8px rgba(139, 92, 246, 0.18);
   --shadow-atmosphere: 0 48px 120px -60px rgba(139, 92, 246, 0.42);
   --shadow-glow: 0 0 42px -12px rgba(139, 92, 246, 0.35);
-  --glass-fill: rgba(18, 14, 32, 0.42);
-  --glass-fill-elevated: rgba(24, 18, 42, 0.5);
+  --glass-fill: rgba(18, 14, 32, 0.54);
+  --glass-fill-elevated: rgba(24, 18, 42, 0.62);
   --glass-subtle: rgba(18, 14, 32, 0.38);
   --glass-surface: var(--glass-fill);
   --glass-floating: var(--glass-fill-elevated);
@@ -648,7 +648,9 @@ body {
     @apply glass-working rounded-[var(--radius-md)];
   }
   .input {
-    @apply w-full rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--foreground)] outline-none;
+    @apply w-full rounded-[var(--radius-sm)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--glass-fill)_88%,transparent)] px-3 py-2.5 text-sm text-[var(--foreground)] outline-none;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     transition:
       border-color var(--motion-fast) var(--ease-standard),
       box-shadow var(--motion-fast) var(--ease-standard);
@@ -705,6 +707,120 @@ body {
   to {
     transform: rotate(360deg);
   }
+}
+
+.hero-blackhole {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.hero-blackhole-bloom {
+  position: absolute;
+  left: 50%;
+  bottom: 2%;
+  width: min(110vw, 1400px);
+  height: min(62vw, 560px);
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 55%, rgba(255, 255, 255, 0.62) 0%, rgba(232, 213, 255, 0.48) 12%, rgba(168, 85, 247, 0.4) 30%, rgba(124, 58, 237, 0.18) 58%, transparent 78%);
+  filter: blur(16px);
+  animation: blackhole-breathe 9s ease-in-out infinite;
+}
+
+.hero-blackhole-shimmer {
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  width: min(78vw, 820px);
+  height: 11rem;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent 10%, rgba(255, 255, 255, 0.38) 48%, transparent 88%);
+  filter: blur(16px);
+  mix-blend-mode: screen;
+  animation: blackhole-shimmer 12s ease-in-out infinite;
+}
+
+.hero-blackhole-haze {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 140%;
+  height: 36%;
+  transform: translateX(-50%);
+  background: linear-gradient(to top, var(--background) 6%, color-mix(in srgb, var(--primary) 22%, transparent) 50%, transparent 100%);
+  opacity: 0.55;
+}
+
+.hero-blackhole-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.hero-blackhole-core {
+  animation: blackhole-breathe 7.5s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hero-blackhole-ring {
+  animation: blackhole-ring 11s ease-in-out infinite;
+}
+
+@keyframes blackhole-breathe {
+  0%, 100% {
+    opacity: 0.82;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes blackhole-ring {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.92;
+  }
+}
+
+@keyframes blackhole-shimmer {
+  0%, 100% {
+    opacity: 0.18;
+    transform: translateX(-54%);
+  }
+  50% {
+    opacity: 0.42;
+    transform: translateX(-46%);
+  }
+}
+
+.dark .hero-blackhole-bloom {
+  background:
+    radial-gradient(ellipse at 50% 55%, rgba(255, 255, 255, 0.92) 0%, rgba(245, 233, 255, 0.62) 10%, rgba(192, 132, 252, 0.55) 28%, rgba(124, 58, 237, 0.28) 52%, transparent 76%);
+  mix-blend-mode: screen;
+}
+
+.dark .hero-blackhole-shimmer {
+  mix-blend-mode: screen;
+}
+
+.reduce-motion .hero-blackhole-bloom,
+.reduce-motion .hero-blackhole-core,
+.reduce-motion .hero-blackhole-ring,
+.reduce-motion .hero-blackhole-shimmer {
+  animation: none !important;
 }
 
 @keyframes ripple-drift {

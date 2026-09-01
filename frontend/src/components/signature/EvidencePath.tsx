@@ -27,7 +27,7 @@ function HighlightedText({ text }: { text: string }) {
 
 function StatusLabel({ kind, label }: { kind?: FactorStatus; label: string }) {
   if (kind === "unknown") {
-    return <p className="mt-1 text-sm font-semibold text-ink-600 dark:text-ink-300">? {label}</p>;
+    return <p className="mt-1 text-sm font-semibold text-muted-foreground">? {label}</p>;
   }
   if (kind === "not_satisfied") {
     return <p className="mt-1 text-sm font-semibold text-danger-600">✕ {label}</p>;

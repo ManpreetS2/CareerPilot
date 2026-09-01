@@ -35,7 +35,7 @@ export function JobPreviewPanel({
     job.employment_type && job.employment_type !== "unknown" ? chipLabel(job.employment_type) : null;
 
   return (
-    <Glass variant="working" className="sticky top-6 min-w-0 space-y-4 rounded-[var(--radius-lg)] p-6">
+    <Glass variant="floating" className="sticky top-6 min-w-0 space-y-4 rounded-[var(--radius-lg)] p-6">
       <div className="flex min-w-0 items-start gap-4">
         <ScoreOrb score={verified ? match?.overall_score : null} />
         <div className="min-w-0">
