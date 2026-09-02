@@ -17,5 +17,5 @@ playwright>=1.49.0
 google-genai>=1.0.0
 anthropic>=0.40.0
 openai>=1.55.0
-pytest>=8.3.0
+pytest>=9.1.1
 PyYAML>=6.0.2,<7.0.0
