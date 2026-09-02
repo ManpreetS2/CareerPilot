@@ -69,6 +69,11 @@ export function PrivacyPage() {
               <li>Assisted-apply / extension autofill attempt records (CareerPilot never submits the application)</li>
             </ul>
             <p>
+              Career Growth / Skills Gap insights are computed from your stored jobs, scores, and
+              evidence when you open that page. CareerPilot does not persist a separate growth
+              summary.
+            </p>
+            <p>
               Job postings and extracted job requirements are a shared catalog. They are not deleted
               when you delete your account merely because you viewed or scored them.
             </p>
