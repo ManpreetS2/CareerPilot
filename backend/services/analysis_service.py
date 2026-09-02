@@ -255,6 +255,11 @@ def _alias_pattern(alias: str) -> re.Pattern[str]:
     # except aliases that themselves contain a dot (node.js, .NET).
     if lowered == "react":
         return re.compile(rf"(?<![a-z0-9+#]){body}(?![\s-]*native)(?![a-z0-9+#])", re.I)
+    if lowered == "js":
+        # Do not treat the ".js" in React.js / Node.js as a standalone JavaScript token.
+        return re.compile(rf"(?<![a-z0-9+#.]){body}(?![a-z0-9+#])", re.I)
+    if lowered == "ts":
+        return re.compile(rf"(?<![a-z0-9+#.]){body}(?![a-z0-9+#])", re.I)
     if lowered == "java":
         return re.compile(rf"(?<![a-z0-9+#]){body}(?!script)(?![a-z0-9+#])", re.I)
     if lowered == "go":
@@ -750,10 +755,11 @@ def _match_skills(requirements: GroundedRequirements, evidence: set[str]) -> Ski
         ratio = sum(scores) / len(scores)
         return matched, partial, missing, ratio
 
-    req_m, req_p, req_miss, req_ratio = _bucket(requirements.required)
+    required_labels = _ordered_unique(list(requirements.required))
+    req_m, req_p, req_miss, req_ratio = _bucket(required_labels)
     pref_labels = _ordered_unique([*requirements.preferred, *requirements.tech_stack])
     # Keep preferred/stack labels that are not already required canonicals.
-    required_canon = {_canonical_skill_key(item) for item in requirements.required}
+    required_canon = {_canonical_skill_key(item) for item in required_labels}
     pref_labels = [
         item for item in pref_labels if _canonical_skill_key(item) not in required_canon
     ]
@@ -768,7 +774,7 @@ def _match_skills(requirements: GroundedRequirements, evidence: set[str]) -> Ski
         missing=missing,
         required_ratio=req_ratio,
         preferred_ratio=pref_ratio,
-        required_labels=list(requirements.required),
+        required_labels=required_labels,
         preferred_labels=pref_labels,
     )
 

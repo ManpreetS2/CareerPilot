@@ -471,8 +471,14 @@ export function JobDetailPage() {
                 items={profile.requirements.filter((item) => item.importance === "preferred")}
               />
               {profile.requirement_groups.map((group) => {
+                const evaluated = evidence?.groups.find((item) => item.group_id === group.id);
+                const branchStatuses = Object.fromEntries(
+                  (evidence?.evaluations ?? [])
+                    .filter((item) => item.group_id === group.id)
+                    .map((item) => [item.requirement_id, item.result]),
+                );
                 const blockers = match?.gap_reasons ?? [];
-                const groupStatus =
+                const inferred =
                   match?.score_kind !== "verified"
                     ? "unknown"
                     : blockers.some((reason) => reason === group.text || reason.includes(group.text))
@@ -480,11 +486,13 @@ export function JobDetailPage() {
                       : match?.eligibility_status === "likely_eligible"
                         ? "satisfied"
                         : "unknown";
+                const groupStatus = evaluated?.status ?? inferred;
                 return (
                   <RequirementGroupView
                     key={group.id}
                     group={group}
                     requirements={profile.requirements}
+                    statuses={branchStatuses}
                     groupStatus={groupStatus}
                   />
                 );
