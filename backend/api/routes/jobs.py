@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.api.dependencies import get_current_user
 from backend.api.profile_gate import enforce_profile_ready
+from backend.core.rate_limit import guard_expensive
 from backend.db.database import get_db
 from backend.db.models import JobRecord, User
 from backend.schemas.schemas import (
@@ -198,9 +199,12 @@ def query_jobs_route(
 
 
 @router.post("/jobs/search-intent", response_model=JobSearchIntent)
-def parse_search_intent_route(payload: ParseSearchRequest, user: User = Depends(get_current_user)) -> JobSearchIntent:
-    deterministic = parse_job_search_intent(payload.query)
-    return enrich_search_intent(payload.query, deterministic)
+def parse_search_intent_route(
+    payload: ParseSearchRequest, user: User = Depends(get_current_user)
+) -> JobSearchIntent:
+    with guard_expensive(user.id, "llm"):
+        deterministic = parse_job_search_intent(payload.query)
+        return enrich_search_intent(payload.query, deterministic)
 
 
 @router.get("/jobs/saved", response_model=list[Job])
@@ -237,6 +241,16 @@ def trigger_scout(
     fill in a blank, never to override a deliberate search.
     """
     enforce_profile_ready(db, user.id)
+    with guard_expensive(user.id, "scout"):
+        return _run_scout(what, where, db, user)
+
+
+def _run_scout(
+    what: str | None,
+    where: str | None,
+    db: Session,
+    user: User,
+) -> ScoutJobsResponse:
     consume_scout_run_stats()
     total_started = time.perf_counter()
     criteria_started = time.perf_counter()
@@ -321,21 +335,22 @@ def ingest_job_url_route(payload: IngestJobUrlRequest, user: User = Depends(get_
     if not url:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="url is required")
 
-    try:
-        raw = ingest_job_url(url)
-    except UnsafeURLError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="URL is malformed.",
-        ) from exc
-    except JobScoutError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    with guard_expensive(user.id, "ingest"):
+        try:
+            raw = ingest_job_url(url)
+        except UnsafeURLError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="URL is malformed.",
+            ) from exc
+        except JobScoutError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    job = normalize_job(raw, "manual")
-    stored = persist_jobs([job])
-    return stored[0]
+        job = normalize_job(raw, "manual")
+        stored = persist_jobs([job])
+        return stored[0]
 
 
 @router.post("/jobs/{job_id}/save", response_model=Job)

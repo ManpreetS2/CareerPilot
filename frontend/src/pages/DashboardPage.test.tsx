@@ -15,6 +15,7 @@ vi.mock("../lib/auth", () => ({
     login: vi.fn(),
     signup: vi.fn(),
     logout: vi.fn(),
+    deleteAccount: vi.fn(),
   }),
 }));
 

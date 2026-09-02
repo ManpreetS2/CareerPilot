@@ -129,3 +129,12 @@ def _block_llm_generate_during_tests(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _blank_llm_provider_order_during_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("backend.core.config.settings.llm_provider_order", "")
+
+
+@pytest.fixture(autouse=True)
+def _reset_runtime_guards() -> Generator[None, None, None]:
+    from backend.core.rate_limit import reset_runtime_guards
+
+    reset_runtime_guards()
+    yield
+    reset_runtime_guards()

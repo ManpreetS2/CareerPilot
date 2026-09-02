@@ -19,6 +19,7 @@ vi.mock("../lib/api", async (importOriginal) => {
       login: vi.fn(),
       signup: vi.fn(),
       logout: vi.fn(),
+      deleteAccount: vi.fn(),
       getProfile: vi.fn(),
       getJobs: vi.fn(),
       getStoredScores: vi.fn(),
@@ -148,5 +149,12 @@ describe("auth pages", () => {
     expect(alert.textContent).not.toContain(SECRET_PASSWORD);
     expect(alert.textContent).not.toContain("careerpilot_session=abc");
     expect(document.body.textContent).not.toContain("careerpilot_session=abc");
+  });
+
+  it("opens /privacy without requiring a session", async () => {
+    renderApp("/privacy");
+    expect(await screen.findByRole("heading", { name: "Privacy" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Log in" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
   });
 });

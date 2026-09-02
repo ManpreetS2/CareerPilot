@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user
 from backend.api.profile_gate import enforce_grounded_candidate
+from backend.core.rate_limit import guard_expensive
 from backend.db.database import get_db
 from backend.db.models import User
 from backend.schemas.job_requirements import JobRequirementProfile
@@ -111,7 +112,10 @@ def extract_job_intelligence_route(
 ) -> JobIntelligence:
     """Explicitly extract, ground, and persist requirements for one job."""
     try:
-        return extract_job_intelligence(db, job_id)
+        with guard_expensive(user.id, "llm"):
+            return extract_job_intelligence(db, job_id)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_intelligence_error(exc) from exc
 
@@ -136,9 +140,12 @@ def score_job_route(
     """Calculate and persist an explainable fit score using the request session."""
     enforce_grounded_candidate(db, user.id)
     try:
-        score_job_with_intelligence(db, job_id, user.id)
-        job = load_job(db, job_id)
-        return score_job_verified(db, job, user.id)
+        with guard_expensive(user.id, "score"):
+            score_job_with_intelligence(db, job_id, user.id)
+            job = load_job(db, job_id)
+            return score_job_verified(db, job, user.id)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         if _is_intelligence_pipeline_error(exc):
             raise _http_for_intelligence_error(exc) from exc
@@ -183,4 +190,5 @@ def extract_requirement_profile_route(
     user: User = Depends(get_current_user),
 ) -> JobRequirementProfile:
     job = load_job(db, job_id)
-    return extract_requirement_profile(db, job, force=True)
+    with guard_expensive(user.id, "llm"):
+        return extract_requirement_profile(db, job, force=True)

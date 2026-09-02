@@ -228,7 +228,10 @@ export function LandingPage() {
       <footer className="safe-pad relative z-10 border-t border-border py-8">
         <div className="mx-auto max-w-7xl px-4 text-center text-sm text-muted-foreground sm:px-6 lg:px-8">
           <p>
-            &copy; {new Date().getFullYear()} {APP_NAME}. All rights reserved.
+            &copy; {new Date().getFullYear()} {APP_NAME}. All rights reserved.{" "}
+            <Link to="/privacy" className="font-medium text-foreground underline-offset-4 hover:underline">
+              Privacy
+            </Link>
           </p>
         </div>
       </footer>

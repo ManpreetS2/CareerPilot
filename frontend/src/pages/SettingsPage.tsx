@@ -1,5 +1,9 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { ErrorBanner } from "../components/ErrorBanner";
+import { Dialog, DialogContent } from "../components/ui/dialog";
 import { PageHeader } from "../components/ui/page-header";
 import { Surface } from "../components/ui/surface";
 import { Switch } from "../components/ui/switch";
@@ -15,13 +19,33 @@ const THEMES: { id: ThemePreference; label: string; icon: typeof Sun }[] = [
 ];
 
 export function SettingsPage() {
-  const { user } = useAuth();
+  const { user, deleteAccount } = useAuth();
+  const navigate = useNavigate();
   const { preference, setPreference, appReducedMotion, setReducedMotion } = useTheme();
   const healthQuery = useQuery({
     queryKey: queryKeys.health,
     queryFn: ({ signal }) => api.health({ signal }),
     retry: false,
   });
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<unknown>(null);
+
+  async function onConfirmDelete() {
+    if (confirmation !== "DELETE") return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAccount();
+      setDeleteOpen(false);
+      navigate("/", { replace: true });
+    } catch (err) {
+      setDeleteError(err);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -71,7 +95,75 @@ export function SettingsPage() {
           <li>Human approval is required before assisted apply unlocks.</li>
           <li>CareerPilot never automatically submits an application.</li>
         </ul>
+        <p className="text-sm">
+          <Link to="/privacy" className="font-semibold text-primary">
+            Read the privacy page
+          </Link>
+        </p>
+        <div className="border-t border-border pt-4">
+          <h3 className="text-sm font-semibold text-danger">Delete account and data</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Permanently deletes your account, private records, and every sign-in session on this
+            machine&apos;s database. Shared job listings are kept. This cannot be undone.
+          </p>
+          <button
+            type="button"
+            className="btn-secondary mt-3 min-h-11 border-danger/40 text-danger"
+            onClick={() => {
+              setConfirmation("");
+              setDeleteError(null);
+              setDeleteOpen(true);
+            }}
+          >
+            Delete account and data
+          </button>
+        </div>
       </Surface>
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (deleting) return;
+          setDeleteOpen(open);
+        }}
+      >
+        <DialogContent title="Delete account and data?">
+          <p className="text-sm text-muted-foreground">
+            Type <span className="font-mono font-semibold text-foreground">DELETE</span> to confirm.
+            CareerPilot will remove your private data and revoke every session. You will be signed
+            out.
+          </p>
+          <ErrorBanner error={deleteError} heading="Couldn't delete the account" />
+          <label className="mt-4 block">
+            <span className="label">Confirmation</span>
+            <input
+              className="input"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              autoComplete="off"
+              aria-label="Type DELETE to confirm account deletion"
+            />
+          </label>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-primary min-h-11 bg-danger text-danger-foreground"
+              disabled={confirmation !== "DELETE" || deleting}
+              onClick={() => void onConfirmDelete()}
+            >
+              {deleting ? "Deleting…" : "Delete permanently"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary min-h-11"
+              disabled={deleting}
+              onClick={() => setDeleteOpen(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Surface className="space-y-4 p-6">
         <h2 className="font-display text-xl font-semibold">Accessibility</h2>

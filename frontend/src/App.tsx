@@ -11,6 +11,7 @@ import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { PrepareApplicationPage } from "./pages/PrepareApplicationPage";
+import { PrivacyPage } from "./pages/PrivacyPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { ResumePage } from "./pages/ResumePage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -41,6 +42,7 @@ export default function App() {
       <Route path="/" element={<HomeRoute />} />
       <Route path="login" element={<LoginPage />} />
       <Route path="signup" element={<SignupPage />} />
+      <Route path="privacy" element={<PrivacyPage />} />
       <Route element={<ProtectedRoute />}>
         <Route path="onboarding" element={<OnboardingPage />} />
         <Route element={<AppShell />}>

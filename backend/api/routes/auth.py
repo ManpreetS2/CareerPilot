@@ -7,6 +7,12 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user
 from backend.core.config import settings
+from backend.core.rate_limit import (
+    RateLimited,
+    clear_failed_login,
+    peek_login_allowed,
+    record_failed_login,
+)
 from backend.db.database import get_db
 from backend.db.models import User
 from backend.schemas.schemas import UserCreate, UserLogin, UserPublic
@@ -36,12 +42,27 @@ def signup(payload: UserCreate, response: Response, db: Session = Depends(get_db
 
 
 @router.post("/login", response_model=UserPublic)
-def login(payload: UserLogin, response: Response, db: Session = Depends(get_db)) -> UserPublic:
+def login(
+    payload: UserLogin, request: Request, response: Response, db: Session = Depends(get_db)
+) -> UserPublic:
+    try:
+        peek_login_allowed(request, payload.email)
+    except RateLimited as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again later.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
     user = auth_service.authenticate(db, payload.email, payload.password)
     if user is None:
+        try:
+            record_failed_login(request, payload.email)
+        except RateLimited:
+            pass
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password."
         )
+    clear_failed_login(request, payload.email)
     session = auth_service.create_session(db, user)
     _set_session_cookie(response, session)
     return UserPublic.model_validate(user)

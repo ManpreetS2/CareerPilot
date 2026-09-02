@@ -18,6 +18,7 @@ type AuthState = {
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -96,8 +97,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     bindSessionUser(null);
   }
 
+  async function deleteAccount() {
+    await api.deleteAccount();
+    await clearAuthenticatedQueryCache(queryClient);
+    clearCurrentUserSensitiveCache();
+    setUser(null);
+    bindSessionUser(null);
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, logout, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

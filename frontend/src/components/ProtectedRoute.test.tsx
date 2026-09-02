@@ -17,6 +17,7 @@ describe("ProtectedRoute", () => {
       login: vi.fn(),
       signup: vi.fn(),
       logout: vi.fn(),
+      deleteAccount: vi.fn(),
     });
     render(
       <MemoryRouter initialEntries={["/dashboard"]}>
@@ -40,6 +41,7 @@ describe("ProtectedRoute", () => {
       login: vi.fn(),
       signup: vi.fn(),
       logout: vi.fn(),
+      deleteAccount: vi.fn(),
     });
     render(
       <MemoryRouter initialEntries={["/dashboard"]}>

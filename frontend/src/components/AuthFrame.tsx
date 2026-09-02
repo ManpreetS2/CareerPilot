@@ -25,6 +25,11 @@ export function AuthFrame({
           <h1 className="font-display text-xl font-semibold">{title}</h1>
           {children}
         </Glass>
+        <p className="text-center text-xs text-muted-foreground">
+          <Link to="/privacy" className="font-medium hover:text-foreground">
+            Privacy
+          </Link>
+        </p>
       </div>
     </div>
   );

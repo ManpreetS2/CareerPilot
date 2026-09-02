@@ -55,6 +55,7 @@ from backend.services.llm_structured_schemas import candidate_profile_llm_schema
 logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB
+MAX_RESUME_TEXT_CHARS = 400_000  # generous for long CVs; finite before any LLM call
 NEAR_EMPTY_CHAR_THRESHOLD = 40
 FUZZY_RATIO_THRESHOLD = 0.72
 TOKEN_COVERAGE_THRESHOLD = 0.6
@@ -1684,6 +1685,9 @@ def _complete_profile_from_text(
     total_start: float | None = None,
 ) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
     """Extract, ground, and persist using one resume provider at a time."""
+
+    if len(extraction.text or "") > MAX_RESUME_TEXT_CHARS:
+        raise ResumeExtractionError("Resume contained too much text to process.")
 
     started = time.perf_counter() if total_start is None else total_start
 

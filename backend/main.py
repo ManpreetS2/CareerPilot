@@ -11,10 +11,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import applications, auth, candidate, health, interview, jobs, scoring, tracker
+from backend.api.routes import account, applications, auth, candidate, health, interview, jobs, scoring, tracker
 from backend.core.config import settings, validate_runtime_settings
 from backend.core.csrf import OriginCSRFMiddleware
 from backend.core.logging import setup_logging
+from backend.core.security_headers import SecurityHeadersMiddleware
 from backend.db.init_db import init_db
 
 logger = logging.getLogger(__name__)
@@ -45,9 +46,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(OriginCSRFMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(account.router)
 app.include_router(candidate.router)
 app.include_router(jobs.router)
 app.include_router(scoring.router)
@@ -68,7 +71,11 @@ def root() -> dict[str, str]:
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=dict(exc.headers) if exc.headers else None,
+    )
 
 
 _SENSITIVE_LOC = {
