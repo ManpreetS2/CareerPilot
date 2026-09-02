@@ -63,7 +63,8 @@ export function classifyAutofillFields(fields: Record<string, unknown> | null | 
     rows.push({ ...field, status: "Manual" });
     seen.add(field.key);
   }
-  rows.push({ key: "resume", label: "Resume file", status: "Unsupported" });
+  // Resume attachment is a separate owned-file workflow, not an autofill field.
+  // Do not label it Unsupported — Fill can attach an approved resume version.
   void seen;
   return rows;
 }
