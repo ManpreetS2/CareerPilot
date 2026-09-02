@@ -33,6 +33,7 @@ function renderShell(route = "/dashboard") {
               <Route path="/analyze" element={<div>Analyze empty</div>} />
               <Route path="/prepare" element={<div>Prepare empty</div>} />
               <Route path="/track" element={<div>Track body</div>} />
+              <Route path="/growth" element={<div>Growth body</div>} />
               <Route path="/profile" element={<div>Profile body</div>} />
               <Route path="/resume" element={<div>Resume body</div>} />
               <Route
@@ -78,6 +79,7 @@ describe("AppShell", () => {
       "Prepare",
       "Track",
       "Profile",
+      "Growth",
       "Resume",
       "Settings",
     ]);
@@ -169,6 +171,7 @@ describe("AppShell", () => {
       "Prepare",
       "Track",
       "Profile",
+      "Growth",
       "Resume",
       "Settings",
     ]);

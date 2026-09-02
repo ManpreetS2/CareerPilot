@@ -267,6 +267,19 @@ export function DashboardPage() {
                 Open Tracker →
               </Link>
             </Glass>
+
+            <Glass variant="panel" className="rounded-2xl p-6">
+              <h2 className="text-lg font-semibold text-foreground">Career Growth</h2>
+              <p className="mt-4 text-sm text-muted-foreground">
+                See which skills keep appearing in jobs you saved and currently match — using stored evidence only.
+              </p>
+              <Link
+                to="/growth"
+                className="mt-4 inline-block text-sm font-semibold text-primary hover:text-primary-hover"
+              >
+                Open Career Growth →
+              </Link>
+            </Glass>
           </div>
         </>
       )}
