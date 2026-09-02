@@ -14,6 +14,7 @@ import {
   PenLine,
   Settings,
   Sun,
+  TrendingUp,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -33,7 +34,7 @@ type NavItem = {
   to: string;
   label: string;
   icon: LucideIcon;
-  id: "overview" | "discover" | "analyze" | "prepare" | "track" | "profile" | "resume" | "settings";
+  id: "overview" | "discover" | "analyze" | "prepare" | "track" | "profile" | "growth" | "resume" | "settings";
 };
 
 export const WORKFLOW_NAV: NavItem[] = [
@@ -46,6 +47,7 @@ export const WORKFLOW_NAV: NavItem[] = [
 
 export const SUPPORTING_NAV: NavItem[] = [
   { id: "profile", to: "/profile", label: "Profile", icon: UserRound },
+  { id: "growth", to: "/growth", label: "Growth", icon: TrendingUp },
   { id: "resume", to: "/resume", label: "Resume", icon: FileText },
   { id: "settings", to: "/settings", label: "Settings", icon: Settings },
 ];
@@ -71,6 +73,7 @@ function isNavActive(item: NavItem, pathname: string): boolean {
   if (item.id === "prepare") return /\/jobs\/[^/]+\/prepare/.test(pathname) || pathname === "/prepare";
   if (item.id === "track") return pathname.startsWith("/track") || pathname.startsWith("/applications");
   if (item.id === "resume") return pathname.startsWith("/resume");
+  if (item.id === "growth") return pathname.startsWith("/growth") || pathname.startsWith("/career-growth");
   return pathname === item.to || pathname.startsWith(`${item.to}/`);
 }
 

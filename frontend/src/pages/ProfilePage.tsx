@@ -1,6 +1,7 @@
 import { useState, type DragEvent, type FormEvent } from "react";
 import { FileUp, Upload } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { CandidateSummary } from "../components/CandidateSummary";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { PreferenceForm } from "../components/PreferenceForm";
@@ -106,6 +107,11 @@ export function ProfilePage() {
       <PageHeader
         title="Profile"
         description="Resume-derived fields stay read-only. Upload a PDF to refresh them. Job preferences save through the real preferences API."
+        actions={
+          <Link to="/growth" className="btn-secondary">
+            Career Growth
+          </Link>
+        }
       />
 
       {profileQuery.isError ? <ErrorBanner error={profileQuery.error} heading="Could not load profile" /> : null}

@@ -14,4 +14,5 @@ export const queryKeys = {
   jobResumeVersions: (jobId: string) => ["job-resume-versions", jobId] as const,
   applications: ["applications"] as const,
   dashboardSummary: ["dashboard-summary"] as const,
+  careerGrowth: ["career-growth"] as const,
 };

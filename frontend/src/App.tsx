@@ -16,6 +16,7 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { ResumePage } from "./pages/ResumePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SignupPage } from "./pages/SignupPage";
+import { GrowthPage } from "./pages/GrowthPage";
 import { WorkflowJobRedirect } from "./pages/WorkflowJobRedirect";
 
 function HomeRoute() {
@@ -54,6 +55,8 @@ export default function App() {
           <Route path="analyze" element={<WorkflowJobRedirect kind="analyze" />} />
           <Route path="prepare" element={<WorkflowJobRedirect kind="prepare" />} />
           <Route path="track" element={<ApplicationsPage />} />
+          <Route path="growth" element={<GrowthPage />} />
+          <Route path="career-growth" element={<Navigate to="/growth" replace />} />
           <Route path="resume" element={<ResumePage />} />
           <Route path="resume/:versionId" element={<ResumePage />} />
           <Route path="settings" element={<SettingsPage />} />

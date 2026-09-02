@@ -511,3 +511,48 @@ export type MatchEvidence = {
   groups: GroupEvaluation[];
   evidence: Record<string, EvidenceRef>;
 };
+
+export type EvidenceState = "satisfied" | "partial" | "unknown" | "not_satisfied";
+export type PriorityLabel = "high" | "medium" | "low";
+export type SkillImportance = "required" | "preferred";
+
+export type CareerGrowthJobRef = {
+  job_id: string;
+  title: string;
+  company: string;
+  importance: SkillImportance;
+  evidence_state: EvidenceState;
+  saved: boolean;
+};
+
+export type SkillGrowthItem = {
+  canonical_key: string;
+  label: string;
+  jobs_count: number;
+  denominator: number;
+  required_count: number;
+  preferred_count: number;
+  satisfied_count: number;
+  partial_count: number;
+  unknown_count: number;
+  not_satisfied_count: number;
+  candidate_evidence_state: EvidenceState;
+  candidate_evidence_count: number;
+  priority: PriorityLabel;
+  reason: string;
+  suggested_action: string;
+  related_jobs: CareerGrowthJobRef[];
+};
+
+export type CareerGrowthSummary = {
+  jobs_considered: number;
+  jobs_with_current_evidence: number;
+  saved_jobs_considered: number;
+  matched_jobs_considered: number;
+  stale_jobs_excluded: number;
+  unavailable_jobs_excluded: number;
+  generated_at: string;
+  skill_gaps: SkillGrowthItem[];
+  strengths: SkillGrowthItem[];
+  notice?: string | null;
+};

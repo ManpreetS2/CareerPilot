@@ -9,6 +9,7 @@ import {
   PenLine,
   Search,
   Settings,
+  TrendingUp,
   Upload,
   UserRound,
 } from "lucide-react";
@@ -33,6 +34,7 @@ const BASE_COMMANDS: Command[] = [
   { id: "prepare", label: "Prepare", hint: "Grounded application workspace", to: "/prepare", icon: PenLine },
   { id: "track", label: "Track", hint: "Pipeline Kanban and list", to: "/track", icon: Kanban },
   { id: "profile", label: "Upload Resume", hint: "Profile workspace", to: "/profile", icon: Upload },
+  { id: "growth", label: "Career Growth", hint: "Skills gap from stored evidence", to: "/growth", icon: TrendingUp },
   { id: "resume", label: "Resume", hint: "Immutable version library", to: "/resume", icon: FileText },
   { id: "settings", label: "Settings", hint: "Appearance and privacy", to: "/settings", icon: Settings },
   { id: "profile-nav", label: "Profile", hint: "Grounded candidate record", to: "/profile", icon: UserRound },
