@@ -333,9 +333,14 @@ export function JobDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <Link to={jobsListPath()} className="btn-ghost min-h-11 px-3">
-          Back to Jobs
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to={jobsListPath()} className="btn-ghost min-h-11 px-3">
+            Back to Jobs
+          </Link>
+          <Link to="/growth" className="btn-ghost min-h-11 px-3">
+            Career Growth
+          </Link>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
         {neighbors.prev ? (
           <Link to={`/jobs/${neighbors.prev}`} className="btn-ghost min-h-11 px-3">

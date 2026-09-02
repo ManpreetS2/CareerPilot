@@ -5,6 +5,7 @@ import type {
   ApplicationTrackerItem,
   ApprovalDecision,
   ApprovalResponse,
+  CareerGrowthSummary,
   DashboardSummary,
   FormFillResult,
   HealthResponse,
@@ -326,6 +327,9 @@ export const api = {
 
   getDashboardSummary: (init?: RequestInit) =>
     request<DashboardSummary>("/api/dashboard/summary", init),
+
+  getCareerGrowth: (init?: RequestInit) =>
+    request<CareerGrowthSummary>("/api/career-growth", init),
 
   fillApplication: (jobId: string) =>
     request<FormFillResult>(`/api/jobs/${jobId}/fill-application`, {
