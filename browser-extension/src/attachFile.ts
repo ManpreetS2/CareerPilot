@@ -188,7 +188,7 @@ export async function attachDocumentInPage(payload: AttachDocumentPayload): Prom
   }
 
   function highlight(input: HTMLInputElement) {
-    input.style.outline = "2px solid #4f46e5";
+    input.style.outline = "2px solid #7c3aed";
     try {
       input.focus();
       input.scrollIntoView({ block: "center", inline: "nearest" });

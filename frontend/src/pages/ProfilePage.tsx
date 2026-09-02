@@ -108,6 +108,13 @@ export function ProfilePage() {
         description="Resume-derived fields stay read-only. Upload a PDF to refresh them. Job preferences save through the real preferences API."
       />
 
+      {profileQuery.isError ? <ErrorBanner error={profileQuery.error} heading="Could not load profile" /> : null}
+      {profileQuery.isPending && !liveCandidate ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          Loading saved profile…
+        </p>
+      ) : null}
+
       <Surface className="p-5">
         <h2 className="font-display text-lg font-semibold">Profile readiness</h2>
         <div className="mt-3">
@@ -131,7 +138,7 @@ export function ProfilePage() {
             }}
             onDragLeave={() => setDragActive(false)}
             onDrop={onDrop}
-            className={`flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-md)] border border-dashed px-6 py-10 text-center ${
+            className={`flex min-h-[11rem] cursor-pointer flex-col items-center justify-center rounded-[var(--radius-md)] border border-dashed px-6 py-10 text-center ${
               dragActive ? "border-primary bg-primary/5" : "border-border bg-surface-secondary"
             }`}
           >

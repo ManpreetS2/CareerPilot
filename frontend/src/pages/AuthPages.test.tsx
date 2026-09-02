@@ -86,7 +86,7 @@ describe("auth pages", () => {
     await userEvent.click(screen.getByRole("button", { name: "Sign up" }));
     expect(await screen.findByTestId("onboarding-step-1")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("onboarding-skip"));
-    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
   });
 
   it("returns to login after logout and can sign back in to the dashboard", async () => {
@@ -94,19 +94,19 @@ describe("auth pages", () => {
     vi.mocked(api.logout).mockResolvedValue(undefined);
     vi.mocked(api.login).mockResolvedValue(testUser);
     renderApp("/dashboard");
-    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Log out" }));
     expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Email"), testUser.email);
     await userEvent.type(screen.getByLabelText("Password"), SECRET_PASSWORD);
     await userEvent.click(screen.getByRole("button", { name: "Log in" }));
-    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
   });
 
   it("keeps the session after a reload when /api/auth/me succeeds", async () => {
     vi.mocked(api.me).mockResolvedValue(testUser);
     renderApp("/dashboard");
-    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Log in" })).not.toBeInTheDocument();
     expect(api.login).not.toHaveBeenCalled();
   });
@@ -130,7 +130,7 @@ describe("auth pages", () => {
     expect(alert).not.toHaveTextContent(SECRET_PASSWORD);
     expect(alert).not.toHaveTextContent("careerpilot_session");
     expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Dashboard" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
   });
 
   it("never puts submitted passwords or session values into a login error", async () => {

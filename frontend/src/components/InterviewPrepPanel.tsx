@@ -45,7 +45,7 @@ function AnswerPractice({ jobId, questions }: { jobId: string; questions: string
   return (
     <div className="border-t border-[var(--line)] pt-4">
       <h3 className="flex items-center gap-2 text-sm font-semibold">
-        <Sparkles className="h-4 w-4 text-accent-600 dark:text-accent-300" aria-hidden />
+        <Sparkles className="h-4 w-4 text-primary" aria-hidden />
         Practice an answer
       </h3>
       <p className="mt-1 text-sm text-muted-foreground">
@@ -97,7 +97,7 @@ function AnswerPractice({ jobId, questions }: { jobId: string; questions: string
         {feedback ? (
           <div
             role="status"
-            className="card border-accent-300/60 bg-accent-50/70 p-4 text-sm text-accent-900 dark:border-accent-800 dark:bg-accent-950/30 dark:text-accent-100"
+            className="notice rounded-[var(--radius-md)] p-4 text-sm"
           >
             {feedback.feedback}
           </div>
@@ -151,6 +151,16 @@ export function InterviewPrepPanel({
       </div>
 
       <ErrorBanner error={error} />
+      {error ? (
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={onPrepare}
+          disabled={loading || generating}
+        >
+          Retry interview prep
+        </button>
+      ) : null}
       {loading ? (
         <div role="status" aria-live="polite">
           <LoadingState label="Loading interview prep…" />

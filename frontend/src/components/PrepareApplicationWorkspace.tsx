@@ -201,8 +201,17 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
   const stalePending = materialsState === "stale_pending";
   const materialsError = materialsState === "error" ? materialsQuery.error : null;
   const approved = materials?.approval_status === "approved";
+  const nextActionLabel = staleReviewed
+    ? "Discard previous reviewed materials, then regenerate."
+    : !materials
+      ? stalePending
+        ? "Generate materials for the current profile."
+        : "Generate grounded materials for this job."
+      : approved
+        ? "Save an immutable resume version if you want a snapshot."
+        : "Review the draft, confirm eligibility, then approve. CareerPilot never submits.";
   const workflow = [
-    { id: "generate", label: "Generate", state: materials ? "complete" : "current" },
+    { id: "generate", label: "Materials", state: materials ? "complete" : "current" },
     {
       id: "review",
       label: "Review",
@@ -210,7 +219,7 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
     },
     {
       id: "approve",
-      label: "Approve",
+      label: "Approval",
       state: approved ? "complete" : materials ? "current" : "upcoming",
     },
   ] as const;
@@ -223,6 +232,9 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
           Review stored fit and grounded materials. Scoring and generation run only when you ask.
         </p>
         <WorkflowPath className="mt-4" nodes={[...workflow]} />
+        <p className="notice mt-4 rounded-[var(--radius-md)] px-4 py-3 text-sm">
+          <span className="font-semibold">Next action:</span> {nextActionLabel}
+        </p>
       </div>
 
       <ErrorBanner error={actionError ?? materialsError} />
@@ -384,13 +396,13 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
               ))}
             </ul>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <div className="rounded-[var(--radius-md)] border border-border p-4">
+              <div className="paper-surface p-4">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                   Cover letter
                 </h3>
                 <p className="mt-2 whitespace-pre-wrap text-sm">{materials.cover_letter_draft || "None"}</p>
               </div>
-              <div className="rounded-[var(--radius-md)] border border-border p-4">
+              <div className="paper-surface p-4">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                   Recruiter message
                 </h3>

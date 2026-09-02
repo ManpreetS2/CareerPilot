@@ -126,7 +126,7 @@ export function ResumeVersionPanel({
       <ErrorBanner error={downloadError} />
       <LockIn active={saved} message="Resume version saved and locked in." />
       {conflict ? (
-        <div role="alert" className="card border-accent-300/60 bg-accent-50/70 p-4 text-sm text-accent-900 dark:border-accent-800 dark:bg-accent-950/30 dark:text-accent-100">
+        <div role="alert" className="notice rounded-[var(--radius-md)] p-4 text-sm">
           {conflict}
         </div>
       ) : null}
