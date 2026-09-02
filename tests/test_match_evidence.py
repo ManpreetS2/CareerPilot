@@ -144,14 +144,16 @@ def test_missing_skill_does_not_fabricate_absence(isolated_session) -> None:
         item
         for item in payload.factors
         if item.category == "skill"
-        and item.status == "not_satisfied"
+        and item.status == "unknown"
         and item.id not in {"factor_required_skills", "factor_preferred_skills"}
+        and item.importance == "required"
     ]
     assert missing_skills
     target = missing_skills[0]
     assert target.candidate_evidence_refs == []
     assert "does not know" not in target.explanation.lower()
-    assert "no supporting candidate evidence" in target.explanation.lower()
+    assert "does not have enough evidence" in target.explanation.lower()
+    assert "you do not meet" not in target.explanation.lower()
 
 
 def test_unknown_work_auth_is_not_failure(isolated_session) -> None:
@@ -431,9 +433,11 @@ def test_required_skill_unsatisfied_stays_required(isolated_session) -> None:
     sql = next((item for item in payload.factors if item.label.lower() == "sql"), None)
     if sql is not None:
         assert sql.importance == "required"
-        assert sql.status == "not_satisfied"
+        assert sql.status == "unknown"
+        assert sql.section == "required_skills"
         assert sql.candidate_evidence_refs == []
         assert "does not know" not in sql.explanation.lower()
+        assert "does not have enough evidence" in sql.explanation.lower()
 
 
 def test_skill_factor_links_requirement_when_present(isolated_session) -> None:
