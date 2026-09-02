@@ -322,3 +322,13 @@ Developer B ownership remains: Job Scout, Job Verification, Form Fill, browser-e
 | `GET` | `/api/jobs/{job_id}/interview-prep` | Read-only stored prep |
 | `POST` | `/api/jobs/{job_id}/prepare-interview` | Deterministic baseline (explicit) |
 | `POST` | `/api/jobs/{job_id}/interview-prep/feedback` | Ephemeral mock-interview answer feedback (`LLM_PROVIDER_ORDER`) |
+
+## License and source use
+
+CareerPilot is source-visible for portfolio, evaluation, and collaboration purposes, but it is not an open-source project.
+
+Unless a file explicitly states otherwise, original CareerPilot source is protected by copyright and no permission is granted to copy, modify, redistribute, sublicense, sell, deploy, or create derivative works without prior written permission from the applicable copyright holder(s).
+
+Third-party dependencies remain subject to their own licenses.
+
+See [LICENSE](./LICENSE).
