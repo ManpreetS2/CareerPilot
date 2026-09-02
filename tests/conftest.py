@@ -134,7 +134,10 @@ def _blank_llm_provider_order_during_tests(monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.fixture(autouse=True)
 def _reset_runtime_guards() -> Generator[None, None, None]:
     from backend.core.rate_limit import reset_runtime_guards
+    from backend.services.extraction_pool import reset_extraction_runtime
 
     reset_runtime_guards()
+    reset_extraction_runtime()
     yield
     reset_runtime_guards()
+    reset_extraction_runtime()

@@ -22,6 +22,7 @@ from backend.services.analysis_service import (
 from backend.services.job_intelligence_service import (
     extract_job_intelligence,
     has_usable_posting_evidence,
+    intelligence_record_is_current,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,12 +44,12 @@ def score_job_with_intelligence(
         job = load_job(db, job_public_id)
         # Preserve the candidate prerequisite before spending a provider request.
         load_latest_candidate(db, user_id)
-        intelligence_exists = (
-            db.query(JobIntelligenceRecord.id)
+        intelligence_row = (
+            db.query(JobIntelligenceRecord)
             .filter(JobIntelligenceRecord.job_id == job.id)
             .first()
-            is not None
         )
+        intelligence_exists = intelligence_record_is_current(job, intelligence_row)
         extracted = False
         if not intelligence_exists and has_usable_posting_evidence(job):
             try:
@@ -61,12 +62,12 @@ def score_job_with_intelligence(
                 extracted = True
             except IntegrityError:
                 db.rollback()
-                intelligence_exists = (
-                    db.query(JobIntelligenceRecord.id)
+                intelligence_row = (
+                    db.query(JobIntelligenceRecord)
                     .filter(JobIntelligenceRecord.job_id == job.id)
                     .first()
-                    is not None
                 )
+                intelligence_exists = intelligence_record_is_current(job, intelligence_row)
                 if not intelligence_exists:
                     raise
                 extracted = False

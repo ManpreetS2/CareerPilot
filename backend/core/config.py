@@ -30,7 +30,15 @@ class Settings(BaseSettings):
     )
 
     gemini_api_key: str | None = None
+    # Optional comma-separated extra Gemini keys. Combined with GEMINI_API_KEY.
+    gemini_api_keys: str = ""
     gemini_model: str = "gemini-3.6-flash"
+
+    job_extraction_max_workers: int = 3
+    job_extraction_ollama_max_workers: int = 1
+    job_extraction_slot_cooldown_seconds: float = 15.0
+    job_extraction_retry_budget: int = 4
+    job_extraction_slot_acquire_timeout_seconds: float = 120.0
 
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4-20250514"
@@ -253,6 +261,21 @@ def validate_llm_settings(cfg: Settings | None = None) -> None:
         raise RuntimeError("Resume Ollama context size is invalid.")
     if int(cfg.resume_ollama_num_predict) < 1 or int(cfg.resume_ollama_num_predict) > 32768:
         raise RuntimeError("Resume Ollama output limit is invalid.")
+    max_workers = int(cfg.job_extraction_max_workers)
+    if max_workers < 1 or max_workers > 16:
+        raise RuntimeError("JOB_EXTRACTION_MAX_WORKERS must be between 1 and 16.")
+    ollama_workers = int(cfg.job_extraction_ollama_max_workers)
+    if ollama_workers < 1 or ollama_workers > 4:
+        raise RuntimeError("JOB_EXTRACTION_OLLAMA_MAX_WORKERS must be between 1 and 4.")
+    cooldown = float(cfg.job_extraction_slot_cooldown_seconds)
+    if not 0.1 <= cooldown <= 300:
+        raise RuntimeError("JOB_EXTRACTION_SLOT_COOLDOWN_SECONDS is invalid.")
+    budget = int(cfg.job_extraction_retry_budget)
+    if budget < 1 or budget > 8:
+        raise RuntimeError("JOB_EXTRACTION_RETRY_BUDGET must be between 1 and 8.")
+    acquire_timeout = float(cfg.job_extraction_slot_acquire_timeout_seconds)
+    if not 1 <= acquire_timeout <= 600:
+        raise RuntimeError("JOB_EXTRACTION_SLOT_ACQUIRE_TIMEOUT_SECONDS is invalid.")
     resume_keep = (cfg.resume_ollama_keep_alive or "").strip()
     resume_keep_match = _KEEP_ALIVE_RE.fullmatch(resume_keep)
     if resume_keep_match is None:
@@ -275,6 +298,22 @@ def validate_runtime_settings() -> None:
         )
     validate_origin_settings(settings)
     validate_llm_settings(settings)
+
+
+def configured_gemini_keys(cfg: Settings | None = None) -> list[str]:
+    """Primary GEMINI_API_KEY plus optional extras. Deduped, blanks ignored."""
+
+    cfg = cfg or settings
+    keys: list[str] = []
+    seen: set[str] = set()
+    extras = [item.strip() for item in (cfg.gemini_api_keys or "").split(",")]
+    for raw in [(cfg.gemini_api_key or "").strip(), *extras]:
+        key = raw.strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+    return keys
 
 
 settings = Settings()

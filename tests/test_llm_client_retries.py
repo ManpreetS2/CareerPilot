@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from google.genai import errors as genai_errors
 
-from backend.services.llm_client import LLMClient, LLMProviderError
+from backend.services.llm_client import LLMAuthError, LLMClient, LLMProviderError, LLMRateLimitError
 
 
 def _make_gemini_client() -> LLMClient:
@@ -51,10 +51,28 @@ def test_gemini_transient_exhausted_exactly_two_calls() -> None:
 
     client = _make_gemini_client()
     with patch("google.genai.Client", return_value=fake_client):
-        with pytest.raises(LLMProviderError):
+        with pytest.raises(LLMRateLimitError):
             client._generate_gemini("hello", None)
 
     assert calls["n"] == 2
+
+
+def test_gemini_auth_failure_does_not_retry() -> None:
+    calls = {"n": 0}
+
+    def generate_content(**_kwargs):
+        calls["n"] += 1
+        raise genai_errors.APIError(401, {"message": "unauthorized"})
+
+    fake_client = MagicMock()
+    fake_client.models.generate_content.side_effect = generate_content
+
+    client = _make_gemini_client()
+    with patch("google.genai.Client", return_value=fake_client):
+        with pytest.raises(LLMAuthError):
+            client._generate_gemini("hello", None)
+
+    assert calls["n"] == 1
 
 
 def test_gemini_non_transient_no_retry() -> None:

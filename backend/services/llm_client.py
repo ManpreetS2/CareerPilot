@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 import httpx
 
-from backend.core.config import SUPPORTED_LLM_PROVIDERS, settings, validate_ollama_base_url
+from backend.core.config import SUPPORTED_LLM_PROVIDERS, configured_gemini_keys, settings, validate_ollama_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,14 @@ class LLMEmptyResponseError(RuntimeError):
     """Provider returned an empty payload (eligible for structured-output retry)."""
 
 
+class LLMRateLimitError(LLMProviderError):
+    """Provider rejected the request due to rate limit or quota pressure."""
+
+
+class LLMAuthError(LLMProviderError):
+    """Provider rejected the credential. Do not retry this slot."""
+
+
 class LLMClient:
     """Normalize generate() across Ollama, Gemini, Anthropic, and OpenAI."""
 
@@ -42,6 +50,7 @@ class LLMClient:
         provider: ProviderName | str = "gemini",
         *,
         model: str | None = None,
+        api_key: str | None = None,
         ollama_read_timeout_seconds: float | None = None,
         ollama_num_ctx: int | None = None,
         ollama_num_predict: int | None = None,
@@ -54,6 +63,7 @@ class LLMClient:
                 "Unsupported LLM provider. Use ollama, gemini, anthropic, or openai."
             )
         self._model_override = (model or "").strip() or None
+        self._api_key_override = (api_key or "").strip() or None
         self._ollama_read_timeout_seconds = ollama_read_timeout_seconds
         self._ollama_num_ctx = ollama_num_ctx
         self._ollama_num_predict = ollama_num_predict
@@ -95,9 +105,14 @@ class LLMClient:
             )
 
     def _api_key(self) -> str | None:
+        if self._api_key_override:
+            return self._api_key_override
         if self.provider == "ollama":
             return None
         if self.provider == "gemini":
+            keys = configured_gemini_keys()
+            if keys:
+                return keys[0]
             return settings.gemini_api_key
         if self.provider == "anthropic":
             return settings.anthropic_api_key
@@ -252,15 +267,20 @@ class LLMClient:
             except genai_errors.APIError as exc:
                 last_error = exc
                 status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                status_name = str(getattr(exc, "status", "") or "").upper()
                 logger.warning(
                     "Gemini APIError attempt=%s status=%s type=%s",
                     attempt + 1,
                     status,
                     type(exc).__name__,
                 )
+                if status in {401, 403} or status_name in {"UNAUTHENTICATED", "PERMISSION_DENIED"}:
+                    raise LLMAuthError("Gemini provider request failed.") from exc
                 # Retry once on transient provider pressure / rate limits.
                 if status in {429, 500, 503} and attempt == 0:
                     continue
+                if status == 429 or status_name in {"RESOURCE_EXHAUSTED", "UNAVAILABLE"}:
+                    raise LLMRateLimitError("Gemini provider request failed.") from exc
                 raise LLMProviderError("Gemini provider request failed.") from exc
             except (TimeoutError, httpx.TimeoutException) as exc:
                 logger.warning("Gemini request failed category=timeout")
@@ -269,6 +289,9 @@ class LLMClient:
                 if isinstance(exc, LLMTimeoutError):
                     raise
                 raise LLMProviderError("Gemini provider request failed.") from exc
+        status = getattr(last_error, "code", None) or getattr(last_error, "status_code", None)
+        if status == 429:
+            raise LLMRateLimitError("Gemini provider request failed.") from last_error
         raise LLMProviderError("Gemini provider request failed.") from last_error
 
     def _generate_anthropic(self, prompt: str, system_prompt: str | None) -> str:
@@ -335,7 +358,7 @@ def provider_is_configured(provider: str) -> bool:
             return False
         return True
     if name == "gemini":
-        return bool((settings.gemini_api_key or "").strip())
+        return bool(configured_gemini_keys())
     if name == "anthropic":
         return bool((settings.anthropic_api_key or "").strip())
     return bool((settings.openai_api_key or "").strip())

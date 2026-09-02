@@ -6,6 +6,7 @@ import json
 import logging
 from collections.abc import Callable
 from unittest.mock import Mock, patch
+import threading
 
 import pytest
 
@@ -86,10 +87,12 @@ class SequenceGenerator:
     def __init__(self, *responses: str | Exception) -> None:
         self.responses = list(responses)
         self.prompts: list[tuple[str, str | None]] = []
+        self._lock = threading.Lock()
 
     def __call__(self, prompt: str, system: str | None) -> str:
-        self.prompts.append((prompt, system))
-        response = self.responses.pop(0)
+        with self._lock:
+            self.prompts.append((prompt, system))
+            response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
         return response
