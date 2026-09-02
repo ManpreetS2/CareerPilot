@@ -116,6 +116,35 @@ def insert_candidate(session, *, user_id: int = TEST_USER_ID) -> Candidate:
     return record
 
 
+def insert_target_preference(
+    session,
+    *,
+    user_id: int = TEST_USER_ID,
+    candidate_id: int | None = None,
+    **overrides,
+) -> TargetPreference:
+    ensure_user(session, user_id)
+    defaults = dict(
+        user_id=user_id,
+        candidate_id=candidate_id,
+        target_roles=["Software Engineer Intern"],
+        preferred_locations=[],
+    )
+    defaults.update(overrides)
+    record = TargetPreference(**defaults)
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record
+
+
+def insert_ready_profile(session, *, user_id: int = TEST_USER_ID):
+    """Candidate with evidence plus at least one target role — the readiness minimum."""
+    candidate = insert_candidate(session, user_id=user_id)
+    prefs = insert_target_preference(session, user_id=user_id, candidate_id=candidate.id)
+    return candidate, prefs
+
+
 def insert_intelligence(session, job: JobRecord) -> JobIntelligenceRecord:
     record = JobIntelligenceRecord(
         job_id=job.id,

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session, joinedload
 
 from backend.api.dependencies import get_current_user
+from backend.api.profile_gate import enforce_profile_ready
 from backend.db.database import get_db
 from backend.db.models import JobRecord, User
 from backend.schemas.schemas import (
@@ -235,6 +236,7 @@ def trigger_scout(
     An explicit `what`/`where` still wins outright: this reads preferences to
     fill in a blank, never to override a deliberate search.
     """
+    enforce_profile_ready(db, user.id)
     consume_scout_run_stats()
     total_started = time.perf_counter()
     criteria_started = time.perf_counter()

@@ -75,6 +75,11 @@ class TargetPreferences(BaseModel):
     academic_year: str | None = None
     work_mode_preferences: list[str] = Field(default_factory=list)
     relocation_willingness: str | None = None
+    field_of_study: str | None = None
+    industry_preferences: list[str] = Field(default_factory=list)
+    opportunity_preference: str | None = None
+    experience_levels: list[str] = Field(default_factory=list)
+    skill_preferences: list[str] = Field(default_factory=list)
     gender: str | None = None
     race_ethnicity: str | None = None
     veteran_status: str | None = None
@@ -519,8 +524,18 @@ class UserPublic(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProfileReadinessPayload(BaseModel):
+    """Canonical profile-readiness contract. Deterministic; never LLM-derived."""
+
+    ready: bool
+    code: str | None = None
+    missing: list[str] = Field(default_factory=list)
+    next_route: str | None = None
+
+
 class CurrentProfile(BaseModel):
     """Authenticated read of the current user's stored candidate and preferences."""
 
     candidate: CandidateProfile | None = None
     preferences: TargetPreferences | None = None
+    readiness: ProfileReadinessPayload

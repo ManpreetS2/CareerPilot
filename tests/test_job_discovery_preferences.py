@@ -25,7 +25,7 @@ from backend.services.job_service import (
     MAX_SEARCH_TERM_CHARS,
     derive_scout_criteria,
 )
-from tests.mvp_helpers import TEST_USER_ID, ensure_user
+from tests.mvp_helpers import TEST_USER_ID, ensure_user, insert_candidate
 
 
 def _preference(session, *, user_id=TEST_USER_ID, candidate_id=None, **overrides) -> TargetPreference:
@@ -374,9 +374,15 @@ def _save_preferences(SessionLocal, user_id, **overrides) -> None:
         _preference(db, user_id=user_id, **overrides)
 
 
+def _seed_ready_profile(SessionLocal, user_id, **overrides) -> None:
+    with SessionLocal() as db:
+        insert_candidate(db, user_id=user_id)
+        _preference(db, user_id=user_id, **overrides)
+
+
 def test_route_searches_saved_roles_when_no_query_given(isolated_client, captured_scout) -> None:
     client, SessionLocal = isolated_client
-    _save_preferences(
+    _seed_ready_profile(
         SessionLocal,
         client.test_user_id,
         target_roles=["Cloud Engineer", "SRE"],
@@ -395,7 +401,7 @@ def test_route_lets_an_explicit_query_override_preferences(isolated_client, capt
     """The regression that keeps manual search working: reading preferences
     fills in a blank, it never overrides a deliberate search."""
     client, SessionLocal = isolated_client
-    _save_preferences(SessionLocal, client.test_user_id, target_roles=["Cloud Engineer"])
+    _seed_ready_profile(SessionLocal, client.test_user_id, target_roles=["Cloud Engineer"])
 
     client.post("/api/scout-jobs", params={"what": "data analyst"})
     assert captured_scout["queries"] == ["data analyst"]
@@ -403,7 +409,7 @@ def test_route_lets_an_explicit_query_override_preferences(isolated_client, capt
 
 def test_route_lets_an_explicit_location_override_preferences(isolated_client, captured_scout) -> None:
     client, SessionLocal = isolated_client
-    _save_preferences(
+    _seed_ready_profile(
         SessionLocal,
         client.test_user_id,
         target_roles=["Cloud Engineer"],
@@ -418,17 +424,18 @@ def test_route_lets_an_explicit_location_override_preferences(isolated_client, c
 @pytest.mark.parametrize("blank", ["", "   "])
 def test_route_treats_a_blank_query_as_absent(isolated_client, captured_scout, blank) -> None:
     client, SessionLocal = isolated_client
-    _save_preferences(SessionLocal, client.test_user_id, target_roles=["Cloud Engineer"])
+    _seed_ready_profile(SessionLocal, client.test_user_id, target_roles=["Cloud Engineer"])
 
     client.post("/api/scout-jobs", params={"what": blank})
     assert captured_scout["queries"] == ["Cloud Engineer"]
 
 
-def test_route_falls_back_for_a_user_with_no_preferences(isolated_client, captured_scout) -> None:
+def test_route_blocks_a_user_with_no_preferences(isolated_client, captured_scout) -> None:
     client, _ = isolated_client
     response = client.post("/api/scout-jobs")
-    assert response.status_code == 202
-    assert captured_scout["queries"] == [DEFAULT_SCOUT_QUERY]
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "profile_required"
+    assert "queries" not in captured_scout
 
 
 def test_route_requires_authentication(isolated_client) -> None:
@@ -489,7 +496,8 @@ def test_an_explicit_query_is_bounded_like_a_saved_one(isolated_client, captured
     """The explicit path reaches the same outbound query string, so it needs
     the same bound — otherwise ?what=<5000 chars> reintroduces the oversized
     URL the preferences path is protected against."""
-    client, _ = isolated_client
+    client, SessionLocal = isolated_client
+    _seed_ready_profile(SessionLocal, client.test_user_id, target_roles=["Cloud Engineer"])
 
     client.post("/api/scout-jobs", params={"what": "y" * 5000})
     (query,) = captured_scout["queries"]
@@ -497,7 +505,8 @@ def test_an_explicit_query_is_bounded_like_a_saved_one(isolated_client, captured
 
 
 def test_an_explicit_query_has_its_whitespace_normalized(isolated_client, captured_scout) -> None:
-    client, _ = isolated_client
+    client, SessionLocal = isolated_client
+    _seed_ready_profile(SessionLocal, client.test_user_id, target_roles=["Cloud Engineer"])
 
     client.post("/api/scout-jobs", params={"what": "  Cloud\n\tEngineer  "})
     assert captured_scout["queries"] == ["Cloud Engineer"]
@@ -505,7 +514,7 @@ def test_an_explicit_query_has_its_whitespace_normalized(isolated_client, captur
 
 def test_a_whitespace_only_location_is_treated_as_absent(isolated_client, captured_scout) -> None:
     client, SessionLocal = isolated_client
-    _save_preferences(
+    _seed_ready_profile(
         SessionLocal,
         client.test_user_id,
         target_roles=["Cloud Engineer"],

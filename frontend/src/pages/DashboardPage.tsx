@@ -16,7 +16,7 @@ import { useCandidateSession } from "../lib/session";
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const { candidate, preferences } = useCandidateSession();
+  const { candidate, preferences, sessionUserId } = useCandidateSession();
 
   const jobsQuery = useQuery({
     queryKey: queryKeys.jobs,
@@ -43,7 +43,7 @@ export function DashboardPage() {
     },
   });
   const profileQuery = useQuery({
-    queryKey: queryKeys.profile,
+    queryKey: queryKeys.profile(sessionUserId),
     queryFn: ({ signal }) => api.getProfile({ signal }),
   });
 
@@ -64,16 +64,16 @@ export function DashboardPage() {
     versionsQuery.isPending ||
     profileQuery.isPending ||
     summaryQuery.isPending;
-  const error = jobsQuery.error ?? profileQuery.error;
   const jobs = jobsQuery.data ?? [];
   const scores = scoresQuery.data ?? [];
   const versions = versionsQuery.data ?? [];
   const summary = summaryQuery.data;
   const liveCandidate = profileQuery.data?.candidate ?? candidate;
   const livePreferences = profileQuery.data?.preferences ?? preferences;
+  const readiness = profileQuery.data?.readiness;
+  const profileReady = Boolean(readiness?.ready);
   const next = resolveNextAction({
-    candidate: liveCandidate,
-    preferences: livePreferences,
+    readiness,
     jobs,
     scores,
     resumeVersions: versions,
@@ -109,7 +109,18 @@ export function DashboardPage() {
         </p>
       </div>
 
-      <ErrorBanner error={error} />
+      <ErrorBanner error={jobsQuery.error} />
+      {profileQuery.isError ? (
+        <Glass variant="atmosphere" className="relative z-[1] rounded-[var(--radius-lg)] p-4" data-testid="dashboard-profile-error">
+          <p className="font-display text-base font-semibold tracking-tight">Couldn't load your profile</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            CareerPilot paused discovery until it can read your profile.
+          </p>
+          <button type="button" className="btn-primary mt-3 inline-flex" onClick={() => void profileQuery.refetch()}>
+            Retry
+          </button>
+        </Glass>
+      ) : null}
 
       {loading ? (
         <div className="relative z-[1] space-y-4" aria-busy>
@@ -119,7 +130,7 @@ export function DashboardPage() {
             <Skeleton className="h-40 w-full" />
           </div>
         </div>
-      ) : (
+      ) : profileQuery.isError ? null : (
         <>
           <Glass variant="floating" className="relative z-[1] rounded-2xl p-8">
             <p className="text-sm font-medium text-primary">Next Action</p>
@@ -163,7 +174,11 @@ export function DashboardPage() {
                   View All
                 </Link>
               </div>
-              {strong.length === 0 ? (
+              { !profileReady ? (
+                <p className="mt-4 text-sm text-muted-foreground" data-testid="dashboard-matches-gate">
+                  Complete your profile to see matches.
+                </p>
+              ) : strong.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">
                   No verified matches yet. Open Matches to review rankings.
                 </p>

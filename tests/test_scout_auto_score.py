@@ -8,7 +8,7 @@ from unittest.mock import Mock
 from backend.db.models import MatchScoreRecord
 from backend.schemas.schemas import Job
 from backend.services.job_service import record_to_job
-from tests.mvp_helpers import insert_candidate, insert_job
+from tests.mvp_helpers import insert_candidate, insert_job, insert_ready_profile
 
 
 def _job(job_id: str, *, description: str = "Required: Python") -> Job:
@@ -24,7 +24,9 @@ def _job(job_id: str, *, description: str = "Required: Python") -> Job:
 
 
 def test_scout_route_auto_scores_each_returned_job(isolated_client, monkeypatch) -> None:
-    client, _ = isolated_client
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        insert_ready_profile(db, user_id=client.test_user_id)
     jobs = [_job("jobicy-one"), _job("himalayas-two")]
     monkeypatch.setattr("backend.api.routes.jobs.scout_jobs", lambda **_: jobs)
     scored: list[str] = []
@@ -53,7 +55,9 @@ def test_scout_route_auto_scores_each_returned_job(isolated_client, monkeypatch)
 
 
 def test_one_scoring_failure_does_not_fail_scout(isolated_client, monkeypatch) -> None:
-    client, _ = isolated_client
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        insert_ready_profile(db, user_id=client.test_user_id)
     jobs = [_job("good-job"), _job("bad-job")]
     monkeypatch.setattr("backend.api.routes.jobs.scout_jobs", lambda **_: jobs)
 
@@ -72,7 +76,9 @@ def test_one_scoring_failure_does_not_fail_scout(isolated_client, monkeypatch) -
 
 
 def test_scout_auto_score_logs_ids_not_job_text(isolated_client, monkeypatch, caplog) -> None:
-    client, _ = isolated_client
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        insert_ready_profile(db, user_id=client.test_user_id)
     secret = "SECRET_SSN_999-99-9999_DO_NOT_LOG"
     monkeypatch.setattr(
         "backend.api.routes.jobs.scout_jobs",
@@ -104,7 +110,7 @@ def test_scout_auto_score_uses_deterministic_score_job_not_llm(
 ) -> None:
     client, SessionLocal = isolated_client
     with SessionLocal() as db:
-        insert_candidate(db, user_id=client.test_user_id)
+        insert_ready_profile(db, user_id=client.test_user_id)
         record = insert_job(db, public_id="jobicy-fit-1")
         stored = record_to_job(record)
 

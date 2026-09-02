@@ -6,7 +6,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfilePage } from "./ProfilePage";
 import { api, ApiClientError } from "../lib/api";
 import { ThemeProvider } from "../lib/theme";
-import { createTestQueryClient } from "../test/render";
+import { createTestQueryClient, testUser } from "../test/render";
+
+vi.mock("../lib/auth", () => ({
+  useAuth: () => ({
+    user: testUser,
+    loading: false,
+    login: vi.fn(),
+    signup: vi.fn(),
+    logout: vi.fn(),
+  }),
+}));
 
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
@@ -14,7 +24,16 @@ vi.mock("../lib/api", async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
-      getProfile: vi.fn().mockResolvedValue({ candidate: null, preferences: null }),
+      getProfile: vi.fn().mockResolvedValue({
+        candidate: null,
+        preferences: null,
+        readiness: {
+          ready: false,
+          code: "profile_required",
+          missing: ["candidate_profile", "candidate_evidence", "target_roles"],
+          next_route: "/profile",
+        },
+      }),
       parseResume: vi.fn(),
       savePreferences: vi.fn(),
     },
@@ -52,7 +71,16 @@ function renderProfile() {
 describe("ProfilePage resume parsing", () => {
   beforeEach(() => {
     vi.mocked(api.parseResume).mockReset();
-    vi.mocked(api.getProfile).mockResolvedValue({ candidate: null, preferences: null });
+    vi.mocked(api.getProfile).mockResolvedValue({
+      candidate: null,
+      preferences: null,
+      readiness: {
+        ready: false,
+        code: "profile_required",
+        missing: ["candidate_profile", "candidate_evidence", "target_roles"],
+        next_route: "/profile",
+      },
+    });
   });
   it("uses the shared parsing progress while parseResume is unresolved", async () => {
     const user = userEvent.setup();

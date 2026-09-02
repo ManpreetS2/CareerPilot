@@ -47,7 +47,16 @@ function renderApp(route: string) {
 describe("auth pages", () => {
   beforeEach(() => {
     vi.mocked(api.me).mockRejectedValue(new ApiClientError(401, "Not authenticated"));
-    vi.mocked(api.getProfile).mockResolvedValue({ candidate: null, preferences: null });
+    vi.mocked(api.getProfile).mockResolvedValue({
+      candidate: null,
+      preferences: null,
+      readiness: {
+        ready: false,
+        code: "profile_required",
+        missing: ["candidate_profile", "candidate_evidence", "target_roles"],
+        next_route: "/profile",
+      },
+    });
     vi.mocked(api.getJobs).mockResolvedValue([]);
     vi.mocked(api.getStoredScores).mockResolvedValue([]);
     vi.mocked(api.listAllResumeVersions).mockResolvedValue([]);

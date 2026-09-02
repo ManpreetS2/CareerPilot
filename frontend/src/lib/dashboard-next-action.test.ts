@@ -1,16 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { resolveNextAction } from "./dashboard-next-action";
-import type { CandidateProfile, Job, MatchScore, ResumeVersionSummary } from "./types";
+import type { Job, MatchScore, ResumeVersionSummary } from "./types";
 
-const candidate: CandidateProfile = {
-  name: "Ada",
-  skills: ["Python"],
-  projects: [],
-  experience: [{ title: "Intern", company: "Labs", highlights: [] }],
-  education: [],
-  certifications: [],
-  strengths: [],
-  evidence_links: [],
+const ready = { ready: true, missing: [] as string[], code: null, next_route: null };
+const incomplete = {
+  ready: false,
+  code: "profile_required",
+  missing: ["candidate_profile", "candidate_evidence", "target_roles"],
+  next_route: "/profile",
 };
 
 const job: Job = {
@@ -24,35 +21,33 @@ const job: Job = {
 };
 
 describe("resolveNextAction", () => {
-  it("asks to build a profile when none exists", () => {
-    expect(
-      resolveNextAction({
-        candidate: null,
-        preferences: null,
-        jobs: [],
-        scores: [],
-        resumeVersions: [],
-      }).id,
-    ).toBe("profile");
+  it("asks to complete the profile when readiness is missing", () => {
+    const next = resolveNextAction({
+      readiness: incomplete,
+      jobs: [],
+      scores: [],
+      resumeVersions: [],
+    });
+    expect(next.id).toBe("profile");
+    expect(next.title).toBe("Complete your profile");
+    expect(next.cta).toBe("Complete your profile");
+    expect(next.to).toBe("/profile");
   });
 
-  it("asks to finish setup when preferences are missing", () => {
+  it("asks to complete the profile when readiness is omitted", () => {
     expect(
       resolveNextAction({
-        candidate,
-        preferences: { target_roles: [], preferred_locations: [], constraints: [] },
-        jobs: [],
+        jobs: [job],
         scores: [],
         resumeVersions: [],
-      }).id,
-    ).toBe("preferences");
+      }).cta,
+    ).toBe("Complete your profile");
   });
 
-  it("asks to find jobs when none are stored", () => {
+  it("asks to find jobs when the profile is ready and none are stored", () => {
     expect(
       resolveNextAction({
-        candidate,
-        preferences: { target_roles: ["Engineer"], preferred_locations: ["Remote"], constraints: [] },
+        readiness: ready,
         jobs: [],
         scores: [],
         resumeVersions: [],
@@ -72,8 +67,7 @@ describe("resolveNextAction", () => {
     };
     expect(
       resolveNextAction({
-        candidate,
-        preferences: { target_roles: ["Engineer"], preferred_locations: [], constraints: [] },
+        readiness: ready,
         jobs: [job],
         scores: [score],
         resumeVersions: [],
@@ -95,8 +89,7 @@ describe("resolveNextAction", () => {
     };
     expect(
       resolveNextAction({
-        candidate,
-        preferences: { target_roles: ["Engineer"], preferred_locations: [], constraints: [] },
+        readiness: ready,
         jobs: [job],
         scores: [],
         resumeVersions: [version],

@@ -1,64 +1,63 @@
 import { describe, expect, it } from "vitest";
-import { canScoutJobs, isGroundedCandidate, resolveProfileGate } from "./profile-gate";
-import type { CandidateProfile } from "./types";
+import {
+  INCOMPLETE_READINESS,
+  canScoutJobs,
+  resolveProfileGate,
+} from "./profile-gate";
 
-const grounded: CandidateProfile = {
-  name: "Ada Lovelace",
-  skills: ["Python"],
-  projects: [],
-  experience: [],
-  education: [],
-  certifications: [],
-  strengths: [],
-  evidence_links: [],
+const ready = {
+  ready: true,
+  missing: [] as string[],
+  code: null,
+  next_route: null,
 };
 
-const empty: CandidateProfile = {
-  name: "",
-  skills: [],
-  projects: [],
-  experience: [],
-  education: [],
-  certifications: [],
-  strengths: [],
-  evidence_links: [],
-};
-
-describe("profile gate", () => {
-  it("treats a named or skilled candidate as grounded", () => {
-    expect(isGroundedCandidate(grounded)).toBe(true);
-    expect(isGroundedCandidate({ ...empty, skills: ["Go"] })).toBe(true);
-    expect(isGroundedCandidate(empty)).toBe(false);
-    expect(isGroundedCandidate(null)).toBe(false);
-  });
-
-  it("blocks scouting while profile status is unknown and nothing is cached", () => {
-    const gate = resolveProfileGate({ cached: null, status: "pending", remote: undefined });
+describe("resolveProfileGate", () => {
+  it("blocks scout while the profile query is pending", () => {
+    const gate = resolveProfileGate({ status: "pending", readiness: ready });
     expect(gate.kind).toBe("pending");
     expect(canScoutJobs(gate)).toBe(false);
   });
 
-  it("blocks scouting when profile loading failed and nothing is cached", () => {
-    const gate = resolveProfileGate({ cached: null, status: "error", remote: undefined });
+  it("treats a profile GET failure as an error, not ready or missing", () => {
+    const gate = resolveProfileGate({ status: "error", readiness: ready });
     expect(gate.kind).toBe("error");
     expect(canScoutJobs(gate)).toBe(false);
   });
 
-  it("blocks scouting for a successful empty profile", () => {
-    const gate = resolveProfileGate({ cached: null, status: "success", remote: null });
-    expect(gate.kind).toBe("incomplete");
+  it("unlocks scout only from server readiness", () => {
+    const gate = resolveProfileGate({ status: "success", readiness: ready });
+    expect(gate.kind).toBe("ready");
+    expect(canScoutJobs(gate)).toBe(true);
+  });
+
+  it("shows the incomplete gate from server missing requirements", () => {
+    const gate = resolveProfileGate({
+      status: "success",
+      readiness: {
+        ready: false,
+        code: "profile_required",
+        missing: ["target_roles"],
+        next_route: "/profile",
+      },
+    });
+    expect(gate).toEqual({
+      kind: "incomplete",
+      readiness: {
+        ready: false,
+        code: "profile_required",
+        missing: ["target_roles"],
+        next_route: "/profile",
+      },
+    });
     expect(canScoutJobs(gate)).toBe(false);
   });
 
-  it("allows scouting from a cached complete profile while the query is pending", () => {
-    const gate = resolveProfileGate({ cached: grounded, status: "pending", remote: undefined });
-    expect(gate.kind).toBe("ready");
-    expect(canScoutJobs(gate)).toBe(true);
-  });
-
-  it("allows scouting from a cached complete profile if the live query failed", () => {
-    const gate = resolveProfileGate({ cached: grounded, status: "error", remote: undefined });
-    expect(gate.kind).toBe("ready");
-    expect(canScoutJobs(gate)).toBe(true);
+  it("does not invent ready=true when the server omitted readiness", () => {
+    const gate = resolveProfileGate({ status: "success", readiness: undefined });
+    expect(gate.kind).toBe("incomplete");
+    if (gate.kind === "incomplete") {
+      expect(gate.readiness).toEqual(INCOMPLETE_READINESS);
+    }
   });
 });

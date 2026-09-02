@@ -9,8 +9,9 @@ import { readJobsWorkspace, toJobQueryParams } from "../lib/jobs-workspace";
 import { ThemeProvider } from "../lib/theme";
 import { createTestQueryClient } from "../test/render";
 import { JOB_DISCOVERY_STAGES } from "../components/JobDiscoveryProgress";
-import { saveCandidate } from "../lib/session";
-import type { CandidateProfile, Job, JobListPage, ScoutJobsResponse } from "../lib/types";
+import { bindSessionUser, saveCandidate } from "../lib/session";
+import type { CandidateProfile, CurrentProfile, Job, JobListPage, ScoutJobsResponse } from "../lib/types";
+import { queryKeys } from "../lib/query-keys";
 
 vi.mock("../lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/api")>();
@@ -40,6 +41,23 @@ const groundedCandidate: CandidateProfile = {
   certifications: [],
   strengths: [],
   evidence_links: [],
+};
+
+const readyProfile: CurrentProfile = {
+  candidate: groundedCandidate,
+  preferences: { target_roles: ["Software Engineer"], preferred_locations: [], constraints: [] },
+  readiness: { ready: true, missing: [], code: null, next_route: null },
+};
+
+const incompleteProfile: CurrentProfile = {
+  candidate: null,
+  preferences: null,
+  readiness: {
+    ready: false,
+    code: "profile_required",
+    missing: ["candidate_profile", "candidate_evidence", "target_roles"],
+    next_route: "/profile",
+  },
 };
 
 const existingJob: Job = {
@@ -89,10 +107,8 @@ function renderJobs(route = "/jobs", queryClient = createTestQueryClient()) {
 
 describe("JobsPage workspace", () => {
   beforeEach(() => {
-    vi.mocked(api.getProfile).mockResolvedValue({
-      candidate: groundedCandidate,
-      preferences: null,
-    });
+    bindSessionUser(null);
+    vi.mocked(api.getProfile).mockResolvedValue(readyProfile);
     vi.mocked(api.queryJobs).mockResolvedValue(pageOf([existingJob]));
     vi.mocked(api.getStoredScores).mockResolvedValue([]);
     vi.mocked(api.scoutJobs).mockReset();
@@ -605,21 +621,20 @@ describe("JobsPage workspace", () => {
   });
 
   it("does not scout jobs when the profile is incomplete", async () => {
-    vi.mocked(api.getProfile).mockResolvedValue({
-      candidate: null,
-      preferences: null,
-    });
+    vi.mocked(api.getProfile).mockResolvedValue(incompleteProfile);
+    vi.mocked(api.queryJobs).mockResolvedValue(pageOf([]));
     renderJobs();
     expect(await screen.findByTestId("jobs-profile-gate")).toBeInTheDocument();
+    expect(screen.getByText("Complete your profile before CareerPilot searches for matches.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue profile" })).toBeInTheDocument();
+    expect(screen.queryByText("We couldn't find jobs matching all of those filters.")).not.toBeInTheDocument();
+    expect(screen.getByTestId("find-jobs-button")).toBeDisabled();
     await userEvent.click(screen.getByTestId("find-jobs-button"));
     expect(api.scoutJobs).not.toHaveBeenCalled();
   });
 
   it("does not scout when Enter is pressed with a null profile", async () => {
-    vi.mocked(api.getProfile).mockResolvedValue({
-      candidate: null,
-      preferences: null,
-    });
+    vi.mocked(api.getProfile).mockResolvedValue(incompleteProfile);
     renderJobs();
     await screen.findByTestId("jobs-profile-gate");
     await userEvent.type(screen.getByTestId("jobs-search-input"), "backend{Enter}");
@@ -641,43 +656,49 @@ describe("JobsPage workspace", () => {
     vi.mocked(api.getProfile).mockRejectedValue(new Error("profile down"));
     renderJobs();
     expect(await screen.findByTestId("jobs-profile-error")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't load your profile")).toBeInTheDocument();
     expect(screen.getByTestId("find-jobs-button")).toBeDisabled();
     await userEvent.type(screen.getByTestId("jobs-search-input"), "intern{Enter}");
     expect(api.scoutJobs).not.toHaveBeenCalled();
   });
 
-  it("scouts from a cached complete profile while the live query is pending", async () => {
+  it("does not scout from a cached candidate while the live query is pending", async () => {
     saveCandidate(groundedCandidate);
     vi.mocked(api.getProfile).mockImplementation(() => new Promise(() => undefined));
-    vi.mocked(api.scoutJobs).mockResolvedValue({
-      jobs: [existingJob],
-      jobs_found: 1,
-      matched_count: 1,
-      sources_searched: 2,
-      sources_unavailable: 0,
-    });
     renderJobs();
     expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("find-jobs-button")).toBeEnabled());
+    expect(screen.getByTestId("find-jobs-button")).toBeDisabled();
     await userEvent.click(screen.getByTestId("find-jobs-button"));
-    await waitFor(() => expect(api.scoutJobs).toHaveBeenCalledTimes(1));
+    expect(api.scoutJobs).not.toHaveBeenCalled();
   });
 
-  it("scouts from a cached complete profile when the live query failed", async () => {
+  it("does not treat a failed profile GET as ready even with a cached candidate", async () => {
     saveCandidate(groundedCandidate);
     vi.mocked(api.getProfile).mockRejectedValue(new Error("profile down"));
-    vi.mocked(api.scoutJobs).mockResolvedValue({
-      jobs: [existingJob],
-      jobs_found: 1,
-      matched_count: 1,
-      sources_searched: 2,
-      sources_unavailable: 0,
-    });
     renderJobs();
-    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("find-jobs-button")).toBeEnabled());
+    expect(await screen.findByTestId("jobs-profile-error")).toBeInTheDocument();
+    expect(screen.getByTestId("find-jobs-button")).toBeDisabled();
     await userEvent.click(screen.getByTestId("find-jobs-button"));
-    await waitFor(() => expect(api.scoutJobs).toHaveBeenCalledTimes(1));
-    expect(screen.queryByTestId("jobs-profile-error")).not.toBeInTheDocument();
+    expect(api.scoutJobs).not.toHaveBeenCalled();
+  });
+
+  it("unlocks Discover when readiness becomes ready without a reload", async () => {
+    vi.mocked(api.getProfile).mockResolvedValue(incompleteProfile);
+    const client = createTestQueryClient();
+    renderJobs("/jobs", client);
+    expect(await screen.findByTestId("jobs-profile-gate")).toBeInTheDocument();
+    vi.mocked(api.getProfile).mockResolvedValue(readyProfile);
+    await client.invalidateQueries({ queryKey: queryKeys.profile(null) });
+    await waitFor(() => expect(screen.queryByTestId("jobs-profile-gate")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("find-jobs-button")).toBeEnabled());
+  });
+
+  it("does not keep a previous user's ready gate after an incomplete profile loads", async () => {
+    const client = createTestQueryClient();
+    client.setQueryData(queryKeys.profile(null), readyProfile);
+    vi.mocked(api.getProfile).mockResolvedValue(incompleteProfile);
+    renderJobs("/jobs", client);
+    expect(await screen.findByTestId("jobs-profile-gate")).toBeInTheDocument();
+    expect(api.scoutJobs).not.toHaveBeenCalled();
   });
 });
