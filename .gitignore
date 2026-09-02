@@ -1,4 +1,12 @@
 .env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+browser-extension/.env
+browser-extension/.env.*
+!browser-extension/.env.example
 .venv/
 venv/
 env/

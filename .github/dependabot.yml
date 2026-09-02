@@ -1,0 +1,35 @@
+# Dependabot opens version-update PRs only. Do not enable auto-merge.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-compatible:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend-compatible:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /browser-extension
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      extension-compatible:
+        update-types:
+          - minor
+          - patch

@@ -1,0 +1,22 @@
+# CareerPilot Gitleaks configuration.
+#
+# Extends the default rule set. Scanning stays enabled for tests that
+# construct fake token-shaped strings. Do not add broad path ignores.
+# Allowlists, if any, must be extremely narrow and documented here.
+
+title = "CareerPilot"
+
+[extend]
+useDefault = true
+
+# Extremely narrow: Gitleaks generic-api-key flags the empty
+# ADZUNA_APP_KEY= placeholder when it sits next to ADZUNA_COUNTRY=us
+# in .env.example. The assignment value is empty; this is not a credential.
+# A filled-in ADZUNA_APP_KEY value would not match this regex and would
+# still fail the scan. Do not broaden this to other files or rules.
+[[allowlists]]
+description = "Empty ADZUNA_APP_KEY= placeholder in .env.example (generic-api-key false positive)"
+targetRules = ["generic-api-key"]
+paths = ['''(?:^|/)\.env\.example$''']
+regexTarget = "match"
+regexes = ['''ADZUNA_APP_KEY=\r?\n''']
