@@ -20,6 +20,7 @@ vi.mock("./api", async (importOriginal) => {
       login: vi.fn(),
       signup: vi.fn(),
       logout: vi.fn(),
+      deleteAccount: vi.fn(),
       getProfile: vi.fn(),
       getJobs: vi.fn(),
       queryJobs: vi.fn(),

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user, get_extension_user
 from backend.api.profile_gate import enforce_grounded_candidate
+from backend.core.rate_limit import guard_expensive
 from backend.db.database import get_db
 from backend.db.models import User
 from backend.schemas.schemas import (
@@ -105,13 +106,14 @@ def generate_materials(
     """
     enforce_grounded_candidate(db, user.id)
     generator = getattr(request.app.state, "application_materials_generator", None)
-    return get_or_generate_application_package(
-        db,
-        job_id,
-        user.id,
-        generator=generator,
-        override_grounding=bool(payload and payload.override_grounding),
-    )
+    with guard_expensive(user.id, "llm"):
+        return get_or_generate_application_package(
+            db,
+            job_id,
+            user.id,
+            generator=generator,
+            override_grounding=bool(payload and payload.override_grounding),
+        )
 
 
 @router.post("/jobs/{job_id}/discard-stale-materials")
@@ -311,16 +313,19 @@ def extension_ingest_url(
     existing = find_job_by_url(db, url)
     if existing is not None:
         return record_to_job(existing)
-    try:
-        raw = ingest_job_url(url)
-    except UnsafeURLError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="URL is malformed.") from exc
-    except JobScoutError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    stored = persist_jobs([normalize_job(raw, "manual")])
-    return stored[0]
+    with guard_expensive(user.id, "ingest"):
+        try:
+            raw = ingest_job_url(url)
+        except UnsafeURLError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="URL is malformed."
+            ) from exc
+        except JobScoutError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        stored = persist_jobs([normalize_job(raw, "manual")])
+        return stored[0]
 
 
 @router.post("/extension/jobs/{job_id}/save", response_model=Job)

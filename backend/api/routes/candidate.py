@@ -9,6 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user
+from backend.core.rate_limit import guard_expensive
 from backend.db.database import get_db
 from backend.db.models import Candidate, TargetPreference, User
 from backend.schemas.schemas import CurrentProfile, ParseResumeResponse, ProfileReadinessPayload, TargetPreferences
@@ -29,6 +30,7 @@ from backend.services.candidate_profile_agent import (
     ProfileGroundingError,
     ResumeExtractionError,
     build_candidate_profile_from_upload,
+    validate_pdf_upload,
 )
 from backend.services.llm_client import LLMConfigurationError
 
@@ -120,6 +122,10 @@ async def parse_resume(
         content = await file.read(MAX_UPLOAD_BYTES + 1)
     finally:
         await file.close()
+    try:
+        validate_pdf_upload(filename, content, content_type=content_type)
+    except Exception as exc:  # noqa: BLE001 — reject before the expensive parse quota
+        raise _http_for_candidate_error(exc) from exc
 
     def _process() -> ParseResumeResponse:
         candidate, extraction, report = build_candidate_profile_from_upload(
@@ -136,7 +142,10 @@ async def parse_resume(
         return ParseResumeResponse(candidate=candidate, preferences=None, note=note)
 
     try:
-        return await run_in_threadpool(_process)
+        with guard_expensive(user.id, "parse_resume"):
+            return await run_in_threadpool(_process)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 — map domain errors; unexpected become 500
         raise _http_for_candidate_error(exc) from exc
 

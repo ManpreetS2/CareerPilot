@@ -56,34 +56,34 @@ class TargetPreferences(BaseModel):
 
     target_roles: list[str] = Field(default_factory=list)
     preferred_locations: list[str] = Field(default_factory=list)
-    remote_preference: str | None = None
+    remote_preference: str | None = Field(default=None, max_length=64)
     salary_min: int | None = Field(
         default=None,
         description="Minimum acceptable base salary in annual USD (not hourly).",
     )
-    work_authorization: str | None = None
+    work_authorization: str | None = Field(default=None, max_length=128)
     sponsorship_required: bool | None = None
     constraints: list[str] = Field(default_factory=list)
-    legal_name: str | None = None
-    linkedin_url: str | None = None
-    github_url: str | None = None
-    portfolio_url: str | None = None
-    earliest_start_date: str | None = None
-    currently_enrolled_in_program: str | None = None
-    expected_graduation: str | None = None
-    degree_pursuing: str | None = None
-    academic_year: str | None = None
+    legal_name: str | None = Field(default=None, max_length=255)
+    linkedin_url: str | None = Field(default=None, max_length=512)
+    github_url: str | None = Field(default=None, max_length=512)
+    portfolio_url: str | None = Field(default=None, max_length=512)
+    earliest_start_date: str | None = Field(default=None, max_length=128)
+    currently_enrolled_in_program: str | None = Field(default=None, max_length=16)
+    expected_graduation: str | None = Field(default=None, max_length=64)
+    degree_pursuing: str | None = Field(default=None, max_length=128)
+    academic_year: str | None = Field(default=None, max_length=32)
     work_mode_preferences: list[str] = Field(default_factory=list)
-    relocation_willingness: str | None = None
-    field_of_study: str | None = None
+    relocation_willingness: str | None = Field(default=None, max_length=16)
+    field_of_study: str | None = Field(default=None, max_length=128)
     industry_preferences: list[str] = Field(default_factory=list)
-    opportunity_preference: str | None = None
+    opportunity_preference: str | None = Field(default=None, max_length=32)
     experience_levels: list[str] = Field(default_factory=list)
     skill_preferences: list[str] = Field(default_factory=list)
-    gender: str | None = None
-    race_ethnicity: str | None = None
-    veteran_status: str | None = None
-    disability_status: str | None = None
+    gender: str | None = Field(default=None, max_length=64)
+    race_ethnicity: str | None = Field(default=None, max_length=64)
+    veteran_status: str | None = Field(default=None, max_length=128)
+    disability_status: str | None = Field(default=None, max_length=128)
 
     @field_validator("salary_min")
     @classmethod
@@ -94,6 +94,24 @@ class TargetPreferences(BaseModel):
             raise ValueError(
                 "salary_min must be an annual USD amount between 10000 and 1000000"
             )
+        return value
+
+    @field_validator(
+        "target_roles",
+        "preferred_locations",
+        "constraints",
+        "work_mode_preferences",
+        "industry_preferences",
+        "experience_levels",
+        "skill_preferences",
+    )
+    @classmethod
+    def _bounded_preference_lists(cls, value: list[str]) -> list[str]:
+        if len(value) > 40:
+            raise ValueError("Too many items.")
+        for item in value:
+            if len(item) > 200:
+                raise ValueError("An item is too long.")
         return value
 
 
@@ -264,8 +282,8 @@ class InterviewPrep(BaseModel):
 
 
 class InterviewAnswerRequest(BaseModel):
-    question: str
-    answer: str
+    question: str = Field(min_length=1, max_length=4000)
+    answer: str = Field(min_length=1, max_length=20000)
 
 
 class InterviewAnswerFeedback(BaseModel):
@@ -292,7 +310,7 @@ class ScoutJobsResponse(BaseModel):
 
 
 class IngestJobUrlRequest(BaseModel):
-    url: str
+    url: str = Field(min_length=1, max_length=2048)
 
 
 class JobVerificationResponse(BaseModel):
@@ -304,9 +322,9 @@ class JobVerificationResponse(BaseModel):
 
 class ApprovalRequest(BaseModel):
     decision: Literal["approved", "edit_requested", "rejected"]
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=4000)
     eligibility_confirmed: bool = False
-    eligibility_notes: str | None = None
+    eligibility_notes: str | None = Field(default=None, max_length=4000)
 
 
 class ApprovalResponse(BaseModel):
@@ -337,7 +355,7 @@ class JobListPage(BaseModel):
 
 
 class ParseSearchRequest(BaseModel):
-    query: str = ""
+    query: str = Field(default="", max_length=500)
 
 
 class FlaggedField(BaseModel):
@@ -451,7 +469,7 @@ class ApplicationTrackerItem(BaseModel):
 
 class ApplicationTrackerUpdate(BaseModel):
     status: TrackerStatus
-    note: str | None = None
+    note: str | None = Field(default=None, max_length=4000)
     reminder_date: date | None = None
 
 
