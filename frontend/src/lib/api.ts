@@ -87,6 +87,8 @@ export const api = {
 
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 
+  deleteAccount: () => request<void>("/api/account", { method: "DELETE" }),
+
   me: (init?: RequestInit) => request<User>("/api/auth/me", init),
 
   getProfile: (init?: RequestInit) => request<CurrentProfile>("/api/profile", init),

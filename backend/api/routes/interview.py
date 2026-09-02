@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user
 from backend.api.profile_gate import enforce_grounded_candidate
+from backend.core.rate_limit import guard_expensive
 from backend.db.database import get_db
 from backend.db.models import User
 from backend.schemas.schemas import InterviewAnswerFeedback, InterviewAnswerRequest, InterviewPrep
@@ -79,7 +80,10 @@ def prepare_interview(
     """Explicit deterministic interview-prep generation. Does not call a provider."""
     enforce_grounded_candidate(db, user.id)
     try:
-        return generate_and_store_interview_prep(db, job_id, user.id)
+        with guard_expensive(user.id, "interview_prep"):
+            return generate_and_store_interview_prep(db, job_id, user.id)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_interview_error(exc) from exc
 
@@ -96,8 +100,11 @@ def answer_interview_question(
     enforce_grounded_candidate(db, user.id)
     generate_fn = getattr(request.app.state, "interview_answer_generator", None)
     try:
-        return get_interview_answer_feedback(
-            db, job_id, user.id, payload.question, payload.answer, generate_fn=generate_fn
-        )
+        with guard_expensive(user.id, "llm"):
+            return get_interview_answer_feedback(
+                db, job_id, user.id, payload.question, payload.answer, generate_fn=generate_fn
+            )
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_interview_error(exc) from exc
