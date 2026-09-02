@@ -162,6 +162,8 @@ class JobIntelligenceRecord(Base):
     seniority: Mapped[str | None] = mapped_column(String(64), nullable=True)
     responsibilities: Mapped[list] = mapped_column(JSON, default=list)
     likely_interview_focus: Mapped[list] = mapped_column(JSON, default=list)
+    source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    extraction_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     job: Mapped[JobRecord] = relationship(back_populates="intelligence")
 

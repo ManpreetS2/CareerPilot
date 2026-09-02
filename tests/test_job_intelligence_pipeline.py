@@ -716,7 +716,7 @@ def test_cli_refuses_production_mutation_without_confirm(monkeypatch, capsys) ->
     monkeypatch.setattr("scripts.backfill_job_intelligence.SessionLocal", session_factory)
     monkeypatch.setattr("scripts.backfill_job_intelligence.run_backfill", worker)
     monkeypatch.setattr(
-        "scripts.backfill_job_intelligence.extract_job_intelligence",
+        "scripts.backfill_job_intelligence.extract_job_intelligence_batch",
         extractor,
     )
 
@@ -753,7 +753,7 @@ def test_cli_production_dry_run_is_read_only_without_confirm(
     )
     monkeypatch.setattr("scripts.backfill_job_intelligence.SessionLocal", fake_session)
     monkeypatch.setattr(
-        "scripts.backfill_job_intelligence.extract_job_intelligence",
+        "scripts.backfill_job_intelligence.extract_job_intelligence_batch",
         extractor,
     )
 
@@ -803,7 +803,7 @@ def test_cli_temporary_database_runs_without_confirm(
     from contextlib import contextmanager
 
     from backend.services.job_intelligence_service import (
-        extract_job_intelligence as extract_impl,
+        extract_job_intelligence_batch as extract_impl,
     )
 
     _described_job(isolated_session, public_id="cli-temp-backfill")
@@ -813,9 +813,9 @@ def test_cli_temporary_database_runs_without_confirm(
     def fake_session():
         yield isolated_session
 
-    def extract_with_fake_provider(db, public_id, generate_fn=None):
+    def extract_with_fake_provider(db, public_ids, generate_fn=None, force=False):
         del generate_fn
-        return extract_impl(db, public_id, generate_fn=generator)
+        return extract_impl(db, public_ids, generate_fn=generator, force=force)
 
     monkeypatch.setattr(
         "scripts.backfill_job_intelligence.sqlite_path_from_url",
@@ -823,7 +823,7 @@ def test_cli_temporary_database_runs_without_confirm(
     )
     monkeypatch.setattr("scripts.backfill_job_intelligence.SessionLocal", fake_session)
     monkeypatch.setattr(
-        "scripts.backfill_job_intelligence.extract_job_intelligence",
+        "scripts.backfill_job_intelligence.extract_job_intelligence_batch",
         extract_with_fake_provider,
     )
 
