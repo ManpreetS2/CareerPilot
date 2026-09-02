@@ -6,6 +6,7 @@ import html
 import json
 import logging
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -23,9 +24,11 @@ from backend.services.analysis_service import (
     canonicalize_skill,
 )
 from backend.services.llm_client import (
+    LLMAuthError,
     LLMConfigurationError,
     LLMEmptyResponseError,
     LLMProviderError,
+    LLMRateLimitError,
     get_llm_client,
 )
 from backend.services.llm_provider_sequence import (
@@ -34,6 +37,13 @@ from backend.services.llm_provider_sequence import (
     uses_injected_generator,
 )
 from backend.services.llm_structured_schemas import job_intelligence_llm_schema
+from backend.services.extraction_pool import (
+    WorkerResult,
+    generate_with_provider_slot,
+    run_extraction_batch,
+)
+from backend.services.extraction_task import INTELLIGENCE_EXTRACTION_VERSION, ExtractionTask
+from backend.services.job_content import source_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +202,8 @@ _PROVIDER_ERROR_PRIORITY: dict[type[BaseException], int] = {
     PostingEvidenceError: 50,
     EmptyGroundedIntelligenceError: 50,
     StructuredIntelligenceError: 40,
+    LLMRateLimitError: 40,
+    LLMAuthError: 30,
     LLMProviderError: 40,
     LLMEmptyResponseError: 40,
     LLMConfigurationError: 10,
@@ -206,7 +218,7 @@ def _should_replace_provider_error(current: Exception | None, new: Exception) ->
     return new_rank > current_rank
 
 
-def build_extraction_prompts(job: JobRecord) -> tuple[str, str]:
+def build_extraction_prompts(job: JobRecord | ExtractionTask) -> tuple[str, str]:
     """Build a strict prompt containing only the stored posting title and description."""
     user_prompt = f"""Extract structured requirements from this job posting.
 
@@ -247,20 +259,20 @@ def _retry_prompt(original: str) -> str:
     )
 
 
-def _posting_source(job: JobRecord) -> str:
+def _posting_source(job: JobRecord | ExtractionTask) -> str:
     title = html.unescape((job.title or "").strip())
     description = html.unescape((job.description or "").strip())
     return f"{title}\n{description}"
 
 
-def _require_posting_evidence(job: JobRecord) -> None:
+def _require_posting_evidence(job: JobRecord | ExtractionTask) -> None:
     title = (job.title or "").strip()
     description = (job.description or "").strip()
     if len(title) < 2 or len(description) < 12 or len(description.split()) < 2:
         raise PostingEvidenceError()
 
 
-def has_usable_posting_evidence(job: JobRecord) -> bool:
+def has_usable_posting_evidence(job: JobRecord | ExtractionTask) -> bool:
     """Return whether the stored posting is sufficient for provider extraction."""
     try:
         _require_posting_evidence(job)
@@ -666,7 +678,7 @@ def _seniority_phrase_supported(value: str, source: str) -> bool:
     return False
 
 
-def _seniority_supported(value: str | None, job: JobRecord) -> bool:
+def _seniority_supported(value: str | None, job: JobRecord | ExtractionTask) -> bool:
     if not value or not value.strip():
         return False
     words = _normalize_seniority(value)
@@ -859,7 +871,7 @@ def _interview_topic_source_lines(source: str) -> set[str]:
 
 def ground_job_intelligence(
     raw: JobIntelligence | dict[str, Any],
-    job: JobRecord,
+    job: JobRecord | ExtractionTask,
 ) -> tuple[JobIntelligence, dict[str, int]]:
     """Drop unsupported claims and return category-level removal counts."""
     raw_years_is_boolean = isinstance(raw, dict) and isinstance(
@@ -960,19 +972,35 @@ def get_stored_job_intelligence(db: Session, public_id: str) -> JobIntelligence:
 
 
 def _extract_structured(
-    job: JobRecord,
+    job: JobRecord | ExtractionTask,
     generate_fn: GenerateFn | None,
     *,
     provider: str | None = None,
+    use_slots: bool = False,
+    worker_result: WorkerResult | None = None,
 ) -> JobIntelligence:
     system_prompt, user_prompt = build_extraction_prompts(job)
     schema = job_intelligence_llm_schema()
     generator = generate_fn
     if generator is None:
-        client = get_llm_client(provider or "gemini")
-        generator = lambda prompt, system: invoke_provider_generate(
-            client, prompt, system, schema
-        )
+        if use_slots:
+            def generator(prompt: str, system: str | None) -> str:
+                text, slot_id = generate_with_provider_slot(
+                    provider or "gemini",
+                    prompt,
+                    system,
+                    schema,
+                )
+                if worker_result is not None:
+                    worker_result.slot_id = slot_id
+                    worker_result.attempts += 1
+                    worker_result.provider = provider or "gemini"
+                return text
+        else:
+            client = get_llm_client(provider or "gemini")
+            generator = lambda prompt, system: invoke_provider_generate(
+                client, prompt, system, schema
+            )
 
     last_error: Exception | None = None
     for attempt in range(2):
@@ -1022,6 +1050,21 @@ def _persist_grounded(
         "seniority": intelligence.seniority,
         "responsibilities": list(intelligence.responsibilities),
         "likely_interview_focus": list(intelligence.likely_interview_focus),
+        "source_fingerprint": source_fingerprint(job.title, job.description),
+        "extraction_version": INTELLIGENCE_EXTRACTION_VERSION,
+    }
+    schema_payload = {
+        key: payload[key]
+        for key in (
+            "required_skills",
+            "preferred_skills",
+            "years_experience",
+            "education_requirements",
+            "tech_stack",
+            "seniority",
+            "responsibilities",
+            "likely_interview_focus",
+        )
     }
     if record is None:
         record = JobIntelligenceRecord(job_id=job.id, **payload)
@@ -1043,7 +1086,97 @@ def _persist_grounded(
         for key, value in payload.items():
             setattr(record, key, value)
         db.commit()
-    return JobIntelligence(job_id=job.public_id, **payload)
+    return JobIntelligence(job_id=job.public_id, **schema_payload)
+
+
+def extraction_task_from_job(job: JobRecord) -> ExtractionTask:
+    return ExtractionTask(
+        kind="job_intelligence",
+        job_public_id=job.public_id,
+        job_pk=job.id,
+        source_fingerprint=source_fingerprint(job.title, job.description),
+        extraction_version=INTELLIGENCE_EXTRACTION_VERSION,
+        title=job.title,
+        company=job.company,
+        description=job.description or "",
+        content_status=job.content_status,
+    )
+
+
+def intelligence_record_is_current(
+    job: JobRecord,
+    record: JobIntelligenceRecord | None,
+) -> bool:
+    if record is None:
+        return False
+    stored_fp = record.source_fingerprint
+    stored_ver = record.extraction_version
+    if not stored_fp:
+        return True
+    return (
+        stored_fp == source_fingerprint(job.title, job.description)
+        and int(stored_ver or 0) == INTELLIGENCE_EXTRACTION_VERSION
+    )
+
+
+def extract_intelligence_on_worker(
+    task: ExtractionTask,
+    generate_fn: GenerateFn | None,
+) -> WorkerResult:
+    """Provider/parse/ground only. No SQLAlchemy Session."""
+    started = time.perf_counter()
+    result = WorkerResult()
+    try:
+        _require_posting_evidence(task)
+        if uses_injected_generator(generate_fn):
+            structured = _extract_structured(task, generate_fn)
+            grounded, _counts = ground_job_intelligence(structured, task)
+            if not _has_usable_intelligence(grounded):
+                raise EmptyGroundedIntelligenceError()
+            result.intelligence = grounded
+            return result
+        last_error: Exception | None = None
+        for index, provider in enumerate(configured_provider_names()):
+            try:
+                structured = _extract_structured(
+                    task,
+                    None,
+                    provider=provider,
+                    use_slots=True,
+                    worker_result=result,
+                )
+                grounded, _counts = ground_job_intelligence(structured, task)
+                if not _has_usable_intelligence(grounded):
+                    raise EmptyGroundedIntelligenceError()
+                result.intelligence = grounded
+                result.provider = provider
+                if index > 0:
+                    result.fallbacks += 1
+                return result
+            except (
+                StructuredIntelligenceError,
+                EmptyGroundedIntelligenceError,
+                LLMProviderError,
+                LLMEmptyResponseError,
+                LLMConfigurationError,
+            ) as exc:
+                if index > 0:
+                    result.fallbacks += 1
+                if _should_replace_provider_error(last_error, exc):
+                    last_error = exc
+                logger.warning(
+                    "job intelligence provider sequence failed category=%s job_pk=%s",
+                    type(exc).__name__,
+                    task.job_pk,
+                )
+                continue
+        result.error = last_error or StructuredIntelligenceError()
+        return result
+    except Exception as exc:  # noqa: BLE001 — isolate one job
+        result.error = exc
+        return result
+    finally:
+        result.provider_duration_ms = int((time.perf_counter() - started) * 1000)
 
 
 def extract_job_intelligence(
@@ -1087,6 +1220,92 @@ def extract_job_intelligence(
     except Exception:
         db.rollback()
         raise
+
+
+def extract_job_intelligence_batch(
+    db: Session,
+    public_ids: list[str],
+    *,
+    generate_fn: GenerateFn | None = None,
+    force: bool = False,
+) -> list[JobIntelligence | BaseException | None]:
+    """Parallelize Job Intelligence provider extraction only.
+
+    JobRequirementProfile / Verified Fit / Find Jobs stay on their existing
+    deterministic paths. This does not create a third source of truth.
+    """
+    ordered_jobs: list[JobRecord | None] = []
+    cached: dict[str, JobIntelligence] = {}
+    pending: list[ExtractionTask] = []
+    failures: dict[str, BaseException] = {}
+    for public_id in public_ids:
+        try:
+            job = _load_job(db, public_id)
+        except JobNotFoundError as exc:
+            ordered_jobs.append(None)
+            failures[public_id] = exc
+            continue
+        ordered_jobs.append(job)
+        if not has_usable_posting_evidence(job):
+            failures[public_id] = PostingEvidenceError()
+            continue
+        record = (
+            db.query(JobIntelligenceRecord)
+            .filter(JobIntelligenceRecord.job_id == job.id)
+            .first()
+        )
+        if not force and intelligence_record_is_current(job, record):
+            assert record is not None
+            cached[job.public_id] = _record_to_schema(record, job.public_id)
+            continue
+        pending.append(extraction_task_from_job(job))
+
+    outcome = run_extraction_batch(pending, extract_intelligence_on_worker, generate_fn=generate_fn)
+    outcome.metrics.cache_hits = len(cached)
+    outcome.metrics.queued = len(pending)
+
+    stored_by_id: dict[str, JobIntelligence | BaseException | None] = dict(cached)
+    stored_by_id.update(failures)
+    jobs_by_pk = {job.id: job for job in ordered_jobs if job is not None}
+    for task in pending:
+        result = outcome.results.get(task.job_public_id) or WorkerResult(
+            error=StructuredIntelligenceError()
+        )
+        job = jobs_by_pk.get(task.job_pk)
+        if job is None:
+            stored_by_id[task.job_public_id] = JobNotFoundError()
+            continue
+        try:
+            db.refresh(job)
+        except Exception:  # noqa: BLE001 — reload if this session cannot refresh
+            job = db.query(JobRecord).filter(JobRecord.id == task.job_pk).first()
+            if job is None:
+                stored_by_id[task.job_public_id] = JobNotFoundError()
+                continue
+            jobs_by_pk[task.job_pk] = job
+        current_fp = source_fingerprint(job.title, job.description)
+        if current_fp != task.source_fingerprint:
+            stored_by_id[task.job_public_id] = None
+            logger.warning(
+                "job intelligence discarded stale snapshot job_pk=%s",
+                task.job_pk,
+            )
+            continue
+        if result.error is not None or result.intelligence is None:
+            stored_by_id[task.job_public_id] = result.error
+            continue
+        try:
+            stored_by_id[task.job_public_id] = _persist_grounded(db, job, result.intelligence)
+        except Exception as exc:  # noqa: BLE001 — keep other jobs
+            db.rollback()
+            stored_by_id[task.job_public_id] = exc
+            logger.warning(
+                "job intelligence persist failed category=%s job_pk=%s",
+                type(exc).__name__,
+                job.id,
+            )
+
+    return [stored_by_id.get(public_id) for public_id in public_ids]
 
 
 def _ground_and_persist_intelligence(

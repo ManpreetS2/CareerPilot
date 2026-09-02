@@ -21,7 +21,7 @@ from backend.core.config import settings
 from backend.db.database import SessionLocal
 from backend.db.models import JobIntelligenceRecord, JobRecord
 from backend.services.job_intelligence_service import (
-    extract_job_intelligence,
+    extract_job_intelligence_batch,
     has_usable_posting_evidence,
 )
 
@@ -75,11 +75,8 @@ def run_backfill(
         raise ValueError("limit must be zero or greater")
 
     jobs = db.query(JobRecord).order_by(JobRecord.id.asc()).all()
-    eligible = 0
-    extracted = 0
+    eligible_ids: list[str] = []
     skipped = 0
-    failed = 0
-    attempted = 0
 
     for job in jobs:
         if not has_usable_posting_evidence(job):
@@ -94,24 +91,40 @@ def run_backfill(
         if exists and not reextract:
             skipped += 1
             continue
+        eligible_ids.append(job.public_id)
 
-        eligible += 1
-        if dry_run or (limit is not None and attempted >= limit):
-            skipped += 1
-            continue
+    eligible = len(eligible_ids)
+    to_run = eligible_ids
+    if limit is not None:
+        to_run = eligible_ids[:limit]
+        skipped += len(eligible_ids) - len(to_run)
 
-        attempted += 1
-        try:
-            extract_job_intelligence(
-                db,
-                job.public_id,
-                generate_fn=generate_fn,
-            )
-        except Exception:  # noqa: BLE001 — one job must not stop the maintenance run
-            db.rollback()
-            failed += 1
-            continue
-        extracted += 1
+    if dry_run:
+        skipped += len(to_run)
+        return BackfillCounts(
+            scanned=len(jobs),
+            eligible=eligible,
+            extracted=0,
+            skipped=skipped,
+            failed=0,
+        )
+
+    extracted = 0
+    failed = 0
+    if to_run:
+        results = extract_job_intelligence_batch(
+            db,
+            to_run,
+            generate_fn=generate_fn,
+            force=reextract,
+        )
+        from backend.schemas.schemas import JobIntelligence
+
+        for result in results:
+            if isinstance(result, JobIntelligence):
+                extracted += 1
+            else:
+                failed += 1
 
     return BackfillCounts(
         scanned=len(jobs),

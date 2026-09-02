@@ -33,7 +33,9 @@ def resume_provider_is_configured(provider: str) -> bool:
 
     name = (provider or "").strip().lower()
     if name == "gemini":
-        return bool((settings.gemini_api_key or "").strip()) and bool(
+        from backend.core.config import configured_gemini_keys
+
+        return bool(configured_gemini_keys()) and bool(
             (settings.resume_gemini_model or "").strip()
         )
     if name == "ollama":
