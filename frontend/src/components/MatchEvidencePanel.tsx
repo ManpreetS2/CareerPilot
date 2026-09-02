@@ -27,7 +27,7 @@ const RESULT_LABEL: Record<FactorStatus, string> = {
   satisfied: "Satisfied",
   partially_satisfied: "Partially satisfied",
   not_satisfied: "Not satisfied",
-  unknown: "Unknown / Watch out",
+  unknown: "Not enough evidence",
   not_applicable: "Not applicable",
 };
 

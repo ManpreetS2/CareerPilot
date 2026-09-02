@@ -2,6 +2,8 @@ import type { JobRequirementProfile, MatchScore, Requirement, RequirementGroup }
 import { MatchBadge } from "./MatchBadge";
 import { chipLabel } from "../lib/search-intent";
 
+type RequirementResult = "satisfied" | "partially_satisfied" | "not_satisfied" | "unknown" | "not_applicable";
+
 export function PotentialMatchBadge() {
   return (
     <span className="status-pill bg-muted text-foreground">Potential Match</span>
@@ -58,8 +60,8 @@ export function RequirementGroupView({
 }: {
   group: RequirementGroup;
   requirements: Requirement[];
-  statuses?: Record<string, "satisfied" | "not_satisfied" | "unknown">;
-  groupStatus?: "satisfied" | "not_satisfied" | "unknown";
+  statuses?: Record<string, RequirementResult>;
+  groupStatus?: RequirementResult;
 }) {
   const members = group.requirement_ids
     .map((id) => requirements.find((item) => item.id === id))
@@ -69,6 +71,8 @@ export function RequirementGroupView({
     const status = statuses?.[id];
     if (status === "satisfied") return "✓";
     if (status === "not_satisfied") return "✕";
+    if (status === "partially_satisfied") return "~";
+    if (status === "unknown") return "?";
     return "○";
   };
   const resultLabel =
@@ -76,7 +80,11 @@ export function RequirementGroupView({
       ? "Satisfied"
       : groupStatus === "not_satisfied"
         ? "Neither condition satisfied"
-        : "Not evaluated yet";
+        : groupStatus === "partially_satisfied"
+          ? "Partially satisfied"
+          : groupStatus === "not_applicable"
+            ? "Not applicable"
+            : "Not enough evidence";
   return (
     <div className="rounded-lg border border-border/70 bg-surface/80 p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

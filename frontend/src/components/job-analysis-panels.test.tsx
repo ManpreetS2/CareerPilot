@@ -37,7 +37,7 @@ describe("job analysis panels", () => {
     expect(screen.getByText("You must satisfy one")).toBeInTheDocument();
     expect(screen.getByText("Final-year student")).toBeInTheDocument();
     expect(screen.getByText("or")).toBeInTheDocument();
-    expect(screen.getByText(/Group result: Not evaluated yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Group result: Not enough evidence/)).toBeInTheDocument();
     expect(screen.queryByText(/any_of/)).not.toBeInTheDocument();
   });
 

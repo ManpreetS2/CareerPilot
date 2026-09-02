@@ -77,10 +77,10 @@ function evidence(overrides: Partial<MatchEvidence> = {}): MatchEvidence {
         section: "required_skills",
         label: "Docker",
         importance: "required",
-        status: "not_satisfied",
+        status: "unknown",
         rule_id: "required_skills_v2",
         rule_version: "v2",
-        explanation: "No supporting candidate evidence found.",
+        explanation: "CareerPilot does not have enough evidence to verify this requirement.",
         scoring_effect: "Contributes to the Required Skills component. Individual skills are not assigned separate point values.",
         job_evidence_refs: ["ev_docker"],
         candidate_evidence_refs: [],
@@ -242,7 +242,7 @@ describe("MatchEvidencePanel", () => {
     wrap(<MatchEvidencePanel data={evidence()} loading={false} error={null} onRetry={() => undefined} />);
     const docker = screen.getByTestId("factor-factor_skill_docker");
     await user.click(docker.querySelector("button")!);
-    expect((await screen.findAllByText("No supporting candidate evidence found.")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("CareerPilot does not have enough evidence to verify this requirement.")).length).toBeGreaterThan(0);
     expect(screen.queryByText(/does not know Docker/i)).toBeNull();
   });
 
@@ -251,7 +251,7 @@ describe("MatchEvidencePanel", () => {
     const unknown = screen.getByTestId("factor-factor_auth");
     expect(unknown).toHaveTextContent("?");
     expect(unknown).not.toHaveTextContent("✕");
-    expect(unknown).toHaveTextContent("Unknown / Watch out");
+    expect(unknown).toHaveTextContent("Not enough evidence");
   });
 
   it("shows stale and loading states", () => {
