@@ -497,6 +497,10 @@ def test_production_generate_materials_uses_grounded_generator(isolated_client) 
     source = inspect.getsource(application_service.get_or_generate_application_package)
     assert "generate_grounded_application_materials(" in source
     assert not hasattr(application_service, "_mock_materials")
+    import backend.services.application_materials_agent as materials_agent
+
+    assert hasattr(materials_agent, "generate_grounded_application_materials")
+    assert not hasattr(materials_agent, "ApplicationMaterialsNotImplementedError")
 
 
 # ---------------------------------------------------------------------------

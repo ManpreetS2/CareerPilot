@@ -36,7 +36,6 @@ from backend.db.models import (
     Candidate,
     JobIntelligenceRecord,
     JobRecord,
-    MatchScoreRecord,
     TargetPreference,
 )
 from backend.schemas.schemas import (
@@ -50,7 +49,12 @@ from backend.schemas.schemas import (
     Project,
     TargetPreferences,
 )
-from backend.services.analysis_service import _ALIAS_TO_CANONICAL, _skill_in_text
+from backend.services.analysis_service import (
+    StoredScoreNotFoundError,
+    _ALIAS_TO_CANONICAL,
+    _skill_in_text,
+    get_stored_match_score,
+)
 from sqlalchemy.exc import IntegrityError
 
 from backend.services.job_intelligence_service import (
@@ -389,11 +393,6 @@ class StaleApplicationMaterialsError(ApplicationMaterialsError):
             )
 
 
-class ApplicationMaterialsNotImplementedError(ApplicationMaterialsError):
-    def __init__(self) -> None:
-        super().__init__("Grounded application materials generation is not implemented yet.")
-
-
 class ApplicationMaterialsGenerator(Protocol):
     """Injectable provider/generator boundary. Not called by the unfinished student function."""
 
@@ -527,23 +526,6 @@ def candidate_record_to_profile(record: Candidate) -> CandidateProfile:
     )
 
 
-def _match_record_to_schema(record: MatchScoreRecord, job_public_id: str) -> MatchScore:
-    return MatchScore(
-        job_id=job_public_id,
-        overall_score=record.overall_score,
-        skill_score=record.skill_score,
-        experience_score=record.experience_score,
-        education_score=record.education_score,
-        location_score=record.location_score,
-        preference_score=record.preference_score,
-        matched_skills=list(record.matched_skills or []),
-        partial_matches=list(record.partial_matches or []),
-        missing_skills=list(record.missing_skills or []),
-        recommendation=record.recommendation,  # type: ignore[arg-type]
-        rationale=record.rationale,
-    )
-
-
 def load_application_materials_context(db: Session, job_id: str, user_id: int) -> ApplicationMaterialsContext:
     """Load stored grounded records only. Never creates or mutates rows."""
 
@@ -564,17 +546,10 @@ def load_application_materials_context(db: Session, job_id: str, user_id: int) -
         raise MissingJobIntelligenceError()
     intelligence = get_stored_job_intelligence(db, job_id)
 
-    score_record = (
-        db.query(MatchScoreRecord)
-        .filter(
-            MatchScoreRecord.job_id == job_record.id,
-            MatchScoreRecord.candidate_id == candidate_record.id,
-        )
-        .order_by(MatchScoreRecord.id.desc())
-        .first()
-    )
-    if score_record is None:
-        raise MissingFitScoreError()
+    try:
+        fit_score = get_stored_match_score(db, job_id, user_id)
+    except StoredScoreNotFoundError as exc:
+        raise MissingFitScoreError() from exc
 
     preference_record = (
         db.query(TargetPreference)
@@ -603,7 +578,7 @@ def load_application_materials_context(db: Session, job_id: str, user_id: int) -
         candidate_pk=candidate_record.id,
         user_id=user_id,
         intelligence=intelligence,
-        fit_score=_match_record_to_schema(score_record, job_id),
+        fit_score=fit_score,
         preferences=_preference_record_to_schema(preference_record) if preference_record else None,
         posting_text=f"{job_record.title}\n{job_record.company}\n{job_record.description}",
         resume_input_fingerprint=hash_resume_input_snapshot(

@@ -12,6 +12,7 @@ from backend.schemas.schemas import (
     Job,
     MatchScore,
     Project,
+    ScoutJobsResponse,
     TargetPreferences,
 )
 
@@ -62,3 +63,9 @@ def test_application_package_validates() -> None:
         approval_status="pending_review",
     )
     assert package.job_id == "job-001"
+
+
+def test_scout_jobs_response_default_note_is_not_a_mock_stub() -> None:
+    payload = ScoutJobsResponse(jobs=[])
+    assert "not implemented" not in payload.note.lower()
+    assert "day 1 mock" not in payload.note.lower()

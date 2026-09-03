@@ -1318,6 +1318,54 @@ def _is_match_score_uniqueness_error(exc: IntegrityError) -> bool:
     return False
 
 
+def _match_fingerprints_for(
+    db: Session, job: JobRecord, candidate: Candidate, user_id: int | None
+) -> tuple[str | None, str | None, str | None]:
+    if user_id is None:
+        return None, None, None
+    from backend.services.candidate_provenance import fingerprint_for_candidate
+    from backend.services.job_requirement_extractor import current_posting_fingerprint, load_requirement_profile
+    from backend.services.match_evidence_service import preference_fingerprint
+
+    cand_fp = fingerprint_for_candidate(db, candidate, user_id)
+    pref_fp = preference_fingerprint(load_preferences(db, candidate))
+    profile = load_requirement_profile(db, job)
+    req_fp = profile.source_fingerprint if profile else current_posting_fingerprint(job)
+    return cand_fp, pref_fp, req_fp
+
+
+def _fingerprint_mismatch(stored: str | None, current: str | None) -> bool:
+    return bool(stored and current and stored != current)
+
+
+def _stored_score_is_stale(
+    db: Session,
+    record: MatchScoreRecord,
+    job: JobRecord,
+    candidate: Candidate,
+    user_id: int,
+) -> bool:
+    cand_fp, pref_fp, req_fp = _match_fingerprints_for(db, job, candidate, user_id)
+    if _fingerprint_mismatch(getattr(record, "candidate_fingerprint", None), cand_fp):
+        return True
+    if _fingerprint_mismatch(getattr(record, "preference_fingerprint", None), pref_fp):
+        return True
+    if _fingerprint_mismatch(getattr(record, "requirement_fingerprint", None), req_fp):
+        return True
+    evidence = getattr(record, "evidence", None)
+    if evidence is not None:
+        from backend.services.match_evidence_service import _stale_reasons
+
+        if _stale_reasons(
+            evidence,
+            candidate_fp=cand_fp,
+            preference_fp=pref_fp,
+            requirement_fp=req_fp,
+        ):
+            return True
+    return False
+
+
 def persist_score(
     db: Session,
     job: JobRecord,
@@ -1335,6 +1383,7 @@ def persist_score(
         )
     existing_rows = _newest_match_score_rows(existing_rows)
     existing = existing_rows[0] if existing_rows else None
+    cand_fp, pref_fp, req_fp = _match_fingerprints_for(db, job, candidate, candidate.user_id)
     payload = {
         "job_id": job.id,
         "candidate_id": candidate.id,
@@ -1358,6 +1407,9 @@ def persist_score(
         "ranking_score": breakdown.ranking_score,
         "scoring_version": breakdown.scoring_version,
         "score_kind": breakdown.score_kind,
+        "candidate_fingerprint": cand_fp,
+        "preference_fingerprint": pref_fp,
+        "requirement_fingerprint": req_fp,
         "match_reasons": list(breakdown.match_reasons),
         "gap_reasons": list(breakdown.gap_reasons),
         "watchouts": list(breakdown.watchouts),
@@ -1561,6 +1613,9 @@ def get_stored_match_score(db: Session, job_public_id: str, user_id: int) -> Mat
     )
     if record is None:
         raise StoredScoreNotFoundError()
+    if _stored_score_is_stale(db, record, job, candidate, user_id):
+        logger.info("stored_score stale job_pk=%s candidate_pk=%s", job.id, candidate.id)
+        raise StoredScoreNotFoundError()
     logger.info("stored_score read job_pk=%s candidate_pk=%s", job.id, candidate.id)
     return _record_to_match_score(record, job_public_id)
 
@@ -1588,6 +1643,17 @@ def list_stored_match_scores(db: Session, user_id: int) -> list[MatchScore]:
         .join(JobRecord, JobRecord.id == MatchScoreRecord.job_id)
         .all()
     )
-    scores = [_record_to_match_score(record, job.public_id) for record, job in rows]
-    logger.info("stored_scores listed count=%s candidate_pk=%s", len(scores), candidate.id)
+    scores = []
+    stale = 0
+    for record, job in rows:
+        if _stored_score_is_stale(db, record, job, candidate, user_id):
+            stale += 1
+            continue
+        scores.append(_record_to_match_score(record, job.public_id))
+    logger.info(
+        "stored_scores listed count=%s stale=%s candidate_pk=%s",
+        len(scores),
+        stale,
+        candidate.id,
+    )
     return scores

@@ -111,7 +111,7 @@ function TrackerCard({
             <input
               type="date"
               className="input"
-              aria-label={`Follow-up reminder date for ${item.title} at ${item.company}`}
+              aria-label={`Follow-up date for ${item.title} at ${item.company}`}
               value={item.reminder_date ?? ""}
               disabled={updating || !item.tracker_status}
               title={item.tracker_status ? undefined : "Set a tracking status first"}

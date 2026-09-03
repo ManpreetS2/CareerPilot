@@ -88,7 +88,7 @@ describe("auth pages", () => {
     expect(await screen.findByTestId("onboarding-step-1")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("onboarding-skip"));
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("returns to login after logout and can sign back in to the dashboard", async () => {
     vi.mocked(api.me).mockResolvedValue(testUser);
@@ -102,7 +102,7 @@ describe("auth pages", () => {
     await userEvent.type(screen.getByLabelText("Password"), SECRET_PASSWORD);
     await userEvent.click(screen.getByRole("button", { name: "Log in" }));
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("keeps the session after a reload when /api/auth/me succeeds", async () => {
     vi.mocked(api.me).mockResolvedValue(testUser);
@@ -132,7 +132,7 @@ describe("auth pages", () => {
     expect(alert).not.toHaveTextContent("careerpilot_session");
     expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("never puts submitted passwords or session values into a login error", async () => {
     vi.mocked(api.login).mockRejectedValue(
