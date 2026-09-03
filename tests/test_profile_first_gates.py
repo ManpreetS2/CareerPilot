@@ -5,7 +5,12 @@ from __future__ import annotations
 from unittest.mock import Mock
 
 from backend.db.models import Candidate, TargetPreference
-from tests.mvp_helpers import insert_candidate, insert_job, insert_ready_profile
+from tests.mvp_helpers import (
+    insert_candidate,
+    insert_job,
+    insert_ready_profile,
+    insert_target_preference,
+)
 
 
 def test_profile_get_includes_readiness_for_empty_user(isolated_client) -> None:
@@ -53,6 +58,83 @@ def test_incomplete_profile_does_not_call_scout_jobs(isolated_client, monkeypatc
     assert scout.call_count == 0
     assert score.call_count == 0
     assert verify.call_count == 0
+
+
+def test_target_roles_only_does_not_scout(isolated_client, monkeypatch) -> None:
+    """STATE B: a target role without candidate evidence must not call providers."""
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        insert_target_preference(
+            db,
+            user_id=client.test_user_id,
+            target_roles=["Software Engineer"],
+        )
+    scout = Mock(return_value=[])
+    monkeypatch.setattr("backend.api.routes.jobs.scout_jobs", scout)
+    score = Mock(return_value=(0, 0))
+    monkeypatch.setattr("backend.api.routes.jobs.score_jobs_batch", score)
+    verify = Mock()
+    monkeypatch.setattr("backend.api.routes.jobs.verify_top_ranked_jobs", verify)
+
+    body = client.get("/api/profile").json()
+    assert body["candidate"] is None
+    assert body["readiness"]["ready"] is False
+    assert "candidate_profile" in body["readiness"]["missing"]
+    assert "candidate_evidence" in body["readiness"]["missing"]
+
+    response = client.post("/api/scout-jobs")
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "profile_required"
+    assert scout.call_count == 0
+    assert score.call_count == 0
+    assert verify.call_count == 0
+
+
+def test_minimum_ready_profile_without_experience_or_projects_can_scout(
+    isolated_client, monkeypatch
+) -> None:
+    """STATE C: name + one skill + target role is ready even with empty experience/projects."""
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        candidate = Candidate(
+            user_id=client.test_user_id,
+            name="QA Test User",
+            skills=["Python"],
+            projects=[],
+            experience=[],
+            education=[],
+            certifications=[],
+            strengths=[],
+            evidence_links=[],
+        )
+        db.add(candidate)
+        db.commit()
+        db.refresh(candidate)
+        insert_target_preference(
+            db,
+            user_id=client.test_user_id,
+            candidate_id=candidate.id,
+            target_roles=["Software Engineer"],
+        )
+
+    body = client.get("/api/profile").json()
+    assert body["candidate"]["name"] == "QA Test User"
+    assert body["candidate"]["skills"] == ["Python"]
+    assert body["candidate"]["experience"] == []
+    assert body["candidate"]["projects"] == []
+    assert body["candidate"]["education"] == []
+    assert body["preferences"]["target_roles"] == ["Software Engineer"]
+    assert body["readiness"]["ready"] is True
+    assert body["readiness"]["missing"] == []
+
+    scout = Mock(return_value=[])
+    monkeypatch.setattr("backend.api.routes.jobs.scout_jobs", scout)
+    monkeypatch.setattr("backend.api.routes.jobs.score_jobs_batch", lambda *args, **kwargs: (0, 0))
+    monkeypatch.setattr("backend.api.routes.jobs.verify_top_ranked_jobs", lambda *args, **kwargs: None)
+
+    response = client.post("/api/scout-jobs")
+    assert response.status_code == 202
+    assert scout.call_count == 1
 
 
 def test_partial_profile_without_roles_does_not_scout(isolated_client, monkeypatch) -> None:
