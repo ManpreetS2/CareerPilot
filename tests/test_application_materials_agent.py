@@ -19,7 +19,7 @@ from backend.db.models import (
     TargetPreference,
 )
 from backend.services import application_service
-from tests.mvp_helpers import TEST_USER_ID, insert_candidate
+from tests.mvp_helpers import TEST_USER_ID, ensure_user, insert_candidate
 from backend.services.application_materials_agent import (
     _MATERIALS_PROVIDER_ERROR_PRIORITY,
     _should_replace_materials_error,
@@ -34,6 +34,7 @@ from backend.services.application_materials_agent import (
     MissingJobError,
     MissingJobIntelligenceError,
     build_application_materials_prompt,
+    build_materials_evidence_catalog,
     draft_to_application_package,
     generate_grounded_application_materials,
     ground_application_materials,
@@ -611,3 +612,261 @@ def test_override_records_which_claims_were_unsupported() -> None:
     """Review is only informed if the reviewer can see what is unverified."""
     record = _ungrounded_record()
     assert record.unsupported_claims == ["experience", "skills"]
+
+
+def _rich_qa_materials_context(session):
+    """Sparse QA profile: skills, one project, one education row. No employment."""
+
+    ensure_user(session)
+    previous = session.query(Candidate).filter(Candidate.user_id == TEST_USER_ID).first()
+    if previous is not None:
+        previous.user_id = None
+        session.commit()
+    candidate = Candidate(
+        user_id=TEST_USER_ID,
+        name="QA Test User",
+        email=None,
+        skills=["Python", "Linux"],
+        projects=[
+            {
+                "name": "Release Validation CLI",
+                "description": "Built a Python command-line tool that validates YAML and JSON configuration files.",
+                "technologies": ["Python", "Git"],
+                "url": None,
+            }
+        ],
+        experience=[],
+        education=[
+            {
+                "institution": "QA Technical College",
+                "degree": None,
+                "field": "Computer Science coursework",
+                "graduation_year": None,
+            }
+        ],
+        certifications=[],
+        strengths=[],
+        evidence_links=[],
+    )
+    session.add(candidate)
+    job = JobRecord(
+        public_id="jobicy-qa-materials",
+        title="Software Engineer - Cloud Images",
+        company="Canonical",
+        url="https://example.com/jobs/jobicy-qa-materials",
+        description=(
+            "We are hiring a Software Engineer to work on Linux and cloud images. "
+            "Preferred: Python, Docker, Kubernetes, Jenkins."
+        ),
+        source="manual",
+        status="verified",
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(candidate)
+    session.refresh(job)
+    session.add(
+        JobIntelligenceRecord(
+            job_id=job.id,
+            required_skills=["Python"],
+            preferred_skills=["Linux", "Docker", "Kubernetes", "Jenkins"],
+            years_experience=0,
+            education_requirements=[],
+            tech_stack=["Python", "Linux"],
+            seniority="mid",
+            responsibilities=["Work on Linux cloud images"],
+            likely_interview_focus=["Python"],
+        )
+    )
+    session.add(
+        MatchScoreRecord(
+            job_id=job.id,
+            candidate_id=candidate.id,
+            overall_score=50.0,
+            skill_score=40.0,
+            experience_score=None,
+            education_score=0.0,
+            location_score=None,
+            preference_score=100.0,
+            matched_skills=["Python", "Linux"],
+            partial_matches=[],
+            missing_skills=["Kubernetes", "Jenkins"],
+            recommendation="skip",
+            rationale="Matched Python and Linux from stored evidence.",
+        )
+    )
+    session.add(
+        TargetPreference(
+            user_id=TEST_USER_ID,
+            candidate_id=candidate.id,
+            target_roles=["Software Engineer"],
+            preferred_locations=[],
+        )
+    )
+    session.commit()
+    return load_application_materials_context(session, job.public_id, TEST_USER_ID)
+
+
+def test_prompt_exposes_canonical_evidence_ids(isolated_session) -> None:
+    context = _rich_qa_materials_context(isolated_session)
+    _, user_prompt = build_application_materials_prompt(context)
+    catalog = build_materials_evidence_catalog(context)
+    ids = {row["evidence_id"] for row in catalog}
+    assert ids == {
+        "project:0",
+        "education:0",
+        "skill:profile",
+        "candidate:profile",
+        "job:posting",
+    }
+    for evidence_id in ids:
+        assert evidence_id in user_prompt
+    assert "candidate_evidence_catalog" in user_prompt
+    assert "job_evidence" in user_prompt
+
+
+def test_prompt_explains_claim_evidence_fields(isolated_session) -> None:
+    context = _rich_qa_materials_context(isolated_session)
+    system_prompt, user_prompt = build_application_materials_prompt(context)
+    combined = f"{system_prompt}\n{user_prompt}"
+    assert "claim_excerpt" in combined
+    assert "evidence_kind" in combined
+    assert "evidence_id" in combined
+    assert "claim_evidence" in combined
+    assert "short span copied from the referenced catalog text" in combined
+    assert "claim_evidence_examples" in combined
+    assert "interested in" in combined
+    assert "express" in combined.lower()
+    assert "experience with" in combined.lower()
+    assert "one sentence" in combined.lower() or "exactly one" in combined.lower()
+
+
+def test_prompt_catalog_omits_salary_and_eeo_fields(isolated_session) -> None:
+    context = _rich_qa_materials_context(isolated_session)
+    pref = isolated_session.query(TargetPreference).filter_by(user_id=TEST_USER_ID).one()
+    pref.salary_min = 135000
+    pref.gender = "EEO-GENDER"
+    pref.race_ethnicity = "EEO-RACE"
+    pref.veteran_status = "EEO-VETERAN"
+    pref.disability_status = "EEO-DISABILITY"
+    isolated_session.commit()
+    context = load_application_materials_context(isolated_session, "jobicy-qa-materials", TEST_USER_ID)
+    system_prompt, user_prompt = build_application_materials_prompt(context)
+    combined = f"{system_prompt}\n{user_prompt}"
+    assert "salary_min" not in combined
+    assert "135000" not in combined
+    assert "EEO-GENDER" not in combined
+    assert "EEO-RACE" not in combined
+    assert "EEO-VETERAN" not in combined
+    assert "EEO-DISABILITY" not in combined
+    assert "race_ethnicity" not in combined
+
+
+def test_modest_catalog_backed_response_grounds(isolated_session) -> None:
+    context = _rich_qa_materials_context(isolated_session)
+    output = ApplicationMaterialsStructuredOutput(
+        tailored_bullets=[
+            "Python is included in my current skills.",
+            "My Release Validation CLI project used Python and Git.",
+        ],
+        cover_letter_draft="I am interested in the Software Engineer - Cloud Images role at Canonical.",
+        recruiter_message="I am interested in the Software Engineer role at Canonical.",
+        source_traceability_notes=[
+            "Python is listed in stored skills.",
+            "Release Validation CLI is a stored project.",
+        ],
+        claim_evidence=[
+            MaterialsClaimEvidence(
+                claim_excerpt="Python",
+                evidence_kind="skill",
+                evidence_id="skill:profile",
+            ),
+            MaterialsClaimEvidence(
+                claim_excerpt="Release Validation CLI",
+                evidence_kind="project",
+                evidence_id="project:0",
+            ),
+            MaterialsClaimEvidence(
+                claim_excerpt="Software Engineer",
+                evidence_kind="job",
+                evidence_id="job:posting",
+            ),
+        ],
+    )
+    report = ground_application_materials(output, context)
+    assert report.invented_candidate_claims == 0
+    assert report.invented_job_requirements == 0
+    assert report.numeric_literals_rejected == 0
+    assert report.grounded is True
+
+
+def test_invalid_evidence_id_still_fails(isolated_session) -> None:
+    context = _rich_qa_materials_context(isolated_session)
+    output = ApplicationMaterialsStructuredOutput(
+        tailored_bullets=["Python is included in my current skills."],
+        cover_letter_draft="I am interested in the Software Engineer role at Canonical.",
+        recruiter_message="I am interested in the Software Engineer role at Canonical.",
+        source_traceability_notes=["Python is listed in stored skills."],
+        claim_evidence=[
+            MaterialsClaimEvidence(
+                claim_excerpt="Python",
+                evidence_kind="project",
+                evidence_id="project:999",
+            )
+        ],
+    )
+    report = ground_application_materials(output, context)
+    assert report.grounded is False
+    assert "invalid_evidence_ref" in report.rejected_categories
+
+
+def test_long_claim_excerpt_not_in_catalog_is_invalid_ref(isolated_session) -> None:
+    context = _rich_qa_materials_context(isolated_session)
+    output = ApplicationMaterialsStructuredOutput(
+        tailored_bullets=["Python is included in my current skills."],
+        cover_letter_draft="I am interested in the Software Engineer role at Canonical.",
+        recruiter_message="I am interested in the Software Engineer role at Canonical.",
+        source_traceability_notes=["Python is listed in stored skills."],
+        claim_evidence=[
+            MaterialsClaimEvidence(
+                claim_excerpt="Python is included in my current skills.",
+                evidence_kind="skill",
+                evidence_id="skill:profile",
+            )
+        ],
+    )
+    report = ground_application_materials(output, context)
+    assert report.grounded is False
+    assert "invalid_evidence_ref" in report.rejected_categories
+
+
+def test_express_my_interest_is_still_rejected(isolated_session) -> None:
+    """Prompt forbids 'express'; validator still treats it as the Express skill."""
+
+    context = _rich_qa_materials_context(isolated_session)
+    output = ApplicationMaterialsStructuredOutput(
+        tailored_bullets=["Python is included in my current skills."],
+        cover_letter_draft=(
+            "I am writing to express my interest in the Software Engineer - Cloud Images "
+            "role at Canonical."
+        ),
+        recruiter_message="I am interested in the Software Engineer role at Canonical.",
+        source_traceability_notes=["Python is listed in stored skills."],
+    )
+    report = ground_application_materials(output, context)
+    assert report.grounded is False
+    assert "skill" in report.rejected_categories or "invented_employer" in report.rejected_categories
+
+
+def test_job_only_kubernetes_cannot_become_candidate_evidence(isolated_session) -> None:
+    context = _rich_qa_materials_context(isolated_session)
+    output = ApplicationMaterialsStructuredOutput(
+        tailored_bullets=["Kubernetes expertise"],
+        cover_letter_draft="I am interested in the Software Engineer role at Canonical.",
+        recruiter_message="I am interested in the Software Engineer role at Canonical.",
+        source_traceability_notes=["Kubernetes <- job posting"],
+    )
+    report = ground_application_materials(output, context)
+    assert report.grounded is False
+    assert report.invented_candidate_claims >= 1
+    assert "missing_skill_as_strength" in report.rejected_categories or "skill" in report.rejected_categories

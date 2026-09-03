@@ -303,10 +303,17 @@ _SENTENCE_START_IGNORE = frozenset(
 )
 
 _JSON_SHAPE = """{
-  "tailored_bullets": ["bullet grounded in candidate evidence and the job"],
+  "tailored_bullets": ["modest bullet using only catalog evidence"],
   "cover_letter_draft": "short cover letter using only evidenced claims",
   "recruiter_message": "short recruiter note using only evidenced claims",
-  "source_traceability_notes": ["bullet-or-sentence -> candidate or job evidence"]
+  "source_traceability_notes": ["human-readable note with no evidence_id strings"],
+  "claim_evidence": [
+    {
+      "claim_excerpt": "short span copied from the referenced catalog text; also appears in the claim",
+      "evidence_kind": "skill|project|experience|education|certification|candidate|job",
+      "evidence_id": "one exact ID from the supplied evidence catalog"
+    }
+  ]
 }"""
 
 
@@ -612,16 +619,120 @@ def _materials_prompt_preferences(preferences: TargetPreferences | None) -> dict
     return {field: payload.get(field) for field in _MATERIALS_PROMPT_PREFERENCE_FIELDS}
 
 
+def build_materials_evidence_catalog(context: ApplicationMaterialsContext) -> list[dict[str, str]]:
+    """Provider-facing evidence rows using the same IDs as grounding.
+
+    Derived from ``_build_evidence_contexts`` so prompt IDs cannot drift from
+    the validator. Each row is ``evidence_kind``, ``evidence_id``, and ``text``.
+    """
+
+    return [
+        {
+            "evidence_kind": item.kind,
+            "evidence_id": item.evidence_id,
+            "text": item.text,
+        }
+        for item in _build_evidence_contexts(context)
+    ]
+
+
 def build_application_materials_prompt(context: ApplicationMaterialsContext) -> tuple[str, str]:
     """Construct the grounded generation prompt. Does not call a provider."""
 
+    catalog = build_materials_evidence_catalog(context)
+    candidate_catalog = [row for row in catalog if row["evidence_kind"] != "job"]
+    job_evidence = next(row for row in catalog if row["evidence_kind"] == "job")
+    missing_skills = [item for item in context.fit_score.missing_skills if str(item).strip()]
+    safe_examples: list[str] = []
+    if context.candidate.skills:
+        skill = context.candidate.skills[0].strip()
+        if skill:
+            safe_examples.append(f"{skill} is included in my current skills.")
+    if context.candidate.projects:
+        project_name = (context.candidate.projects[0].name or "").strip()
+        if project_name:
+            techs = [
+                item.strip()
+                for item in (context.candidate.projects[0].technologies or [])
+                if str(item).strip()
+            ]
+            allowed = [s for s in context.candidate.skills if s.strip()]
+            mention = ", ".join(tech for tech in techs if tech in allowed) or (
+                allowed[0] if allowed else "listed skills"
+            )
+            safe_examples.append(f"My {project_name} project used {mention}.")
+    job_title = (context.job.title or "").strip() or "this role"
+    job_company = (context.job.company or "").strip() or "this company"
+    safe_examples.append(f"I am interested in the {job_title} role at {job_company}.")
+    claim_examples: list[dict[str, str]] = []
+    if context.candidate.skills and context.candidate.skills[0].strip():
+        claim_examples.append(
+            {
+                "claim_excerpt": context.candidate.skills[0].strip(),
+                "evidence_kind": "skill",
+                "evidence_id": "skill:profile",
+            }
+        )
+    if context.candidate.projects:
+        project_name = (context.candidate.projects[0].name or "").strip()
+        if project_name:
+            claim_examples.append(
+                {
+                    "claim_excerpt": project_name,
+                    "evidence_kind": "project",
+                    "evidence_id": "project:0",
+                }
+            )
+    claim_examples.append(
+        {
+            "claim_excerpt": job_title if job_title != "this role" else job_company,
+            "evidence_kind": "job",
+            "evidence_id": "job:posting",
+        }
+    )
     system_prompt = (
-        "You write application materials only from the supplied candidate evidence "
-        "and stored job requirements. Never invent skills, employers, titles, dates, "
-        "metrics, percentages, currency values, technologies, education, or accomplishments. "
-        "Never introduce a job requirement that is not in Job Intelligence or the posting. "
+        "You write application materials only from the supplied evidence catalog "
+        "and stored job requirements. Prefer omission over embellishment. Modest, "
+        "literal wording is better than impressive language. Never invent skills, "
+        "employers, titles, dates, metrics, percentages, currency values, "
+        "technologies, education, or accomplishments. Never introduce a job "
+        "requirement that is not in Job Intelligence or the posting. "
         "Preserve numeric types and units exactly as written in the evidence. "
-        "Return one raw JSON object only, with no markdown or commentary."
+        "Use ONLY evidence_id values from candidate_evidence_catalog and job_evidence. "
+        "Never invent evidence IDs. evidence_kind must match that catalog row. "
+        "claim_excerpt must be a short span copied from that row's text (for example a "
+        "skill name, project name, school name, or job title), and the same span must "
+        "appear in the claim. Never use a whole bullet, sentence, or note as "
+        "claim_excerpt. Candidate claims use candidate-side evidence. "
+        "Employer or job-requirement statements use job:posting. A target role "
+        "preference is not candidate work experience. Missing skills must never be "
+        "described as strengths. Do not combine unrelated projects, education, or "
+        "experience into one achievement. Do not invent metrics, years, employers, "
+        "or titles. Do not convert job requirements into candidate accomplishments. "
+        "Resume bullets must not say the candidate worked at the hiring company "
+        "unless that employer appears on a candidate experience evidence row. "
+        "Cover letters and recruiter notes may say the candidate is interested in "
+        "the role at the company. They must not retell project work in the same "
+        "sentence as the company name. Source-traceability notes are human-readable "
+        "sentences with no digits; never copy evidence_id strings such as project:0 "
+        "into bullets, letters, or notes. Put those IDs only in "
+        "claim_evidence.evidence_id, copied character-for-character from the catalog. "
+        "Resume bullets should name an exact catalog project or a listed skill. "
+        "Do not paraphrase a project into a new product name. Prefer 'My {exact "
+        "project name} ...' over 'Built/Created/Developed a ...'. Never write the "
+        "word 'express' (it is not a candidate skill). Never write 'experience with', "
+        "'hands-on experience', 'practical experience', or 'I have completed'. "
+        "Use the exact phrase 'interested in' for role interest; do not write "
+        "'interest in'. Cover letter and recruiter message must each be exactly "
+        "one sentence, copied from the safe_wording_examples role-interest line, "
+        "with no second sentence about skills, education, projects, or background. "
+        "Notes must not use Built, Created, or Developed. In resume bullets, mention "
+        "only exact catalog project names and skills listed on skill:profile; do not "
+        "add extra proper nouns such as YAML or JSON even if they appear in a project "
+        "description. Do not name the hiring company or job title in bullets or notes; "
+        "those names belong only in the one-sentence cover letter and recruiter message. "
+        "If a claim cannot be copied from catalog text, omit it. Return "
+        "one raw JSON object only, with no markdown or commentary."
     )
     payload = {
         "job": context.job.model_dump(mode="json"),
@@ -629,11 +740,21 @@ def build_application_materials_prompt(context: ApplicationMaterialsContext) -> 
         "job_intelligence": context.intelligence.model_dump(mode="json"),
         "fit_score": context.fit_score.model_dump(mode="json"),
         "preferences": _materials_prompt_preferences(context.preferences),
+        "candidate_evidence_catalog": candidate_catalog,
+        "job_evidence": job_evidence,
+        "missing_skills_never_as_strengths": missing_skills,
+        "safe_wording_examples": safe_examples,
+        "claim_evidence_examples": claim_examples,
         "output_schema": _JSON_SHAPE,
     }
     user_prompt = (
         "Using only the JSON context below, draft tailored resume bullets, a cover letter, "
-        "a recruiter message, and source-traceability notes.\n\n"
+        "a recruiter message, source-traceability notes, and claim_evidence rows that cite "
+        "catalog IDs. Write at most three modest bullets. Cover letter and recruiter message "
+        "must each be exactly one 'I am interested in ...' sentence from safe_wording_examples. "
+        "Do not mention skills, education, or projects in those two fields. Copy claim_evidence "
+        "rows from claim_evidence_examples: short catalog spans only, never a full sentence. "
+        "If evidence is thin, write fewer claims rather than filling gaps with inference.\n\n"
         f"{json.dumps(payload, ensure_ascii=True, default=str)}"
     )
     return system_prompt, user_prompt
@@ -1739,12 +1860,13 @@ def generate_grounded_application_materials(
         parsed = _structured_output_from_generator(invoke, context, user_prompt, system_prompt)
         report = ground_application_materials(parsed, context)
         logger.info(
-            "application_materials grounding accepted=%s rejected=%s invented_candidate=%s invented_job=%s numeric=%s job_pk=%s",
+            "application_materials grounding accepted=%s rejected=%s invented_candidate=%s invented_job=%s numeric=%s categories=%s job_pk=%s",
             report.accepted_claim_count,
             report.rejected_claim_count,
             report.invented_candidate_claims,
             report.invented_job_requirements,
             report.numeric_literals_rejected,
+            ",".join(sorted(set(report.rejected_categories))) or "none",
             context.job_pk,
         )
         if not report.grounded and not override_grounding:
