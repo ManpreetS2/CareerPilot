@@ -14,11 +14,11 @@ Primary web navigation is workflow-first:
 - Prepare (`/jobs/:jobId/prepare`, or `/prepare` when no job is selected)
 - Track (`/track`; `/applications` is the same tracker)
 
-Supporting destinations: Profile, Resume, Settings.
+Supporting destinations: Profile, Career Growth (`/growth`), Resume, Settings.
 
-Analyze and Prepare stay contextual under a selected job. Interview Coach remains on Job Detail. Application Tracker is a first-class Track destination with Kanban and list/timeline views.
+Analyze and Prepare stay contextual under a selected job. Interview Coach remains on Job Detail. Application Tracker is a first-class Track destination with Kanban and list/timeline views. Career Growth is advisory only: it never changes Fit scores.
 
-Public routes: `/`, `/login`, `/signup`. New signup continues through `/onboarding`.
+Public routes: `/`, `/login`, `/signup`, `/privacy`. New signup continues through `/onboarding`.
 
 ## MVP workflow
 
@@ -80,14 +80,20 @@ CareerPilot is an authenticated local product. Signup, login, logout, and `GET /
 - Application materials are generated from stored evidence, not a placeholder
 - Mock-interview answer feedback is ephemeral (not stored) and follows `LLM_PROVIDER_ORDER`
 - Tracker rows can store a user-set follow-up date; CareerPilot does not send automated notifications or reminders. Track is a primary web destination (`/track`).
+- Profile-first gates: Discover / Find Jobs / Career Growth require a usable candidate profile and at least one target role
+- Account deletion from Settings (revokes every session and owner-scoped private rows; shared job catalog remains)
+- Process-local login throttling (generic errors, no email-existence leak)
+- Grounded Match Evidence with fingerprint staleness and canonical skill aliases
+- Bounded parallel Job Intelligence extraction workers
+- Read-only Career Growth / Skills Gap from stored evidence (`GET /api/career-growth`, `/growth`)
 
-Opening Dashboard, Jobs, Job Detail, Prepare Application, Profile, Resume, or Settings never scores a job, extracts requirements, generates materials, approves, or creates a resume version by itself. Find Jobs persists a deterministic fit score (`score_job`) for each scoreable listing and does not call an LLM. Calculate Fit, Generate Materials, Prepare Interview, Approve, and Save Resume Version stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation. Assisted Apply and the extension never submit forms.
+Opening Dashboard, Jobs, Job Detail, Prepare Application, Profile, Resume, Settings, or Career Growth never scores a job, extracts requirements, generates materials, approves, or creates a resume version by itself. Career Growth only reads stored evidence. Find Jobs persists a deterministic fit score (`score_job`) for each scoreable listing and does not call an LLM. Calculate Fit, Generate Materials, Prepare Interview, Approve, and Save Resume Version stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation. Assisted Apply and the extension never submit forms.
 
-Job discovery currently supports Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, and manual posting URLs. The Jobs workspace now uses a compact list plus desktop preview, internships/full-time/both title filter, and previous/next job navigation. Developer B still owns discovery, verification, ATS/form-fill, and the Chrome extension; see `docs/developer-b-ui-handoff.md`.
+Job discovery currently supports Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, and manual posting URLs. The Jobs workspace uses a compact list plus desktop preview, internships/full-time/both title filter, and previous/next job navigation.
 
-Approved resume versions can be downloaded as PDF or DOCX from Prepare Application. The Chrome extension can download the same owned files; it does not upload a resume to an ATS.
+Approved resume versions can be downloaded as PDF or DOCX from Prepare Application. The Chrome extension can download the same owned files and may attach them to a recognized Greenhouse/Lever resume file field. If the page blocks programmatic attachment, the side panel says so and asks you to attach the file yourself. CareerPilot never submits the application.
 
-The Chrome extension provides a side panel and approved autofill for Greenhouse/Lever. Extension resume-file upload is not implemented. Unpacked real-Chrome visual verification remains Developer B’s lane and is not claimed complete here.
+The Chrome extension provides a side panel and approved autofill for Greenhouse/Lever. Unpacked real-Chrome visual verification on live ATS pages is a human release check and is not claimed complete from unit tests alone.
 
 **Legacy local data**
 
@@ -105,10 +111,9 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - Deployment / production hosting
 - Password reset
 - Email verification
-- Login rate limiting
 - Live-provider verification in CI
 - Automatic job application submission
-- Extension resume-file upload
+- Calendar, email alerts, billing, or analytics
 
 
 ## Privacy and safety
@@ -119,7 +124,8 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - No candidate skill, employer, metric, or education claim may be invented without stored evidence.
 - Assisted apply and the browser extension **never click submit**. The human reviews and submits.
 - Page load for Jobs, Job Detail, Prepare Application, Fit Score, Resume, and Interview Prep is read-only. Calculate Fit and generation run only on an explicit user action. Find Jobs also persists a deterministic fit score for scoreable listings (no LLM).
-- Private records are user-scoped. Shared job titles may be visible to every signed-in user; scores, recommendations, packages, tracker state, approval, and interview evidence are not.
+- Private records are user-scoped. Shared job titles may be visible to every signed-in user; scores, recommendations, packages, tracker state, approval, interview evidence, and Career Growth aggregates are not.
+- You can delete your account from Settings. That removes owner-scoped private data and revokes sessions. It does not delete the shared job catalog.
 
 ## Setup
 
@@ -259,7 +265,7 @@ npm run typecheck
 npm run build
 ```
 
-CI (`.github/workflows/ci.yml`) runs pytest, the MVP browser workflow, frontend unit tests, frontend typecheck and production build, the browser-extension build, `git diff --check`, and the tracked-secret audit on Python 3.11 and Node.js 20. Playwright Chromium is installed for Form Fill fixture tests.
+CI (`.github/workflows/ci.yml`) runs pytest, the MVP / Job Intelligence / CORS browser workflows, frontend unit tests, frontend typecheck and production build, the browser-extension tests/typecheck/build, Python and npm dependency audits, `git diff --check`, and the tracked-secret audit on Python 3.11 and Node.js 22. Playwright Chromium is installed for Form Fill fixture tests.
 
 Optional live LLM smoke test (not part of CI):
 
@@ -286,9 +292,20 @@ python scripts/live_ollama_gemini_check.py
 
 ## Two-developer Git workflow
 
-Do **not** commit directly to `main`. Work on feature branches and merge through pull requests.
+Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen; remaining work is release-gate QA and blocker fixes only.
 
-Developer B ownership remains: Job Scout, Job Verification, Form Fill, browser-extension, ATS fixtures, and existing approval / assisted-apply behavior. Do not rewrite those implementations while completing Application Materials.
+## Demo path
+
+A recruiter can follow the product without extra tooling:
+
+1. Sign up
+2. Complete Profile (resume + at least one target role)
+3. Discover → Find Jobs
+4. Analyze a listing (Match / Evidence)
+5. Prepare materials, review, and approve
+6. Track status
+
+Optional supporting destinations: Career Growth, Interview Coach on Job Detail, Resume library, Chrome extension (never submits).
 
 ## Useful API routes
 
@@ -299,12 +316,14 @@ Developer B ownership remains: Job Scout, Job Verification, Form Fill, browser-e
 | `POST` | `/api/auth/logout` | Revoke session |
 | `GET` | `/api/auth/me` | Current user |
 | `GET` | `/api/profile` | Current candidate and latest preferences (read-only) |
+| `DELETE` | `/api/account` | Delete account and owner-scoped private data |
 | `POST` | `/api/parse-resume` | Grounded candidate profile |
 | `POST` | `/api/preferences` | Reusable application answers |
 | `POST` | `/api/scout-jobs` | Live job discovery |
 | `POST` | `/api/jobs/ingest-url` | Manual posting URL |
 | `POST` | `/api/jobs/verify` | Verification sweep |
 | `GET`/`POST` | `/api/jobs/{job_id}/intelligence` | Stored / extract Job Intelligence |
+| `GET` | `/api/jobs/{job_id}/match-evidence` | Stored Match Evidence (read-only) |
 | `GET` | `/api/jobs/{job_id}/score` | Stored fit score (read-only; 404 if missing) |
 | `GET` | `/api/jobs/scores` | Stored scores for the Jobs page (read-only) |
 | `POST` | `/api/jobs/{job_id}/score` | Fit & Gap (explicit) |
@@ -316,6 +335,7 @@ Developer B ownership remains: Job Scout, Job Verification, Form Fill, browser-e
 | `GET` | `/api/applications` | Tracker list (read-only) |
 | `GET`/`PATCH` | `/api/applications/{job_id}/tracking` | Explicit tracker updates, including optional follow-up date |
 | `GET` | `/api/dashboard/summary` | Real stored metrics |
+| `GET` | `/api/career-growth` | Read-only Skills Gap / Career Growth from stored evidence |
 | `GET` | `/api/resume-versions` | Owner-scoped immutable resume version summaries |
 | `GET` | `/api/resume-versions/{version_id}` | Historical resume version detail (no hashes or raw snapshot) |
 | `GET`/`POST` | `/api/jobs/{job_id}/resume-versions` | Per-job list / explicit save |

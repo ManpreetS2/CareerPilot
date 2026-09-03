@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { classifyAutofillFields, SENSITIVE_EEO_KEYS } from "../src/field-status";
 
 describe("autofill field status", () => {
-  it("marks identity and profile links Ready, essays Needs review, EEO Manual, resume Unsupported", () => {
+  it("marks identity and profile links Ready, essays Needs review, and EEO Manual", () => {
     const rows = classifyAutofillFields({
       full_name: "Ada Lovelace",
       email: "ada@example.com",
@@ -19,7 +19,7 @@ describe("autofill field status", () => {
     expect(byKey.cover_letter.status).toBe("Needs review");
     expect(byKey.gender.status).toBe("Manual");
     expect(byKey.gender.label).toContain("EEO");
-    expect(byKey.resume.status).toBe("Unsupported");
+    expect(byKey.resume).toBeUndefined();
   });
 
   it("always lists sensitive EEO keys as Manual even when values exist", () => {
