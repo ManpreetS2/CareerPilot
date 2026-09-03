@@ -22,9 +22,9 @@ from backend.db.models import (
     InterviewPrepRecord,
     JobIntelligenceRecord,
     JobRecord,
-    MatchScoreRecord,
 )
 from backend.schemas.schemas import InterviewAnswerFeedback, InterviewPrep, JobIntelligence, MatchScore
+from backend.services.analysis_service import StoredScoreNotFoundError, get_stored_match_score
 from backend.services.application_materials_agent import candidate_record_to_profile
 from backend.services.job_intelligence_service import get_stored_job_intelligence
 from backend.services.job_requirement_extractor import load_requirement_profile
@@ -137,33 +137,12 @@ def get_interview_prep(db: Session, job_id: str, user_id: int) -> InterviewPrep 
 
 
 def _latest_fit_score(db: Session, job: JobRecord, candidate: Candidate | None) -> MatchScore | None:
-    if candidate is None:
+    if candidate is None or candidate.user_id is None:
         return None
-    record = (
-        db.query(MatchScoreRecord)
-        .filter(
-            MatchScoreRecord.job_id == job.id,
-            MatchScoreRecord.candidate_id == candidate.id,
-        )
-        .order_by(MatchScoreRecord.id.desc())
-        .first()
-    )
-    if record is None:
+    try:
+        return get_stored_match_score(db, job.public_id, candidate.user_id)
+    except StoredScoreNotFoundError:
         return None
-    return MatchScore(
-        job_id=job.public_id,
-        overall_score=record.overall_score,
-        skill_score=record.skill_score,
-        experience_score=record.experience_score,
-        education_score=record.education_score,
-        location_score=record.location_score,
-        preference_score=record.preference_score,
-        matched_skills=list(record.matched_skills or []),
-        partial_matches=list(record.partial_matches or []),
-        missing_skills=list(record.missing_skills or []),
-        recommendation=record.recommendation,  # type: ignore[arg-type]
-        rationale=record.rationale,
-    )
 
 
 def load_interview_prep_context(db: Session, job_id: str, user_id: int) -> InterviewPrepContext:

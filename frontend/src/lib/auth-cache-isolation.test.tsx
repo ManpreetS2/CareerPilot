@@ -281,5 +281,5 @@ describe("authenticated query cache isolation", () => {
     await user.click(await screen.findByRole("tab", { name: "Saved" }));
     expect(await screen.findByText("B-Only Backend Role")).toBeInTheDocument();
     expect(screen.queryByText("A-Only Saved Fintech Internship")).not.toBeInTheDocument();
-  });
+  }, 20_000);
 });

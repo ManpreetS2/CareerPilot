@@ -7,7 +7,13 @@ from datetime import date
 import pytest
 
 from backend.db.models import Candidate, JobIntelligenceRecord, JobRecord, MatchEvidenceRecord, TargetPreference, User
-from backend.services.analysis_service import _canonical_skill_key, skill_concepts_in_label
+from backend.services.analysis_service import (
+    StoredScoreNotFoundError,
+    _canonical_skill_key,
+    get_stored_match_score,
+    list_stored_match_scores,
+    skill_concepts_in_label,
+)
 from backend.services.candidate_provenance import fingerprint_for_candidate
 from backend.services.match_evidence_service import (
     MatchEvidenceConsistencyError,
@@ -197,6 +203,21 @@ def test_stale_when_candidate_fingerprint_changes(isolated_session) -> None:
     assert payload.provenance.stale is True
     assert "candidate" in payload.provenance.stale_reasons
     assert payload.full_evidence is False
+
+
+def test_stale_stored_score_is_not_returned_as_current(isolated_session) -> None:
+    _user(isolated_session)
+    job = _job(isolated_session)
+    candidate = _candidate(isolated_session, 1, graduation_year="2027")
+    _prefs(isolated_session, candidate, academic_year="final_year", expected_graduation="2027-05")
+    score_job_verified(isolated_session, job, 1, as_of=AS_OF)
+    current = get_stored_match_score(isolated_session, job.public_id, 1)
+    assert current.overall_score is not None
+    candidate.skills = ["Python", "Rust"]
+    isolated_session.commit()
+    with pytest.raises(StoredScoreNotFoundError):
+        get_stored_match_score(isolated_session, job.public_id, 1)
+    assert list_stored_match_scores(isolated_session, 1) == []
 
 
 def test_other_user_cannot_read_match_evidence(isolated_client) -> None:

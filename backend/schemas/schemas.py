@@ -302,7 +302,7 @@ class ParseResumeResponse(BaseModel):
 
 class ScoutJobsResponse(BaseModel):
     jobs: list[Job]
-    note: str = "Day 1 mock response. Job discovery is not implemented yet."
+    note: str = ""
     jobs_found: int = 0
     matched_count: int = 0
     sources_searched: int = 0
