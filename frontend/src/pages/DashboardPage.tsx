@@ -10,6 +10,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { resolveNextAction } from "../lib/dashboard-next-action";
+import { evidenceSourcesFromCandidate, requiredReadinessFromServer } from "../lib/profile-gate";
 import { shouldPromptFinishSetup } from "../lib/onboarding";
 import { queryKeys } from "../lib/query-keys";
 import { useCandidateSession } from "../lib/session";
@@ -79,13 +80,8 @@ export function DashboardPage() {
     resumeVersions: versions,
   });
   const strong = scores.filter((score) => score.score_kind === "verified");
-  const readinessFlags = [
-    Boolean(liveCandidate?.name),
-    Boolean(liveCandidate?.skills.length),
-    Boolean(liveCandidate?.experience.length),
-    Boolean(liveCandidate?.projects.length),
-    Boolean(livePreferences?.target_roles?.length),
-  ];
+  const readinessRequirements = requiredReadinessFromServer(readiness);
+  const evidenceSources = evidenceSourcesFromCandidate(liveCandidate);
 
   const greetingName =
     liveCandidate?.name?.split(" ")[0] || user?.email?.split("@")[0] || "there";
@@ -204,8 +200,11 @@ export function DashboardPage() {
 
             <Glass variant="panel" className="rounded-2xl p-6">
               <h2 className="text-lg font-semibold text-foreground">Profile Readiness</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Discover unlocks with Identity, any one grounded evidence source, and a target role.
+              </p>
               <div className="mt-4">
-                <ReadinessPath flags={readinessFlags} />
+                <ReadinessPath requirements={readinessRequirements} evidenceSources={evidenceSources} />
               </div>
               <dl className="mt-6 grid grid-cols-2 gap-4">
                 <div>

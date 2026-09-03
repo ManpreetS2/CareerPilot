@@ -10,6 +10,7 @@ import { PageHeader } from "../components/ui/page-header";
 import { Surface } from "../components/ui/surface";
 import { ReadinessPath } from "../components/signature/ReadinessPath";
 import { api } from "../lib/api";
+import { evidenceSourcesFromCandidate, requiredReadinessFromServer } from "../lib/profile-gate";
 import { queryKeys } from "../lib/query-keys";
 import { resumeParseErrorHeading } from "../lib/resume-parse-error";
 import { useCandidateSession } from "../lib/session";
@@ -36,13 +37,8 @@ export function ProfilePage() {
   const [prefsError, setPrefsError] = useState<unknown>(null);
   const [prefsSuccess, setPrefsSuccess] = useState<string | null>(null);
 
-  const readinessFlags = [
-    Boolean(liveCandidate?.name),
-    Boolean(liveCandidate?.skills.length),
-    Boolean(liveCandidate?.experience.length),
-    Boolean(liveCandidate?.projects.length),
-    Boolean(livePreferences?.target_roles?.length),
-  ];
+  const readinessRequirements = requiredReadinessFromServer(profileQuery.data?.readiness);
+  const evidenceSources = evidenceSourcesFromCandidate(liveCandidate);
 
   function selectFile(next: File | null) {
     setProfileError(null);
@@ -123,8 +119,11 @@ export function ProfilePage() {
 
       <Surface className="p-5">
         <h2 className="font-display text-lg font-semibold">Profile readiness</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Discover unlocks with Identity, any one grounded evidence source, and a target role.
+        </p>
         <div className="mt-3">
-          <ReadinessPath flags={readinessFlags} />
+          <ReadinessPath requirements={readinessRequirements} evidenceSources={evidenceSources} />
         </div>
       </Surface>
 

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   INCOMPLETE_READINESS,
   canScoutJobs,
+  evidenceSourcesFromCandidate,
+  requiredReadinessFromServer,
   resolveProfileGate,
 } from "./profile-gate";
+import type { CandidateProfile } from "./types";
 
 const ready = {
   ready: true,
@@ -59,5 +62,54 @@ describe("resolveProfileGate", () => {
     if (gate.kind === "incomplete") {
       expect(gate.readiness).toEqual(INCOMPLETE_READINESS);
     }
+  });
+});
+
+describe("requiredReadinessFromServer", () => {
+  it("marks all three required gates Open when the profile is empty", () => {
+    const items = requiredReadinessFromServer(INCOMPLETE_READINESS);
+    expect(items.map((item) => [item.label, item.ready])).toEqual([
+      ["Identity", false],
+      ["Grounded evidence", false],
+      ["Target role", false],
+    ]);
+  });
+
+  it("marks all three Ready for name + one skill + target role", () => {
+    const items = requiredReadinessFromServer(ready);
+    expect(items.every((item) => item.ready)).toBe(true);
+  });
+
+  it("marks only Target role Ready when the server is still missing candidate evidence", () => {
+    const items = requiredReadinessFromServer({
+      ready: false,
+      code: "profile_required",
+      missing: ["candidate_profile", "candidate_evidence"],
+      next_route: "/profile",
+    });
+    expect(items.find((item) => item.id === "identity")?.ready).toBe(false);
+    expect(items.find((item) => item.id === "grounded_evidence")?.ready).toBe(false);
+    expect(items.find((item) => item.id === "target_role")?.ready).toBe(true);
+  });
+});
+
+describe("evidenceSourcesFromCandidate", () => {
+  it("does not treat empty experience or projects as required gates", () => {
+    const candidate: CandidateProfile = {
+      name: "QA Test User",
+      skills: ["Python"],
+      education: [],
+      experience: [],
+      projects: [],
+      certifications: [],
+      strengths: [],
+      evidence_links: [],
+    };
+    expect(evidenceSourcesFromCandidate(candidate)).toEqual([
+      { id: "skills", label: "Skills", present: true },
+      { id: "education", label: "Education", present: false },
+      { id: "experience", label: "Experience", present: false },
+      { id: "projects", label: "Projects", present: false },
+    ]);
   });
 });

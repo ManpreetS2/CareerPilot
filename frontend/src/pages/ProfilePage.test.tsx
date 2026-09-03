@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -118,5 +118,81 @@ describe("ProfilePage resume parsing", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Alex Rivera")).toBeInTheDocument();
     expect(api.parseResume).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ProfilePage readiness visualization", () => {
+  beforeEach(() => {
+    vi.mocked(api.getProfile).mockReset();
+  });
+
+  it("shows Identity, Grounded evidence, and Target role as Open for an empty profile", async () => {
+    vi.mocked(api.getProfile).mockResolvedValue({
+      candidate: null,
+      preferences: null,
+      readiness: {
+        ready: false,
+        code: "profile_required",
+        missing: ["candidate_profile", "candidate_evidence", "target_roles"],
+        next_route: "/profile",
+      },
+    });
+    renderProfile();
+    await waitFor(() => {
+      expect(screen.getByTestId("readiness-required-identity")).toHaveTextContent("Open");
+      expect(screen.getByTestId("readiness-required-grounded_evidence")).toHaveTextContent("Open");
+      expect(screen.getByTestId("readiness-required-target_role")).toHaveTextContent("Open");
+    });
+    expect(await screen.findByText(/No profile yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Add at least one skill, education item, experience item, or project/)).toBeInTheDocument();
+    expect(screen.queryByTestId("readiness-required-experience")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("readiness-required-projects")).not.toBeInTheDocument();
+  });
+
+  it("marks the three required gates Ready when name, a skill, and a target role exist without experience or projects", async () => {
+    vi.mocked(api.getProfile).mockResolvedValue({
+      candidate: {
+        name: "QA Test User",
+        skills: ["Python"],
+        education: [],
+        experience: [],
+        projects: [],
+        certifications: [],
+        strengths: [],
+        evidence_links: [],
+      },
+      preferences: { target_roles: ["Software Engineer"], preferred_locations: [], constraints: [] },
+      readiness: { ready: true, missing: [], code: null, next_route: null },
+    });
+    renderProfile();
+    await waitFor(() => {
+      expect(screen.getByTestId("readiness-required-identity")).toHaveTextContent("Ready");
+      expect(screen.getByTestId("readiness-required-grounded_evidence")).toHaveTextContent("Ready");
+      expect(screen.getByTestId("readiness-required-target_role")).toHaveTextContent("Ready");
+    });
+    expect(screen.getByTestId("readiness-source-skills")).toHaveTextContent("Present");
+    expect(screen.getByTestId("readiness-source-education")).toHaveTextContent("None");
+    expect(screen.getByTestId("readiness-source-experience")).toHaveTextContent("None");
+    expect(screen.getByTestId("readiness-source-projects")).toHaveTextContent("None");
+    expect(screen.getByText("Evidence sources — not individually required")).toBeInTheDocument();
+  });
+
+  it("keeps Identity and Grounded evidence Open when only a target role is saved", async () => {
+    vi.mocked(api.getProfile).mockResolvedValue({
+      candidate: null,
+      preferences: { target_roles: ["Software Engineer"], preferred_locations: [], constraints: [] },
+      readiness: {
+        ready: false,
+        code: "profile_required",
+        missing: ["candidate_profile", "candidate_evidence"],
+        next_route: "/profile",
+      },
+    });
+    renderProfile();
+    await waitFor(() => {
+      expect(screen.getByTestId("readiness-required-identity")).toHaveTextContent("Open");
+      expect(screen.getByTestId("readiness-required-grounded_evidence")).toHaveTextContent("Open");
+      expect(screen.getByTestId("readiness-required-target_role")).toHaveTextContent("Ready");
+    });
   });
 });
