@@ -444,3 +444,20 @@ class InterviewPrepRecord(Base):
     )
 
     job: Mapped[JobRecord] = relationship(back_populates="interview_prep_rows")
+
+
+class ApplicationEventRecord(Base):
+    """Append-only conversion-funnel log. Never updated or deleted, and never
+    the source of truth for current state (ApplicationTrackerRecord.status and
+    ApplicationPackageRecord.approval_status still are) — this exists only to
+    answer "when did this happen", which a mutable column can't."""
+
+    __tablename__ = "application_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )

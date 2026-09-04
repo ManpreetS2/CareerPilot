@@ -1,5 +1,6 @@
 import { API_BASE_URL } from "./config";
 import type {
+  ApplicationAnalyticsSummary,
   ApplicationListItem,
   ApplicationPackage,
   ApplicationTrackerItem,
@@ -330,6 +331,9 @@ export const api = {
 
   getCareerGrowth: (init?: RequestInit) =>
     request<CareerGrowthSummary>("/api/career-growth", init),
+
+  getAnalyticsSummary: (init?: RequestInit) =>
+    request<ApplicationAnalyticsSummary>("/api/analytics/summary", init),
 
   fillApplication: (jobId: string) =>
     request<FormFillResult>(`/api/jobs/${jobId}/fill-application`, {

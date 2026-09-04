@@ -279,6 +279,19 @@ export function DashboardPage() {
                 Open Career Growth →
               </Link>
             </Glass>
+
+            <Glass variant="panel" className="rounded-2xl p-6">
+              <h2 className="text-lg font-semibold text-foreground">Analytics</h2>
+              <p className="mt-4 text-sm text-muted-foreground">
+                Your conversion funnel from saved jobs through offers, plus source and match-score performance.
+              </p>
+              <Link
+                to="/analytics"
+                className="mt-4 inline-block text-sm font-semibold text-primary hover:text-primary-hover"
+              >
+                Open Analytics →
+              </Link>
+            </Glass>
           </div>
         </>
       )}

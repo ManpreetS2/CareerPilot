@@ -80,6 +80,7 @@ describe("AppShell", () => {
       "Track",
       "Profile",
       "Growth",
+      "Analytics",
       "Resume",
       "Settings",
     ]);
@@ -172,6 +173,7 @@ describe("AppShell", () => {
       "Track",
       "Profile",
       "Growth",
+      "Analytics",
       "Resume",
       "Settings",
     ]);

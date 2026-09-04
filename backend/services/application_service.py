@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from backend.services.analysis_service import StoredScoreNotFoundError, get_stored_match_score
 from backend.db.models import ApplicationPackageRecord, Candidate, JobRecord
 from backend.schemas.schemas import ApplicationPackage, ApprovalRequest, ApprovalResponse
+from backend.services.analytics_service import record_event
 from backend.services.application_materials_agent import (
     ApplicationMaterialsConflictError,
     ApplicationMaterialsGenerateFn,
@@ -185,6 +186,7 @@ def get_or_generate_application_package(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Application materials could not be stored.",
         )
+    record_event(db, job_pk=job.id, user_id=user_id, event_type="materials_generated")
     return _record_to_package(record, job_id)
 
 
@@ -256,6 +258,9 @@ def apply_approval(db: Session, job_id: str, user_id: int, request: ApprovalRequ
     if "notes" in provided:
         record.decision_notes = request.notes or None
     db.commit()
+
+    if request.decision == "approved":
+        record_event(db, job_pk=job.id, user_id=user_id, event_type="materials_approved")
 
     return ApprovalResponse(
         job_id=job_id,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BriefcaseBusiness,
+  ChartNoAxesCombined,
   FileSearch,
   FileText,
   Kanban,
@@ -35,6 +36,13 @@ const BASE_COMMANDS: Command[] = [
   { id: "track", label: "Track", hint: "Pipeline Kanban and list", to: "/track", icon: Kanban },
   { id: "profile", label: "Upload Resume", hint: "Profile workspace", to: "/profile", icon: Upload },
   { id: "growth", label: "Career Growth", hint: "Skills gap from stored evidence", to: "/growth", icon: TrendingUp },
+  {
+    id: "analytics",
+    label: "Analytics",
+    hint: "Conversion funnel from saved jobs to offers",
+    to: "/analytics",
+    icon: ChartNoAxesCombined,
+  },
   { id: "resume", label: "Resume", hint: "Immutable version library", to: "/resume", icon: FileText },
   { id: "settings", label: "Settings", hint: "Appearance and privacy", to: "/settings", icon: Settings },
   { id: "profile-nav", label: "Profile", hint: "Grounded candidate record", to: "/profile", icon: UserRound },

@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   BriefcaseBusiness,
+  ChartNoAxesCombined,
   FileSearch,
   FileText,
   Kanban,
@@ -34,7 +35,17 @@ type NavItem = {
   to: string;
   label: string;
   icon: LucideIcon;
-  id: "overview" | "discover" | "analyze" | "prepare" | "track" | "profile" | "growth" | "resume" | "settings";
+  id:
+    | "overview"
+    | "discover"
+    | "analyze"
+    | "prepare"
+    | "track"
+    | "profile"
+    | "growth"
+    | "analytics"
+    | "resume"
+    | "settings";
 };
 
 export const WORKFLOW_NAV: NavItem[] = [
@@ -48,6 +59,7 @@ export const WORKFLOW_NAV: NavItem[] = [
 export const SUPPORTING_NAV: NavItem[] = [
   { id: "profile", to: "/profile", label: "Profile", icon: UserRound },
   { id: "growth", to: "/growth", label: "Growth", icon: TrendingUp },
+  { id: "analytics", to: "/analytics", label: "Analytics", icon: ChartNoAxesCombined },
   { id: "resume", to: "/resume", label: "Resume", icon: FileText },
   { id: "settings", to: "/settings", label: "Settings", icon: Settings },
 ];

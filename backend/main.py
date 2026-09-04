@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import account, applications, auth, candidate, career_growth, health, interview, jobs, scoring, tracker
+from backend.api.routes import account, analytics, applications, auth, candidate, career_growth, health, interview, jobs, scoring, tracker
 from backend.core.config import settings, validate_runtime_settings
 from backend.core.csrf import OriginCSRFMiddleware
 from backend.core.logging import setup_logging
@@ -58,6 +58,7 @@ app.include_router(applications.router)
 app.include_router(tracker.router)
 app.include_router(interview.router)
 app.include_router(career_growth.router)
+app.include_router(analytics.router)
 
 
 @app.get("/")

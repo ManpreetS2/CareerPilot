@@ -556,3 +556,38 @@ export type CareerGrowthSummary = {
   strengths: SkillGrowthItem[];
   notice?: string | null;
 };
+
+export type FunnelStage =
+  | "saved"
+  | "materials_generated"
+  | "materials_approved"
+  | "applied"
+  | "interviewing"
+  | "offer";
+
+export type FunnelStep = {
+  stage: FunnelStage;
+  label: string;
+  jobs_count: number;
+  conversion_from_previous: number | null;
+};
+
+export type BreakdownBucket = {
+  label: string;
+  applied_count: number;
+  total_count: number;
+  applied_rate: number | null;
+  small_sample: boolean;
+};
+
+export type ApplicationAnalyticsSummary = {
+  generated_at: string;
+  funnel: FunnelStep[];
+  rejected_count: number;
+  withdrawn_count: number;
+  median_days_saved_to_applied: number | null;
+  median_days_applied_to_interviewing: number | null;
+  by_source: BreakdownBucket[];
+  by_match_score_band: BreakdownBucket[];
+  notice?: string | null;
+};
