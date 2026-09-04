@@ -712,7 +712,9 @@ describe("resume documents", () => {
         return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
       }
       if (func.name === "verifyResumeAttachmentInPage") {
-        return [{ result: { attached: true } }];
+        // Nothing attached yet before the first attach; confirmed still
+        // there after the form fill runs.
+        return [{ result: { attached: false } }];
       }
       return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
     });
@@ -723,13 +725,37 @@ describe("resume documents", () => {
     await flush(12);
     expect(executeScript).toHaveBeenCalled();
     const names = executeScript.mock.calls.map((call: any) => call[0].func.name);
-    expect(names[0]).toBe("attachDocumentInPage");
+    // Checks whether the resume is already attached (e.g. from a prior Fill
+    // on this page) before attempting a fresh attach.
+    expect(names[0]).toBe("verifyResumeAttachmentInPage");
+    expect(names).toContain("attachDocumentInPage");
     expect(names).toContain("fillFormInPage");
-    expect(names).toContain("verifyResumeAttachmentInPage");
     expect(panelHtml()).toContain("Resume attached");
     expect(panelHtml()).toContain("Ready for your review");
     expect(panelHtml()).toContain("Submit was not pressed");
     expect(panelHtml()).not.toContain("Application submitted");
+  });
+
+  it("skips re-attaching when the resume is already attached from a prior Fill", async () => {
+    responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
+    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
+      if (func.name === "attachDocumentInPage") {
+        throw new Error("should not attempt a fresh attach when already attached");
+      }
+      if (func.name === "verifyResumeAttachmentInPage") {
+        return [{ result: { attached: true } }];
+      }
+      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+    });
+    (globalThis as any).chrome.scripting.executeScript = executeScript;
+    await loadPanel();
+    await flush();
+    document.getElementById("fill-btn")!.click();
+    await flush(12);
+    const names = executeScript.mock.calls.map((call: any) => call[0].func.name);
+    expect(names).not.toContain("attachDocumentInPage");
+    expect(panelHtml()).toContain("Resume attached");
+    expect(panelHtml()).toContain("Ready for your review");
   });
 
   it("lets the user choose DOCX before attaching", async () => {
@@ -811,17 +837,58 @@ describe("resume documents", () => {
     document.getElementById("fill-btn")!.click();
     await flush(12);
     expect(executeScript.mock.calls.map((call: any) => call[0].func.name)).toEqual([
+      "verifyResumeAttachmentInPage",
       "attachDocumentInPage",
     ]);
     expect(panelHtml()).toContain("Needs manual upload");
     expect(panelHtml()).not.toContain("Ready for your review");
   });
 
-  it("does not mark ready if the resume disappears after fill", async () => {
+  it("re-attaches and still succeeds if the resume disappears after fill", async () => {
+    // Filling the rest of the form (e.g. Greenhouse's cover-letter "Enter
+    // manually" reveal) can make the page re-render and silently drop the
+    // resume input even though the attach step verified clean beforehand.
+    // One automatic re-attach should recover this without user action.
     responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
+    // First verify call is the pre-attach "already there?" check (nothing
+    // attached yet); second is the post-fill re-check, where the disappearance
+    // is simulated.
+    let verifyCalls = 0;
     executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
       if (func.name === "attachDocumentInPage") {
         return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
+      }
+      if (func.name === "verifyResumeAttachmentInPage") {
+        verifyCalls += 1;
+        return [{ result: { attached: false } }];
+      }
+      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+    });
+    (globalThis as any).chrome.scripting.executeScript = executeScript;
+    await loadPanel();
+    await flush();
+    document.getElementById("fill-btn")!.click();
+    await flush(12);
+    expect(verifyCalls).toBe(2);
+    expect(executeScript.mock.calls.filter((call: any) => call[0].func.name === "attachDocumentInPage")).toHaveLength(
+      2,
+    );
+    expect(document.getElementById("fill-status")!.textContent).toContain("Ready for your review");
+    expect(panelHtml()).toContain("Resume attached");
+  });
+
+  it("does not mark ready if the resume disappears after fill and the re-attach also fails", async () => {
+    responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
+    let attachCalls = 0;
+    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
+      if (func.name === "attachDocumentInPage") {
+        attachCalls += 1;
+        if (attachCalls === 1) {
+          return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
+        }
+        return [
+          { result: { status: "failed", fieldKind: "resume", verifiedName: null, reason: "Attachment could not be verified." } },
+        ];
       }
       if (func.name === "verifyResumeAttachmentInPage") {
         return [{ result: { attached: false } }];
@@ -833,7 +900,8 @@ describe("resume documents", () => {
     await flush();
     document.getElementById("fill-btn")!.click();
     await flush(12);
-    expect(document.getElementById("fill-status")!.textContent).toContain("Resume needs re-attachment");
+    expect(attachCalls).toBe(2);
+    expect(document.getElementById("fill-status")!.textContent).toContain("Attachment could not be verified.");
     expect(document.getElementById("fill-status")!.textContent).not.toContain("Ready for your review");
   });
 

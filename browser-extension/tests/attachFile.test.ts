@@ -179,6 +179,20 @@ describe("resume attachment", () => {
     expect(result.reason).toMatch(/re-attachment/i);
   });
 
+  it("verifies attachment when the ATS removed the input and shows a filename display instead", () => {
+    // Confirmed live on Greenhouse: once attached, the raw file input is
+    // removed from the DOM and replaced by a text display of the filename.
+    // A verify call that only looks for a live <input> would wrongly report
+    // the resume as lost even though it genuinely attached and is holding.
+    loadFixture("greenhouse_resume_uploaded_display.html");
+    expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(true);
+  });
+
+  it("does not treat a same-named file under the cover letter group as the resume", () => {
+    loadFixture("greenhouse_cover_letter_uploaded_display.html");
+    expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(false);
+  });
+
   it("never submits", async () => {
     loadFixture("greenhouse_resume_file.html");
     const form = document.querySelector("form") as HTMLFormElement;

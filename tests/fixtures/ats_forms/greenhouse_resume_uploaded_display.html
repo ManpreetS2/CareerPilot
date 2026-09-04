@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <!--
+    Confirmed live on a real Greenhouse posting: once a resume attaches
+    successfully, Greenhouse removes the raw <input type="file"> entirely
+    and replaces it with this filename-display widget. verifyResumeAttachmentInPage
+    must recognize this as attached, not just check for a live file input.
+  -->
+  <form id="application_form">
+    <div class="file-upload" role="group" aria-labelledby="upload-label-resume" aria-required="false" data-allow-s3="false">
+      <span id="upload-label-resume">Resume/CV</span>
+      <div class="file-upload__wrapper">
+        <div class="file-upload__filename">
+          <p class="body body__secondary">resume-v1.pdf</p>
+        </div>
+      </div>
+    </div>
+    <button type="submit" id="submit_app">Submit Application</button>
+  </form>
+</body>
+</html>
