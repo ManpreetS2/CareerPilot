@@ -297,5 +297,29 @@ export function verifyResumeAttachmentInPage(filename: string): { attached: bool
     if (!isResume) continue;
     if (input.files?.[0]?.name === filename) return { attached: true };
   }
+
+  // Some ATS widgets (confirmed live on Greenhouse) remove the raw file
+  // input entirely once a file is confirmed and replace it with a plain
+  // text display of the filename — the input's absence is not itself
+  // evidence the attachment was lost. Fall back to finding the filename
+  // rendered as text inside a container a11y-labelled for the resume field,
+  // not the cover letter field.
+  const filenameNodes = [...document.querySelectorAll("*")].filter(
+    (el) => el.children.length === 0 && el.textContent?.trim() === filename,
+  );
+  for (const node of filenameNodes) {
+    let ancestor: Element | null = node;
+    for (let i = 0; i < 6 && ancestor; i += 1) {
+      const labelledBy = ancestor.getAttribute("aria-labelledby");
+      const labelText = labelledBy ? document.getElementById(labelledBy)?.textContent || "" : "";
+      if (labelText) {
+        if (resumeNameRe.test(labelText) && !coverLetterNameRe.test(labelText)) return { attached: true };
+        if (coverLetterNameRe.test(labelText)) break;
+      }
+      const ariaLabel = ancestor.getAttribute("aria-label") || "";
+      if (resumeNameRe.test(ariaLabel) && !coverLetterNameRe.test(ariaLabel)) return { attached: true };
+      ancestor = ancestor.parentElement;
+    }
+  }
   return { attached: false };
 }

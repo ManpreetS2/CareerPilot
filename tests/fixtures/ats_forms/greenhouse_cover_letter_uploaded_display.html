@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <!--
+    Adversarial-ish case for verifyResumeAttachmentInPage: a same-named file
+    display under a Cover Letter-labelled group must not be mistaken for the
+    resume attaching.
+  -->
+  <form id="application_form">
+    <div class="file-upload" role="group" aria-labelledby="upload-label-cover_letter" aria-required="false" data-allow-s3="false">
+      <span id="upload-label-cover_letter">Cover Letter</span>
+      <div class="file-upload__wrapper">
+        <div class="file-upload__filename">
+          <p class="body body__secondary">resume-v1.pdf</p>
+        </div>
+      </div>
+    </div>
+    <button type="submit" id="submit_app">Submit Application</button>
+  </form>
+</body>
+</html>
