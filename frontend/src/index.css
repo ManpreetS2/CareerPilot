@@ -768,134 +768,67 @@ body {
   }
 }
 
-.hero-blackhole {
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  z-index: 0;
-  height: 45%;
-  min-height: 11rem;
+.signal-lattice {
   overflow: hidden;
-  pointer-events: none;
 }
 
-.hero-blackhole-bloom {
+.signal-cluster {
   position: absolute;
-  left: 50%;
-  bottom: -8%;
-  width: min(100%, 92rem);
-  height: 130%;
-  transform: translateX(-50%);
-  border-radius: 50%;
-  background:
-    radial-gradient(ellipse at 50% 78%, rgba(255, 255, 255, 0.42) 0%, var(--halo) 18%, var(--atmosphere-a) 42%, transparent 72%);
-  filter: blur(22px);
-  animation: blackhole-breathe 8.5s ease-in-out infinite;
-}
-
-.hero-blackhole-haze {
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  height: 70%;
-  background: linear-gradient(to top, color-mix(in srgb, var(--hole-void) 55%, transparent) 0%, transparent 100%);
-  opacity: 0.55;
-}
-
-.hero-blackhole-flow {
-  position: absolute;
-  left: -20%;
-  bottom: 6%;
-  width: 140%;
+  width: 4.5rem;
   height: 4.5rem;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.18) 48%, transparent 100%);
-  filter: blur(18px);
-  mix-blend-mode: normal;
-  animation: blackhole-flow 14s ease-in-out infinite;
+  animation: signal-cluster-float 9s ease-in-out infinite;
 }
 
-.hero-blackhole-svg {
+.signal-cell {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, white);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--halo) 45%, transparent);
+  animation: signal-cell-assemble 5.5s ease-in-out infinite;
 }
 
-.hero-blackhole-band {
-  animation: blackhole-ring 12s ease-in-out infinite;
-  transform-box: fill-box;
-  transform-origin: center;
+.signal-cluster-core .signal-cell {
+  background: color-mix(in srgb, var(--hole-core) 22%, transparent);
+  border-color: color-mix(in srgb, var(--hole-core) 50%, var(--accent));
 }
 
-.hero-blackhole-rim {
-  animation: blackhole-breathe 7.2s ease-in-out infinite;
-  transform-box: fill-box;
-  transform-origin: center;
+.signal-cluster-muted .signal-cell {
+  opacity: 0.72;
+  box-shadow: none;
 }
 
-.hero-blackhole-star {
-  animation: blackhole-star 9s ease-in-out infinite;
-}
-
-@keyframes blackhole-breathe {
+@keyframes signal-cluster-float {
   0%, 100% {
-    opacity: 0.84;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.03);
-  }
-}
-
-@keyframes blackhole-ring {
-  0%, 100% {
-    opacity: 0.72;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@keyframes blackhole-flow {
-  0%, 100% {
-    transform: translateX(-8%);
-    opacity: 0.2;
-  }
-  50% {
-    transform: translateX(8%);
-    opacity: 0.42;
-  }
-}
-
-@keyframes blackhole-star {
-  0%, 100% {
-    opacity: 0.25;
     transform: translate3d(0, 0, 0);
   }
   50% {
-    opacity: 0.85;
-    transform: translate3d(1.5px, -2px, 0);
+    transform: translate3d(0, -6px, 0);
   }
 }
 
-.dark .hero-blackhole-bloom {
-  background:
-    radial-gradient(ellipse at 50% 78%, rgba(255, 255, 255, 0.7) 0%, rgba(232, 213, 255, 0.42) 16%, rgba(168, 85, 247, 0.38) 40%, transparent 74%);
-  mix-blend-mode: screen;
+@keyframes signal-cell-assemble {
+  0%, 100% {
+    opacity: 0.38;
+    transform: translate3d(0, 7px, 0) scale(0.92);
+  }
+  42%, 62% {
+    opacity: 0.95;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 }
 
-.dark .hero-blackhole-flow {
-  mix-blend-mode: screen;
-}
-
-.reduce-motion .hero-blackhole-bloom,
-.reduce-motion .hero-blackhole-flow,
-.reduce-motion .hero-blackhole-band,
-.reduce-motion .hero-blackhole-rim,
-.reduce-motion .hero-blackhole-star,
-.reduce-motion .hero-atmosphere-orb {
+.reduce-motion .hero-atmosphere-orb,
+.reduce-motion .signal-cluster,
+.reduce-motion .signal-cell {
   animation: none !important;
+}
+
+.reduce-motion .signal-cell {
+  opacity: 0.7;
+  transform: none;
 }
 
 @keyframes ripple-drift {
@@ -926,12 +859,9 @@ body {
     transition-duration: 0.01ms !important;
   }
 
-  .hero-blackhole-bloom,
-  .hero-blackhole-flow,
-  .hero-blackhole-band,
-  .hero-blackhole-rim,
-  .hero-blackhole-star,
-  .hero-atmosphere-orb {
+  .hero-atmosphere-orb,
+  .signal-cluster,
+  .signal-cell {
     animation: none !important;
   }
 }
