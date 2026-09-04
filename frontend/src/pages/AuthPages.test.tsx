@@ -119,6 +119,13 @@ describe("auth pages", () => {
     expect(document.querySelector(".pointer-halo")).toBeNull();
   });
 
+  it("shows the dotted globe beside the login card", async () => {
+    renderApp("/login");
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("dotted-globe").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("signal-lattice").length).toBeGreaterThan(0);
+  });
+
   it("keeps invalid credentials on /login with the sanitized backend message", async () => {
     vi.mocked(api.login).mockRejectedValue(new ApiClientError(401, "Invalid email or password."));
     renderApp("/login");
