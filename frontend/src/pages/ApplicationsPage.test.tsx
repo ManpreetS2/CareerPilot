@@ -28,6 +28,7 @@ vi.mock("../lib/api", async (importOriginal) => {
       ...actual.api,
       listApplications: vi.fn(),
       updateTracking: vi.fn(),
+      downloadReminderIcs: vi.fn(),
     },
   };
 });
@@ -72,5 +73,58 @@ describe("ApplicationsPage", () => {
     expect(style.overflowX).toBe("auto");
     expect(localStorage.getItem("careerpilot.tracker-view.u1")).toBe("kanban");
     expect(screen.getByText(/Extra Long Title/i)).toHaveClass("wrap-anywhere");
+  });
+
+  it("does not show follow-up calendar actions when no reminder date is set", async () => {
+    renderTracker();
+    await screen.findByText(/Extra Long Title/i);
+    expect(screen.queryByRole("button", { name: /Download \.ics/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Add to Google Calendar/i })).not.toBeInTheDocument();
+  });
+
+  it("shows follow-up calendar actions once a reminder date is set, and downloads the .ics", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listApplications).mockResolvedValue([
+      {
+        job_id: "job-1",
+        title: "Backend Intern",
+        company: "Acme",
+        tracker_status: "saved",
+        reminder_date: "2026-09-20",
+        updated_at: "2026-08-01T00:00:00Z",
+        allowed_statuses: ["saved", "applied"],
+      },
+    ]);
+    vi.mocked(api.downloadReminderIcs).mockResolvedValue(undefined);
+    renderTracker();
+    await screen.findByText("Backend Intern");
+
+    const googleLink = screen.getByRole("link", { name: /Add to Google Calendar/i });
+    const href = googleLink.getAttribute("href") ?? "";
+    expect(href).toContain("calendar.google.com/calendar/render");
+    expect(href).toContain("dates=20260920%2F20260921");
+
+    await user.click(screen.getByRole("button", { name: /Download \.ics/i }));
+    expect(api.downloadReminderIcs).toHaveBeenCalledWith("job-1");
+  });
+
+  it("shows an error banner if the .ics download fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listApplications).mockResolvedValue([
+      {
+        job_id: "job-1",
+        title: "Backend Intern",
+        company: "Acme",
+        tracker_status: "saved",
+        reminder_date: "2026-09-20",
+        updated_at: "2026-08-01T00:00:00Z",
+        allowed_statuses: ["saved", "applied"],
+      },
+    ]);
+    vi.mocked(api.downloadReminderIcs).mockRejectedValue(new Error("network down"));
+    renderTracker();
+    await screen.findByText("Backend Intern");
+    await user.click(screen.getByRole("button", { name: /Download \.ics/i }));
+    expect(await screen.findByText(/Could not download reminder/i)).toBeInTheDocument();
   });
 });

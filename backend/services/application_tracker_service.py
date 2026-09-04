@@ -8,7 +8,8 @@ rows. Reads never create or mutate tracker rows.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -78,6 +79,11 @@ class TrackerInvalidTransitionError(TrackerError):
         super().__init__(f"Cannot change tracking status from {current} to {target}.")
         self.current = current
         self.target = target
+
+
+class ReminderNotSetError(TrackerError):
+    def __init__(self) -> None:
+        super().__init__("No follow-up date is set for this application.")
 
 
 def _now() -> datetime:
@@ -200,6 +206,38 @@ def get_tracking(db: Session, job_id: str, user_id: int) -> ApplicationTrackerIt
         return ApplicationTrackerItem(job_id=job_id, allowed_statuses=allowed_statuses_for(None))
     logger.info("tracker read hit job_pk=%s status=%s", job.id, record.status)
     return _record_to_item(record, job_id)
+
+
+@dataclass(frozen=True)
+class ReminderExportDetails:
+    """Everything the .ics download route needs, in one ownership-checked read."""
+
+    job_public_id: str
+    job_title: str
+    company: str
+    reminder_date: date
+
+
+def get_reminder_export_details(db: Session, job_id: str, user_id: int) -> ReminderExportDetails:
+    """For the calendar-export route. Raises TrackerJobNotFoundError if the
+    job doesn't exist, ReminderNotSetError if there's no tracker row for this
+    user or no reminder_date set on it — including another user's row, which
+    the job_id + user_id filter already excludes."""
+
+    job = _get_job(db, job_id)
+    record = (
+        db.query(ApplicationTrackerRecord)
+        .filter(ApplicationTrackerRecord.job_id == job.id, ApplicationTrackerRecord.user_id == user_id)
+        .first()
+    )
+    if record is None or record.reminder_date is None:
+        raise ReminderNotSetError()
+    return ReminderExportDetails(
+        job_public_id=job_id,
+        job_title=job.title,
+        company=job.company,
+        reminder_date=record.reminder_date,
+    )
 
 
 def list_applications(db: Session, user_id: int) -> list[ApplicationListItem]:
