@@ -304,21 +304,55 @@ export function verifyResumeAttachmentInPage(filename: string): { attached: bool
   // evidence the attachment was lost. Fall back to finding the filename
   // rendered as text inside a container a11y-labelled for the resume field,
   // not the cover letter field.
-  const filenameNodes = [...document.querySelectorAll("*")].filter(
-    (el) => el.children.length === 0 && el.textContent?.trim() === filename,
-  );
+  const filenameNodes = [...document.querySelectorAll("*")].filter((el) => {
+    const ownText = [...el.childNodes]
+      .filter((node) => node.nodeType === Node.TEXT_NODE)
+      .map((node) => (node.textContent || "").trim())
+      .join("");
+    if (ownText === filename) return true;
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (text === filename) return true;
+    return el.children.length === 0 && (el.textContent || "").trim() === filename;
+  });
   for (const node of filenameNodes) {
     let ancestor: Element | null = node;
+    let coverLetterGroup = false;
     for (let i = 0; i < 6 && ancestor; i += 1) {
       const labelledBy = ancestor.getAttribute("aria-labelledby");
       const labelText = labelledBy ? document.getElementById(labelledBy)?.textContent || "" : "";
       if (labelText) {
         if (resumeNameRe.test(labelText) && !coverLetterNameRe.test(labelText)) return { attached: true };
-        if (coverLetterNameRe.test(labelText)) break;
+        if (coverLetterNameRe.test(labelText)) {
+          coverLetterGroup = true;
+          break;
+        }
       }
       const ariaLabel = ancestor.getAttribute("aria-label") || "";
       if (resumeNameRe.test(ariaLabel) && !coverLetterNameRe.test(ariaLabel)) return { attached: true };
+      if (coverLetterNameRe.test(ariaLabel)) {
+        coverLetterGroup = true;
+        break;
+      }
       ancestor = ancestor.parentElement;
+    }
+    if (coverLetterGroup) continue;
+    const group = node.closest(".file-upload, [role='group']");
+    if (group) {
+      const headingEl =
+        group.querySelector("label, legend, [id*='upload-label']") ||
+        [...group.querySelectorAll("span, p")].find((el) => {
+          const text = (el.textContent || "").trim();
+          return Boolean(text) && text !== filename && !text.includes(filename);
+        });
+      const heading = (headingEl?.textContent || group.getAttribute("aria-label") || "").trim();
+      if (
+        heading &&
+        heading !== filename &&
+        resumeNameRe.test(heading) &&
+        !coverLetterNameRe.test(heading)
+      ) {
+        return { attached: true };
+      }
     }
   }
   return { attached: false };

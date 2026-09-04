@@ -16,8 +16,11 @@ from backend.schemas.schemas import Job
 from backend.services import job_scout_service, job_verification_service
 from backend.services.job_scout_service import (
     JobScoutError,
+    LEVER_API_HOSTS,
+    MANUAL_INGEST_PLACEHOLDER_DESCRIPTION,
     _parse_epoch_millis,
     _title_matches_query,
+    ingest_job_url,
     normalize_job,
     parse_lever_posting_url,
     persist_jobs,
@@ -25,6 +28,7 @@ from backend.services.job_scout_service import (
     scout_lever,
     scout_remotive,
 )
+from backend.services.url_safety import UnsafeURLError
 from backend.services.job_verification_service import (
     DEFAULT_ABSENCE_STALE_AFTER_DAYS,
     mark_stale_if_unseen,
@@ -46,10 +50,11 @@ def mock_fetch(monkeypatch: pytest.MonkeyPatch):
     """Routes each call by URL so a test can script per-board/per-company
     responses (including a deliberately-missing one, to simulate a dead
     board without the test needing to track call order)."""
-    captured: dict = {"calls": [], "by_url": {}}
+    captured: dict = {"calls": [], "by_url": {}, "kwargs": []}
 
     def fake_fetch(url, **kwargs):
         captured["calls"].append(url)
+        captured["kwargs"].append(kwargs)
         for prefix, handler in captured["by_url"].items():
             if url.startswith(prefix):
                 return handler(url, **kwargs)
@@ -501,3 +506,179 @@ def test_run_scout_survives_greenhouse_failure(
 
     result = job_scout_service.run_scout(["software engineer intern"])
     assert result == []  # every source failed/empty, but run_scout itself must not raise
+
+
+# ---------------------------------------------------------------------------
+# Manual Lever ingest uses the public posting API (not HTML meta tags)
+# ---------------------------------------------------------------------------
+
+LEVER_POSTING_ID = "f25a6c49-5ed4-4aa0-a5bb-b30e9790f90c"
+LEVER_POSTING_URL = f"https://jobs.lever.co/ro/{LEVER_POSTING_ID}"
+LEVER_APPLY_URL = f"{LEVER_POSTING_URL}/apply"
+LEVER_API_URL = f"https://api.lever.co/v0/postings/ro/{LEVER_POSTING_ID}"
+LEVER_API_PAYLOAD = {
+    "id": LEVER_POSTING_ID,
+    "text": "Pharmacy Technician",
+    "categories": {"location": "Romeoville, IL"},
+    "hostedUrl": LEVER_POSTING_URL,
+    "createdAt": 1750119882479,
+    "descriptionPlain": "Deliver patient care with enough description text for ingest.",
+    "additionalPlain": "Must be licensed in Illinois.",
+}
+
+
+def test_ingest_lever_uuid_posting_uses_public_api_not_html(mock_fetch) -> None:
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(url, LEVER_API_PAYLOAD)
+    raw = ingest_job_url(LEVER_APPLY_URL)
+    assert mock_fetch["calls"] == [LEVER_API_URL]
+    assert raw["title"] == "Pharmacy Technician"
+    assert raw["company"] == "Ro"
+    assert raw["location"] == "Romeoville, IL"
+    assert raw["url"] == LEVER_POSTING_URL
+    assert raw["ats"] == "lever"
+    assert "Deliver patient care" in raw["description"]
+    assert "Must be licensed" in raw["description"]
+    assert raw["date_posted"] == date(2025, 6, 17)
+    assert raw["source_job_id"] == LEVER_POSTING_ID
+    assert "/apply" not in raw["url"]
+    assert raw["description"] != MANUAL_INGEST_PLACEHOLDER_DESCRIPTION
+    assert mock_fetch["kwargs"][0]["allowed_hosts"] == LEVER_API_HOSTS
+
+
+def test_ingest_lever_posting_url_hits_same_api_endpoint(mock_fetch) -> None:
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(url, LEVER_API_PAYLOAD)
+    raw = ingest_job_url(LEVER_POSTING_URL)
+    assert mock_fetch["calls"] == [LEVER_API_URL]
+    assert raw["url"] == LEVER_POSTING_URL
+    assert raw["source_job_id"] == LEVER_POSTING_ID
+
+
+def test_ingest_lever_tracking_query_hits_same_api_endpoint(mock_fetch) -> None:
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(url, LEVER_API_PAYLOAD)
+    raw = ingest_job_url(f"{LEVER_POSTING_URL}?utm_source=jobright&lever-origin=applied")
+    assert mock_fetch["calls"] == [LEVER_API_URL]
+    assert raw["url"] == LEVER_POSTING_URL
+    assert "?" not in raw["url"]
+
+
+def test_ingest_lever_strips_apply_and_tracking_from_hosted_url(mock_fetch) -> None:
+    payload = dict(LEVER_API_PAYLOAD)
+    payload["hostedUrl"] = f"{LEVER_APPLY_URL}?utm_source=careersite"
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(url, payload)
+    raw = ingest_job_url(LEVER_APPLY_URL)
+    assert raw["url"] == LEVER_POSTING_URL
+    assert "/apply" not in raw["url"]
+
+
+def test_ingest_lever_includes_lists_as_plain_text(mock_fetch) -> None:
+    payload = dict(LEVER_API_PAYLOAD)
+    payload["lists"] = [
+        {
+            "text": "Requirements",
+            "content": "<ul><li>Python experience</li><li>Linux</li></ul>",
+        }
+    ]
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(url, payload)
+    raw = ingest_job_url(LEVER_POSTING_URL)
+    assert "Requirements" in raw["description"]
+    assert "Python experience" in raw["description"]
+    assert "<" not in raw["description"]
+
+
+def test_ingest_lever_rejects_mismatched_posting_id(mock_fetch) -> None:
+    payload = dict(LEVER_API_PAYLOAD)
+    payload["id"] = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(url, payload)
+    with pytest.raises(JobScoutError, match="did not match"):
+        ingest_job_url(LEVER_POSTING_URL)
+
+
+def test_ingest_lever_rejects_short_description(mock_fetch) -> None:
+    payload = dict(LEVER_API_PAYLOAD)
+    payload["descriptionPlain"] = "Too short."
+    payload["additionalPlain"] = ""
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(url, payload)
+    with pytest.raises(JobScoutError, match="enough description"):
+        ingest_job_url(LEVER_POSTING_URL)
+
+
+def test_ingest_lever_ignores_hosted_url_for_a_different_posting(mock_fetch) -> None:
+    payload = dict(LEVER_API_PAYLOAD)
+    payload["hostedUrl"] = "https://jobs.lever.co/evil/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(url, payload)
+    raw = ingest_job_url(LEVER_POSTING_URL)
+    assert raw["url"] == LEVER_POSTING_URL
+
+
+def test_ingest_lever_non_uuid_url_still_fetches_html(mock_fetch) -> None:
+    html_url = "https://jobs.lever.co/acme/abc-123"
+    mock_fetch["by_url"][html_url] = lambda url, **_: httpx.Response(
+        200,
+        text='<html><head><title>Backend Intern</title>'
+        '<meta name="description" content="Great role."></head></html>',
+        request=httpx.Request("GET", url),
+    )
+    raw = ingest_job_url(html_url)
+    assert mock_fetch["calls"] == [html_url]
+    assert raw["title"] == "Backend Intern"
+    assert raw["description"] == "Great role."
+
+
+@pytest.mark.parametrize("status_code", [404, 500, 503])
+def test_ingest_lever_api_http_errors_are_sanitized(status_code, mock_fetch) -> None:
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(
+        url, {"error": SECRET_BODY}, status_code=status_code
+    )
+    with pytest.raises(JobScoutError) as exc:
+        ingest_job_url(LEVER_POSTING_URL)
+    message = str(exc.value)
+    assert SECRET_BODY not in message
+    assert "sk-secret" not in message
+
+
+def test_ingest_lever_timeout_is_sanitized(mock_fetch) -> None:
+    def handler(url, **_):
+        raise httpx.TimeoutException("timed out with secret detail")
+
+    mock_fetch["by_url"][LEVER_API_URL] = handler
+    with pytest.raises(JobScoutError) as exc:
+        ingest_job_url(LEVER_POSTING_URL)
+    assert "secret" not in str(exc.value).lower()
+
+
+def test_ingest_lever_malformed_json_is_sanitized(mock_fetch) -> None:
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: httpx.Response(
+        200, content=SECRET_BODY.encode(), request=httpx.Request("GET", url)
+    )
+    with pytest.raises(JobScoutError) as exc:
+        ingest_job_url(LEVER_POSTING_URL)
+    assert SECRET_BODY not in str(exc.value)
+
+
+def test_ingest_lever_does_not_fetch_api_for_unsafe_host() -> None:
+    with pytest.raises(UnsafeURLError):
+        ingest_job_url(f"https://127.0.0.1/ro/{LEVER_POSTING_ID}")
+    with pytest.raises(UnsafeURLError):
+        ingest_job_url(f"https://api.lever.co/v0/postings/ro/{LEVER_POSTING_ID}")
+    with pytest.raises(UnsafeURLError):
+        ingest_job_url(f"https://jobs.lever.co.evil.example/ro/{LEVER_POSTING_ID}")
+
+
+def test_ingest_lever_rejects_unexpected_port() -> None:
+    with pytest.raises(UnsafeURLError):
+        ingest_job_url(f"https://jobs.lever.co:8080/ro/{LEVER_POSTING_ID}")
+
+
+def test_ingest_lever_posting_and_apply_collapse_to_one_row(isolated_db, mock_fetch) -> None:
+    mock_fetch["by_url"][LEVER_API_URL] = lambda url, **_: _json_response(url, LEVER_API_PAYLOAD)
+    first = persist_jobs([normalize_job(ingest_job_url(LEVER_POSTING_URL), "manual")])
+    second = persist_jobs([normalize_job(ingest_job_url(LEVER_APPLY_URL), "manual")])
+    assert first[0].id == second[0].id
+    with isolated_db() as db:
+        rows = db.query(JobRecord).all()
+        assert len(rows) == 1
+        assert rows[0].url == LEVER_POSTING_URL
+        assert "/apply" not in rows[0].url
+        assert rows[0].source_job_id == LEVER_POSTING_ID
+        assert rows[0].description != MANUAL_INGEST_PLACEHOLDER_DESCRIPTION
+        assert len(rows[0].description) >= 40
