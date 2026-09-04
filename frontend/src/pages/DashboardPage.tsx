@@ -292,6 +292,19 @@ export function DashboardPage() {
                 Open Analytics →
               </Link>
             </Glass>
+
+            <Glass variant="panel" className="rounded-2xl p-6">
+              <h2 className="text-lg font-semibold text-foreground">Saved Searches</h2>
+              <p className="mt-4 text-sm text-muted-foreground">
+                Save a Discover search once and CareerPilot keeps checking for new matches on its own.
+              </p>
+              <Link
+                to="/jobs"
+                className="mt-4 inline-block text-sm font-semibold text-primary hover:text-primary-hover"
+              >
+                Open Discover →
+              </Link>
+            </Glass>
           </div>
         </>
       )}

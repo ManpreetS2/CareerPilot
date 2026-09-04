@@ -11,12 +11,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.routes import account, analytics, applications, auth, candidate, career_growth, health, interview, jobs, scoring, tracker
+from backend.api.routes import account, analytics, applications, auth, candidate, career_growth, health, interview, jobs, saved_searches, scoring, tracker
 from backend.core.config import settings, validate_runtime_settings
 from backend.core.csrf import OriginCSRFMiddleware
 from backend.core.logging import setup_logging
 from backend.core.security_headers import SecurityHeadersMiddleware
 from backend.db.init_db import init_db
+from backend.services.scheduler import start_background_scheduler, stop_background_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     validate_runtime_settings()
     init_db()
     logger.info("CareerPilot API started")
+    start_background_scheduler()
     yield
+    await stop_background_scheduler()
 
 
 app = FastAPI(
@@ -59,6 +62,7 @@ app.include_router(tracker.router)
 app.include_router(interview.router)
 app.include_router(career_growth.router)
 app.include_router(analytics.router)
+app.include_router(saved_searches.router)
 
 
 @app.get("/")

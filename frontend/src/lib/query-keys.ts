@@ -16,4 +16,6 @@ export const queryKeys = {
   dashboardSummary: ["dashboard-summary"] as const,
   careerGrowth: ["career-growth"] as const,
   analytics: ["analytics"] as const,
+  savedSearches: ["saved-searches"] as const,
+  savedSearchMatches: (searchId: number) => ["saved-search-matches", searchId] as const,
 };
