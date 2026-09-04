@@ -67,11 +67,17 @@ export function PrivacyPage() {
               <li>Saved jobs, Fit/Match scores, and Match/Evidence snapshots (private to you)</li>
               <li>Generated application materials, approval state, tracker rows, resume versions, interview prep</li>
               <li>Assisted-apply / extension autofill attempt records (CareerPilot never submits the application)</li>
+              <li>Conversion-analytics events (save, materials generated/approved, applied, interviewing, offer, rejected, withdrawn) with a timestamp, used only to build your own funnel on the Analytics page</li>
             </ul>
             <p>
               Career Growth / Skills Gap insights are computed from your stored jobs, scores, and
               evidence when you open that page. CareerPilot does not persist a separate growth
               summary.
+            </p>
+            <p>
+              Analytics reads your own conversion events, saved jobs, job sources, and match scores to
+              build a funnel and breakdowns when you open that page. It never sends this data to an AI
+              provider and never compares it against other users.
             </p>
             <p>
               Job postings and extracted job requirements are a shared catalog. They are not deleted

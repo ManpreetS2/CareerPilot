@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.models import JobRecord, SavedJobRecord
 from backend.schemas.schemas import Job, JobListItem
+from backend.services.analytics_service import record_event
 from backend.services.job_service import record_to_job
 
 
@@ -57,6 +58,8 @@ def save_job(db: Session, user_id: int, job_public_id: str) -> JobListItem:
             db.commit()
         except IntegrityError:
             db.rollback()
+        else:
+            record_event(db, job_pk=job_row.id, user_id=user_id, event_type="saved")
     job = record_to_job(job_row)
     job.saved = True
     return JobListItem(job=job, saved=True)

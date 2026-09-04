@@ -15,4 +15,5 @@ export const queryKeys = {
   applications: ["applications"] as const,
   dashboardSummary: ["dashboard-summary"] as const,
   careerGrowth: ["career-growth"] as const,
+  analytics: ["analytics"] as const,
 };
