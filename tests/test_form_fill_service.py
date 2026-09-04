@@ -1372,6 +1372,115 @@ def test_panel_data_does_not_match_a_different_posting(isolated_session) -> None
         assert get_extension_panel_data(isolated_session, other, TEST_USER_ID).tracked is False, other
 
 
+@pytest.mark.parametrize(
+    "stored_url, tab_url",
+    [
+        (
+            "https://boards.greenhouse.io/acme/jobs/123",
+            "https://boards.greenhouse.io/acme/jobs/123?gh_jid=123",
+        ),
+        (
+            "https://job-boards.greenhouse.io/acme/jobs/123?gh_jid=123",
+            "https://job-boards.greenhouse.io/acme/jobs/123",
+        ),
+        (
+            "https://boards.greenhouse.io/acme/jobs/123",
+            "https://job-boards.greenhouse.io/acme/jobs/123",
+        ),
+        (
+            "https://job-boards.greenhouse.io/acme/jobs/123?gh_jid=123&utm_source=jobright",
+            "https://job-boards.greenhouse.io/acme/jobs/123?utm_source=careersite",
+        ),
+        (
+            "https://boards.greenhouse.io/acme/jobs/123?gh_src=abc",
+            "https://job-boards.greenhouse.io/acme/jobs/123?gh_src=xyz",
+        ),
+        (
+            "https://job-boards.greenhouse.io/acme/jobs/123?gh_jid=123",
+            "https://job-boards.greenhouse.io/embed/job_app?for=acme&token=123",
+        ),
+    ],
+)
+def test_panel_data_matches_stored_greenhouse_tracking_variants(
+    isolated_session, stored_url: str, tab_url: str
+) -> None:
+    """Rows ingested before canonical storage may still carry gh_jid/utm/gh_src.
+    The live tab often omits those. Both must resolve to the same job."""
+    job = _job(isolated_session, url=stored_url)
+    candidate = _seed_candidate(isolated_session)
+    _approved_package(isolated_session, job, candidate)
+
+    result = get_extension_panel_data(isolated_session, tab_url, TEST_USER_ID)
+    assert result.tracked is True, (stored_url, tab_url)
+    assert result.job is not None
+    assert result.job.id == job.public_id
+    assert result.apply_ready is True
+    assert result.platform == "greenhouse"
+
+
+def test_panel_data_does_not_match_a_different_greenhouse_job_id(isolated_session) -> None:
+    job = _job(
+        isolated_session,
+        url="https://job-boards.greenhouse.io/acme/jobs/123?gh_jid=123",
+    )
+    candidate = _seed_candidate(isolated_session)
+    _approved_package(isolated_session, job, candidate)
+    result = get_extension_panel_data(
+        isolated_session,
+        "https://job-boards.greenhouse.io/acme/jobs/999",
+        TEST_USER_ID,
+    )
+    assert result.tracked is False
+    assert result.apply_ready is False
+
+
+def test_panel_data_matches_stored_lever_apply_and_tracking_query(isolated_session) -> None:
+    """Posting and /apply (plus tracking query) are one Lever job by UUID."""
+    posting_id = "f25a6c49-5ed4-4aa0-a5bb-b30e9790f90c"
+    stored = f"https://jobs.lever.co/acme/{posting_id}?lever-origin=applied"
+    job = _job(isolated_session, url=stored)
+    candidate = _seed_candidate(isolated_session)
+    _approved_package(isolated_session, job, candidate)
+
+    for tab_url in (
+        f"https://jobs.lever.co/acme/{posting_id}",
+        f"https://jobs.lever.co/acme/{posting_id}/apply",
+        f"https://jobs.lever.co/acme/{posting_id}/apply?utm_source=jobright",
+    ):
+        result = get_extension_panel_data(isolated_session, tab_url, TEST_USER_ID)
+        assert result.tracked is True, tab_url
+        assert result.job is not None
+        assert result.job.id == job.public_id
+        assert result.apply_ready is True
+
+
+def test_panel_data_does_not_match_a_different_lever_uuid(isolated_session) -> None:
+    _job(
+        isolated_session,
+        url="https://jobs.lever.co/acme/f25a6c49-5ed4-4aa0-a5bb-b30e9790f90c",
+    )
+    result = get_extension_panel_data(
+        isolated_session,
+        "https://jobs.lever.co/acme/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/apply",
+        TEST_USER_ID,
+    )
+    assert result.tracked is False
+
+
+def test_panel_data_does_not_match_on_title_or_company_alone(isolated_session) -> None:
+    _job(
+        isolated_session,
+        public_id="manual-other",
+        url="https://example.com/unrelated",
+    )
+    result = get_extension_panel_data(
+        isolated_session,
+        "https://job-boards.greenhouse.io/acme/jobs/123",
+        TEST_USER_ID,
+    )
+    assert result.tracked is False
+
+
 def test_panel_data_apply_ready_is_false_without_an_approved_package(isolated_session) -> None:
     job = _job(isolated_session, url="https://boards.greenhouse.io/acme/jobs/7761472003")
     candidate = _seed_candidate(isolated_session)

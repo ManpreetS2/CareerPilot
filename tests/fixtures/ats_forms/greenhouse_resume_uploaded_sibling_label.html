@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <!--
+    Live TransMarket Greenhouse job-boards widget: Resume/CV heading is a
+    sibling label, not aria-labelledby, and the filename sits next to an
+    icon and remove control rather than as a lone leaf node.
+  -->
+  <form id="application_form">
+    <div class="file-upload">
+      <span>Resume/CV *</span>
+      <div class="file-upload__filename">
+        <svg width="12" height="12"></svg>
+        <span>resume-v1.pdf</span>
+        <button type="button" aria-label="Remove">X</button>
+      </div>
+    </div>
+    <button type="submit" id="submit_app">Submit Application</button>
+  </form>
+</body>
+</html>

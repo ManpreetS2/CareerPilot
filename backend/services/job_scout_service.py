@@ -133,6 +133,9 @@ _LEVER_JOB_PATH_RE = re.compile(
     # ingests the posting rather than being rejected as an unsupported host.
     r"^/([^/]+)/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:/apply)?/?$"
 )
+_LEVER_POSTING_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 _BOARD_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -300,20 +303,26 @@ def _resolve_greenhouse_public_url(
     validated_input_url: str,
     ref: GreenhousePostingRef,
 ) -> str:
-    """Accept API absolute_url only when it is safe and matches the same posting."""
-    if not absolute_url or not str(absolute_url).strip():
-        return validated_input_url
-    candidate = str(absolute_url).strip()
-    parsed_ref = parse_greenhouse_posting_url(candidate)
-    if parsed_ref is None:
-        return validated_input_url
-    if parsed_ref.board_token != ref.board_token or parsed_ref.job_id != ref.job_id:
-        return validated_input_url
-    try:
-        assert_safe_outbound_url(candidate, allowed_hosts=GREENHOUSE_POSTING_HOSTS)
-    except UnsafeURLError:
-        return validated_input_url
-    return candidate
+    """Store one canonical posting URL.
+
+    Greenhouse's `absolute_url` often carries `gh_jid` and other tracking
+    query parameters. Those are not job identity. The API URL is still
+    checked so a mismatched posting cannot redirect storage, but the stored
+    URL is always `canonical_greenhouse_posting_url(ref)`.
+    """
+    if absolute_url and str(absolute_url).strip():
+        candidate = str(absolute_url).strip()
+        parsed_ref = parse_greenhouse_posting_url(candidate)
+        if parsed_ref is not None and (
+            parsed_ref.board_token != ref.board_token or parsed_ref.job_id != ref.job_id
+        ):
+            return canonical_greenhouse_posting_url(ref)
+        if parsed_ref is not None:
+            try:
+                assert_safe_outbound_url(candidate, allowed_hosts=GREENHOUSE_POSTING_HOSTS)
+            except UnsafeURLError:
+                return canonical_greenhouse_posting_url(ref)
+    return canonical_greenhouse_posting_url(ref)
 
 
 def _fetch_greenhouse_api(board_token: str, job_id: str) -> dict:
@@ -366,6 +375,116 @@ def _ingest_greenhouse_url(validated_url: str, ref: GreenhousePostingRef) -> dic
         "location": location,
         "date_posted": _parse_iso_date(payload.get("first_published")),
         "ats": "greenhouse",
+        "source_job_id": ref.job_id,
+    }
+
+
+def _fetch_lever_posting(company_slug: str, posting_id: str) -> dict:
+    if not _BOARD_TOKEN_RE.fullmatch(company_slug) or not _LEVER_POSTING_ID_RE.fullmatch(posting_id):
+        raise JobScoutError("Could not load job posting from Lever.")
+    api_url = f"{LEVER_API_BASE}/postings/{company_slug}/{posting_id}"
+    try:
+        response = fetch_url_safely(
+            api_url,
+            user_agent=settings.http_user_agent,
+            timeout_seconds=settings.http_timeout_seconds,
+            allowed_hosts=LEVER_API_HOSTS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except UnsafeURLError:
+        raise
+    except httpx.HTTPStatusError:
+        raise JobScoutError("Could not load job posting from Lever.") from None
+    except httpx.TimeoutException:
+        raise JobScoutError("Lever job request timed out.") from None
+    except httpx.HTTPError:
+        raise JobScoutError("Could not load job posting from Lever.") from None
+    except json.JSONDecodeError:
+        raise JobScoutError("Lever returned an unreadable job posting.") from None
+    if not isinstance(payload, dict):
+        raise JobScoutError("Lever returned an unreadable job posting.")
+    return payload
+
+
+def _resolve_lever_public_url(
+    hosted_url: str | None,
+    validated_input_url: str,
+    company_slug: str,
+    posting_id: str,
+) -> str:
+    """Store the canonical jobs.lever.co posting URL.
+
+    Lever's `hostedUrl` can carry `/apply` or tracking query parameters.
+    Those are not job identity. A mismatched hostedUrl is ignored so it
+    cannot redirect storage; the stored URL is always
+    `canonical_lever_posting_url(company_slug, posting_id)`.
+    """
+    canonical = canonical_lever_posting_url(company_slug, posting_id)
+    if hosted_url and str(hosted_url).strip():
+        candidate = str(hosted_url).strip()
+        parsed = parse_lever_posting_url(candidate)
+        if parsed is not None and parsed != (company_slug, posting_id):
+            return canonical
+        if parsed is not None:
+            try:
+                assert_safe_outbound_url(candidate, allowed_hosts=LEVER_POSTING_HOSTS)
+            except UnsafeURLError:
+                return canonical
+    return canonical
+
+
+def _lever_lists_plain_text(lists: object) -> str:
+    """Fold Lever API `lists` (Requirements, Benefits, …) into plain text."""
+    if not isinstance(lists, list):
+        return ""
+    parts: list[str] = []
+    for item in lists:
+        if not isinstance(item, dict):
+            continue
+        heading = _clean_line(item.get("text") if isinstance(item.get("text"), str) else None)
+        content_raw = item.get("content")
+        content = _clean_description(content_raw if isinstance(content_raw, str) else None)
+        if heading and content:
+            parts.append(f"{heading}\n{content}")
+        elif content:
+            parts.append(content)
+        elif heading:
+            parts.append(heading)
+    return "\n".join(parts).strip()
+
+
+def _ingest_lever_api_url(validated_url: str, company_slug: str, posting_id: str) -> dict:
+    payload = _fetch_lever_posting(company_slug, posting_id)
+    if str(payload.get("id") or "") != posting_id:
+        raise JobScoutError("Lever job posting did not match the requested job.")
+
+    title = _clean_line(payload.get("text"))
+    description = _clean_description(payload.get("descriptionPlain") or payload.get("description"))
+    additional = _clean_description(payload.get("additionalPlain") or payload.get("additional"))
+    if additional:
+        description = f"{description}\n{additional}".strip() if description else additional
+    lists_text = _lever_lists_plain_text(payload.get("lists"))
+    if lists_text:
+        description = f"{description}\n{lists_text}".strip() if description else lists_text
+    if len(description) < _MIN_INGEST_DESCRIPTION_LENGTH:
+        raise JobScoutError("Lever posting did not include enough description text.")
+
+    categories = payload.get("categories") if isinstance(payload.get("categories"), dict) else {}
+    location = _clean_line(categories.get("location")) or None
+    public_url = _resolve_lever_public_url(
+        payload.get("hostedUrl"), validated_url, company_slug, posting_id
+    )
+
+    return {
+        "title": title[:255] or "Untitled role",
+        "company": _board_token_company_name(company_slug),
+        "url": public_url,
+        "description": description,
+        "location": location,
+        "date_posted": _parse_epoch_millis(payload.get("createdAt")),
+        "ats": "lever",
+        "source_job_id": posting_id,
     }
 
 
@@ -770,14 +889,23 @@ def ingest_job_url(url: str) -> dict:
     """Fetch a single supported job posting URL and return a source-backed record.
 
     Greenhouse postings are loaded from the public boards API. Lever postings
-    use a bounded HTML fetch. User-supplied URLs are validated through the
-    shared url_safety guard before any server-side request is made.
+    with a company slug and posting UUID use the public postings API — live
+    jobs.lever.co pages are a JS app and rarely expose a usable meta
+    description, so an HTML-only fetch stored a placeholder and Fit/materials
+    could not run. Non-UUID Lever URLs still use a bounded HTML fetch.
+    User-supplied URLs are validated through the shared url_safety guard
+    before any server-side request is made.
     """
     normalized = url.strip()
     greenhouse_ref = parse_greenhouse_posting_url(normalized)
     if greenhouse_ref is not None:
         validated = validate_manual_ingest_url(normalized)
         return _ingest_greenhouse_url(validated, greenhouse_ref)
+
+    lever_ref = parse_lever_posting_url(normalized)
+    if lever_ref is not None:
+        validated = validate_manual_ingest_url(normalized)
+        return _ingest_lever_api_url(validated, lever_ref[0], lever_ref[1])
 
     host = (urlparse(normalized).hostname or "").lower()
     if host in LEVER_POSTING_HOSTS:
@@ -937,6 +1065,7 @@ def normalize_job(raw: dict, source: str) -> Job:
             url=raw.get("url") or "",
             description=raw.get("description") or "",
             source="manual",
+            source_job_id=raw.get("source_job_id"),
             date_posted=posted,
             date_scraped=now,
             status="discovered",

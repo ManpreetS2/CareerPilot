@@ -188,6 +188,11 @@ describe("resume attachment", () => {
     expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(true);
   });
 
+  it("verifies attachment when Resume/CV is a sibling heading rather than aria-labelledby", () => {
+    loadFixture("greenhouse_resume_uploaded_sibling_label.html");
+    expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(true);
+  });
+
   it("does not treat a same-named file under the cover letter group as the resume", () => {
     loadFixture("greenhouse_cover_letter_uploaded_display.html");
     expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(false);
