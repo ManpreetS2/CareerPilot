@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, LayoutGrid, List } from "lucide-react";
+import { ArrowUpRight, CalendarPlus, Download, LayoutGrid, List } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
@@ -9,6 +9,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { PageHeader } from "../components/ui/page-header";
 import { api, ApiClientError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { googleCalendarUrl } from "../lib/calendar";
 import { cn } from "../lib/cn";
 import { readTrackerView, saveTrackerView, type TrackerView } from "../lib/tracker-view";
 import type { ApplicationListItem, TrackerStatus } from "../lib/types";
@@ -50,6 +51,50 @@ function formatUpdated(value?: string | null) {
 function columnItems(items: ApplicationListItem[], column: TrackerStatus | "untracked") {
   if (column === "untracked") return items.filter((item) => !item.tracker_status);
   return items.filter((item) => item.tracker_status === column);
+}
+
+function FollowUpCalendarActions({ item }: { item: ApplicationListItem }) {
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<unknown>(null);
+  if (!item.reminder_date) return null;
+
+  async function handleDownload() {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      await api.downloadReminderIcs(item.job_id);
+    } catch (err) {
+      setDownloadError(err);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="btn-secondary min-h-11 gap-1.5 px-3 text-sm"
+          disabled={downloading}
+          onClick={() => void handleDownload()}
+        >
+          <Download className="h-4 w-4" aria-hidden />
+          {downloading ? "Downloading…" : "Download .ics"}
+        </button>
+        <a
+          href={googleCalendarUrl(item.title, item.company, item.reminder_date)}
+          target="_blank"
+          rel="noreferrer"
+          className="btn-secondary min-h-11 gap-1.5 px-3 text-sm"
+        >
+          <CalendarPlus className="h-4 w-4" aria-hidden />
+          Add to Google Calendar
+        </a>
+      </div>
+      {downloadError ? <ErrorBanner error={downloadError} heading="Could not download reminder" /> : null}
+    </div>
+  );
 }
 
 function TrackerCard({
@@ -124,6 +169,7 @@ function TrackerCard({
           <ArrowUpRight className="h-4 w-4" aria-hidden />
         </Link>
       </div>
+      <FollowUpCalendarActions item={item} />
     </article>
   );
 }

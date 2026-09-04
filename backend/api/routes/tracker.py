@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_current_user
@@ -17,14 +17,17 @@ from backend.schemas.schemas import (
     DashboardSummary,
 )
 from backend.services.application_tracker_service import (
+    ReminderNotSetError,
     TrackerError,
     TrackerInvalidTransitionError,
     TrackerJobNotFoundError,
     get_dashboard_summary,
+    get_reminder_export_details,
     get_tracking,
     list_applications,
     update_tracking,
 )
+from backend.services.calendar_export_service import build_reminder_ics, reminder_ics_filename
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,8 @@ router = APIRouter(prefix="/api", tags=["tracker"])
 
 def _http_for_tracker_error(exc: Exception) -> HTTPException:
     if isinstance(exc, TrackerJobNotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, ReminderNotSetError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, TrackerInvalidTransitionError):
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
@@ -76,6 +81,30 @@ def patch_application_tracking(
         return update_tracking(db, job_id, payload, user.id)
     except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
         raise _http_for_tracker_error(exc) from exc
+
+
+@router.get("/applications/{job_id}/reminder.ics")
+def download_reminder_ics(
+    job_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> Response:
+    """A standard .ics file for the user's own follow-up date. No account
+    connection — the user imports this into whatever calendar they use."""
+    try:
+        details = get_reminder_export_details(db, job_id, user.id)
+    except Exception as exc:  # noqa: BLE001 — map to sanitized HTTP
+        raise _http_for_tracker_error(exc) from exc
+    content = build_reminder_ics(
+        job_public_id=details.job_public_id,
+        job_title=details.job_title,
+        company=details.company,
+        reminder_date=details.reminder_date,
+    )
+    filename = reminder_ics_filename(details.job_title, details.company)
+    return Response(
+        content=content,
+        media_type="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummary)

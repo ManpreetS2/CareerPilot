@@ -278,6 +278,40 @@ export const api = {
     }
   },
 
+  downloadReminderIcs: async (jobId: string): Promise<void> => {
+    // Not request<T>(): that helper always parses JSON, but this endpoint
+    // returns a raw .ics file.
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/api/applications/${jobId}/reminder.ics`, {
+        credentials: "include",
+      });
+    } catch {
+      throw new ApiClientError(0, `Cannot reach backend at ${API_BASE_URL}.`);
+    }
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      const message =
+        typeof detail.detail === "string" ? detail.detail : `Download failed (${response.status})`;
+      throw new ApiClientError(response.status, message, detail);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    const filename = match?.[1] ?? "follow-up-reminder.ics";
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+
   approveApplication: (
     jobId: string,
     decision: ApprovalDecision,
