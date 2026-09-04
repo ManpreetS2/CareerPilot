@@ -591,3 +591,48 @@ export type ApplicationAnalyticsSummary = {
   by_match_score_band: BreakdownBucket[];
   notice?: string | null;
 };
+
+export type SavedSearchCreate = {
+  label: string;
+  query_text: string;
+  location?: string | null;
+  opportunity?: string | null;
+  employment_type?: string[];
+  work_mode?: string[];
+  date_posted?: string | null;
+  cadence_hours?: number;
+};
+
+export type SavedSearchUpdate = {
+  label?: string;
+  enabled?: boolean;
+  cadence_hours?: number;
+};
+
+export type SavedSearchItem = {
+  id: number;
+  label: string;
+  query_text: string;
+  location?: string | null;
+  opportunity?: string | null;
+  employment_type: string[];
+  work_mode: string[];
+  date_posted?: string | null;
+  cadence_hours: number;
+  enabled: boolean;
+  last_run_at?: string | null;
+  created_at: string;
+  unseen_match_count: number;
+};
+
+export type SavedSearchMatchItem = {
+  job_id: string;
+  title: string;
+  company: string;
+  location?: string | null;
+  url: string;
+  source: string;
+  date_posted?: string | null;
+  first_seen_at: string;
+  seen_at?: string | null;
+};

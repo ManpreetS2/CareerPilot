@@ -49,6 +49,10 @@ LLM = Limit(max_events=12, window_seconds=10 * 60, max_inflight=1)
 INGEST = Limit(max_events=20, window_seconds=10 * 60, max_inflight=1)
 SCORE = Limit(max_events=60, window_seconds=10 * 60, max_inflight=1)
 INTERVIEW_PREP = Limit(max_events=20, window_seconds=10 * 60, max_inflight=1)
+# Separate from SCOUT: saved searches rerun on their own background cadence,
+# not a live user click. Sharing SCOUT's bucket would let a user's own
+# enabled saved searches 429 their own next manual "Find Jobs" click.
+SCHEDULED_SCOUT = Limit(max_events=6, window_seconds=6 * 60 * 60, max_inflight=1)
 
 _CATEGORY_LIMITS: dict[str, Limit] = {
     "login_ip": LOGIN_IP,
@@ -59,6 +63,7 @@ _CATEGORY_LIMITS: dict[str, Limit] = {
     "ingest": INGEST,
     "score": SCORE,
     "interview_prep": INTERVIEW_PREP,
+    "scheduled_scout": SCHEDULED_SCOUT,
 }
 
 

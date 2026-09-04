@@ -26,6 +26,10 @@ import type {
   ResumeVersion,
   ResumeVersionDetail,
   ResumeVersionSummary,
+  SavedSearchCreate,
+  SavedSearchItem,
+  SavedSearchMatchItem,
+  SavedSearchUpdate,
   ScoutJobsResponse,
   TargetPreferences,
   TrackerStatus,
@@ -371,6 +375,34 @@ export const api = {
 
   fillApplication: (jobId: string) =>
     request<FormFillResult>(`/api/jobs/${jobId}/fill-application`, {
+      method: "POST",
+    }),
+
+  listSavedSearches: (init?: RequestInit) =>
+    request<SavedSearchItem[]>("/api/saved-searches", init),
+
+  createSavedSearch: (payload: SavedSearchCreate) =>
+    request<SavedSearchItem>("/api/saved-searches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+
+  updateSavedSearch: (searchId: number, payload: SavedSearchUpdate) =>
+    request<SavedSearchItem>(`/api/saved-searches/${searchId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+
+  deleteSavedSearch: (searchId: number) =>
+    request<void>(`/api/saved-searches/${searchId}`, { method: "DELETE" }),
+
+  listSavedSearchMatches: (searchId: number, init?: RequestInit) =>
+    request<SavedSearchMatchItem[]>(`/api/saved-searches/${searchId}/matches`, init),
+
+  markSavedSearchMatchesSeen: (searchId: number) =>
+    request<{ updated: number }>(`/api/saved-searches/${searchId}/matches/seen`, {
       method: "POST",
     }),
 };

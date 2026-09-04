@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
-import { Link2, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { Bell, Link2, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { JobCard } from "../components/JobCard";
@@ -10,6 +10,7 @@ import { JobPreviewPanel } from "../components/JobPreviewPanel";
 import { JobsFilterPanel } from "../components/JobsFilterPanel";
 import { LoadingState } from "../components/LoadingState";
 import { NaturalSearchBar, type FilterChip } from "../components/NaturalSearchBar";
+import { SavedSearchesPanel, type SavedSearchDraft } from "../components/SavedSearchesPanel";
 import { DashboardAtmosphere } from "../components/DashboardAtmosphere";
 import { Glass } from "../components/ui/glass";
 import { PageHeader } from "../components/ui/page-header";
@@ -56,6 +57,7 @@ export function JobsPage() {
   const state = readJobsWorkspace(params);
   const [draftSearch, setDraftSearch] = useState(state.search);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
   const [manualUrl, setManualUrl] = useState("");
   const [isDesktop, setIsDesktop] = useState(true);
   const [scoutSummary, setScoutSummary] = useState<{
@@ -386,6 +388,18 @@ export function JobsPage() {
     };
   }
 
+  const currentQueryText = (state.q || draftSearch).trim();
+  const savedSearchDraft: SavedSearchDraft | null = currentQueryText
+    ? {
+        query_text: currentQueryText,
+        location: state.location?.[0] ?? null,
+        opportunity: state.opportunity && state.opportunity !== "both" ? state.opportunity : null,
+        employment_type: state.employment_type ?? [],
+        work_mode: state.work_mode ?? [],
+        date_posted: state.date_posted ?? null,
+      }
+    : null;
+
   const listed: JobListItem[] = items;
   const navIds = pageData?.ids ?? getJobsNavIds();
   const verifiedItems = listed.filter((item) => item.match?.score_kind === "verified");
@@ -440,6 +454,15 @@ export function JobsPage() {
             >
               <Link2 className={`h-4 w-4 ${ingestMutation.isPending ? "animate-pulse" : ""}`} aria-hidden />
               {ingestMutation.isPending ? "Adding…" : "Add Job URL"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setSavedSearchesOpen(true)}
+              data-testid="saved-searches-button"
+            >
+              <Bell className="h-4 w-4" aria-hidden />
+              Saved Searches
             </button>
           </div>
         }
@@ -690,6 +713,11 @@ export function JobsPage() {
       ) : null}
 
       <JobsFilterPanel open={filtersOpen} onOpenChange={setFiltersOpen} state={state} onChange={patch} />
+      <SavedSearchesPanel
+        open={savedSearchesOpen}
+        onOpenChange={setSavedSearchesOpen}
+        currentSearch={savedSearchDraft}
+      />
       <p className="sr-only" aria-live="polite">
         {navIds.length} jobs in the current result set.
       </p>

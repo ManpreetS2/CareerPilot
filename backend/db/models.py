@@ -461,3 +461,46 @@ class ApplicationEventRecord(Base):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), index=True
     )
+
+
+class SavedSearchRecord(Base):
+    """A user's saved Discover search. The background scheduler reruns this
+    on its own cadence using the same discovery pipeline a manual "Find
+    Jobs" click uses — see backend/services/saved_search_service.py."""
+
+    __tablename__ = "saved_searches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    query_text: Mapped[str] = mapped_column(String(200), nullable=False)
+    location: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    opportunity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    employment_type: Mapped[list] = mapped_column(JSON, default=list)
+    work_mode: Mapped[list] = mapped_column(JSON, default=list)
+    date_posted: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    cadence_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class SavedSearchMatchRecord(Base):
+    """One row per (saved search, job) the search has ever surfaced — the
+    unique index is the "have I already alerted on this" gate. A row with
+    seen_at=None is an unread alert."""
+
+    __tablename__ = "saved_search_matches"
+    __table_args__ = (
+        Index("ux_saved_search_matches_search_job", "saved_search_id", "job_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    saved_search_id: Mapped[int] = mapped_column(ForeignKey("saved_searches.id"), nullable=False, index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), nullable=False, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
