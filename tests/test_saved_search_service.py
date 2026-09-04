@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from backend.core.rate_limit import guard_expensive
-from backend.db.models import JobRecord, SavedSearchMatchRecord, SavedSearchRecord
+from backend.db.models import Candidate, JobRecord, SavedSearchMatchRecord, SavedSearchRecord
 from backend.schemas.saved_search import SavedSearchCreate, SavedSearchUpdate
 from backend.schemas.schemas import Job
 from backend.services.saved_search_service import (
@@ -44,56 +44,59 @@ def _job(**overrides) -> Job:
     return Job(**defaults)
 
 
+_NOW = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
+
+
+def _matches(job: Job, **overrides) -> bool:
+    defaults = dict(
+        opportunity=None,
+        employment_type=[],
+        work_mode=[],
+        date_posted=None,
+        date_posted_raw=None,
+        now=_NOW,
+    )
+    defaults.update(overrides)
+    return job_matches_search_filters(job, **defaults)
+
+
 class TestJobMatchesSearchFilters:
     def test_no_filters_always_matches(self) -> None:
-        job = _job()
-        assert job_matches_search_filters(
-            job, opportunity=None, employment_type=[], work_mode=[], date_posted=None, today=date(2026, 1, 1)
-        )
+        assert _matches(_job())
 
     def test_opportunity_filter(self) -> None:
         job = _job(opportunity_type="role")
-        assert not job_matches_search_filters(
-            job, opportunity="internship", employment_type=[], work_mode=[], date_posted=None, today=date(2026, 1, 1)
-        )
-        assert job_matches_search_filters(
-            job, opportunity="role", employment_type=[], work_mode=[], date_posted=None, today=date(2026, 1, 1)
-        )
+        assert not _matches(job, opportunity="internship")
+        assert _matches(job, opportunity="role")
 
     def test_employment_type_filter(self) -> None:
         job = _job(employment_type="full_time")
-        assert not job_matches_search_filters(
-            job, opportunity=None, employment_type=["part_time"], work_mode=[], date_posted=None, today=date(2026, 1, 1)
-        )
-        assert job_matches_search_filters(
-            job, opportunity=None, employment_type=["full_time"], work_mode=[], date_posted=None, today=date(2026, 1, 1)
-        )
+        assert not _matches(job, employment_type=["part_time"])
+        assert _matches(job, employment_type=["full_time"])
 
     def test_work_mode_filter(self) -> None:
         job = _job(work_mode="onsite")
-        assert not job_matches_search_filters(
-            job, opportunity=None, employment_type=[], work_mode=["remote"], date_posted=None, today=date(2026, 1, 1)
-        )
-        assert job_matches_search_filters(
-            job, opportunity=None, employment_type=[], work_mode=["onsite", "hybrid"], date_posted=None, today=date(2026, 1, 1)
-        )
+        assert not _matches(job, work_mode=["remote"])
+        assert _matches(job, work_mode=["onsite", "hybrid"])
 
     def test_date_posted_window(self) -> None:
-        today = date(2026, 9, 20)
-        recent = _job(date_posted=date(2026, 9, 15))
-        old = _job(date_posted=date(2026, 8, 1))
-        assert job_matches_search_filters(
-            recent, opportunity=None, employment_type=[], work_mode=[], date_posted="past_7d", today=today
-        )
-        assert not job_matches_search_filters(
-            old, opportunity=None, employment_type=[], work_mode=[], date_posted="past_7d", today=today
-        )
+        # date_posted_raw is the raw JobRecord string (what parse_posting_time
+        # expects), not the already-parsed `date` object the Job schema
+        # carries for display — this is the exact contract production code
+        # relies on (record.date_posted, not job.date_posted).
+        assert _matches(_job(), date_posted="past_7d", date_posted_raw="2026-09-15")
+        assert not _matches(_job(), date_posted="past_7d", date_posted_raw="2026-08-01")
 
     def test_date_posted_window_excludes_unknown_posting_date(self) -> None:
-        job = _job(date_posted=None)
-        assert not job_matches_search_filters(
-            job, opportunity=None, employment_type=[], work_mode=[], date_posted="past_7d", today=date(2026, 1, 1)
-        )
+        assert not _matches(_job(), date_posted="past_7d", date_posted_raw=None)
+
+    def test_date_posted_window_matches_discover_precision_for_a_timestamped_posting(self) -> None:
+        # A posting timestamped 25 hours ago falls outside "past_24h" even
+        # though its calendar date is still "yesterday" — this is the exact
+        # divergence a naive calendar-day delta would get wrong relative to
+        # what job_query_service.query_jobs (Discover's own filter) shows.
+        just_outside = (_NOW - timedelta(hours=25)).isoformat()
+        assert not _matches(_job(), date_posted="past_24h", date_posted_raw=just_outside)
 
 
 class TestSavedSearchCrud:
@@ -162,6 +165,7 @@ class TestSavedSearchCrud:
 class TestSchedulerTick:
     def test_creates_matches_for_newly_scouted_jobs(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
         search = create_saved_search(
             isolated_session, TEST_USER_ID, SavedSearchCreate(label="Interns", query_text="intern")
         )
@@ -190,6 +194,7 @@ class TestSchedulerTick:
 
     def test_does_not_duplicate_matches_on_a_second_run(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
         search = create_saved_search(
             isolated_session,
             TEST_USER_ID,
@@ -214,6 +219,7 @@ class TestSchedulerTick:
 
     def test_skips_a_search_not_yet_due(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
         search = create_saved_search(
             isolated_session, TEST_USER_ID, SavedSearchCreate(label="Interns", query_text="intern", cadence_hours=12)
         )
@@ -235,6 +241,7 @@ class TestSchedulerTick:
 
     def test_a_disabled_search_is_never_run(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
         create_saved_search(
             isolated_session, TEST_USER_ID, SavedSearchCreate(label="Interns", query_text="intern")
         )
@@ -255,6 +262,7 @@ class TestSchedulerTick:
 
     def test_one_failing_search_does_not_block_the_others(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
         failing = create_saved_search(
             isolated_session, TEST_USER_ID, SavedSearchCreate(label="Fails", query_text="fails")
         )
@@ -280,6 +288,7 @@ class TestSchedulerTick:
 
     def test_caps_searches_processed_per_tick(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
         for i in range(MAX_SEARCHES_PER_TICK + 2):
             create_saved_search(
                 isolated_session, TEST_USER_ID, SavedSearchCreate(label=f"Search {i}", query_text=f"q{i}")
@@ -300,6 +309,7 @@ class TestSchedulerTick:
 
     def test_rate_limited_search_is_retried_next_tick_not_marked_run(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
         search = create_saved_search(
             isolated_session, TEST_USER_ID, SavedSearchCreate(label="Interns", query_text="intern")
         )
@@ -320,6 +330,66 @@ class TestSchedulerTick:
 
         assert scout_called["n"] == 0
         assert isolated_session.get(SavedSearchRecord, search.id).last_run_at is None
+
+    def test_a_search_for_a_no_longer_ready_profile_is_skipped_not_scouted(
+        self, isolated_session, monkeypatch
+    ) -> None:
+        # A saved search created while the profile was ready must not keep
+        # auto-scouting forever once the owner's profile stops being ready —
+        # the live "Find Jobs" route re-checks this on every call, and the
+        # background tick has to match that, not just check once at creation.
+        ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
+        search = create_saved_search(
+            isolated_session, TEST_USER_ID, SavedSearchCreate(label="Interns", query_text="intern")
+        )
+        candidate = isolated_session.query(Candidate).filter(Candidate.user_id == TEST_USER_ID).one()
+        isolated_session.delete(candidate)
+        isolated_session.commit()
+
+        scout_called = {"n": 0}
+        monkeypatch.setattr(
+            "backend.services.saved_search_service.scout_jobs",
+            lambda queries, location: (scout_called.__setitem__("n", scout_called["n"] + 1) or []),
+        )
+        monkeypatch.setattr("backend.services.saved_search_service.SessionLocal", lambda: isolated_session)
+        monkeypatch.setattr(isolated_session, "close", lambda: None)
+
+        asyncio.run(run_due_saved_searches())
+
+        assert scout_called["n"] == 0
+        assert isolated_session.get(SavedSearchRecord, search.id).last_run_at is None
+
+    def test_structured_query_text_is_split_into_role_and_location_like_find_jobs(
+        self, isolated_session, monkeypatch
+    ) -> None:
+        # A saved search stored as free text with an embedded location must
+        # be scouted the same way typing it into Discover and clicking "Find
+        # Jobs" would scout it (backend.api.routes.jobs._run_scout) — not
+        # sent verbatim as one literal query string to every source.
+        ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
+        create_saved_search(
+            isolated_session,
+            TEST_USER_ID,
+            SavedSearchCreate(label="Remote analyst", query_text="remote data analyst intern in Chicago"),
+        )
+
+        captured = {}
+
+        def fake_scout_jobs(queries, location):
+            captured["queries"] = queries
+            captured["location"] = location
+            return []
+
+        monkeypatch.setattr("backend.services.saved_search_service.scout_jobs", fake_scout_jobs)
+        monkeypatch.setattr("backend.services.saved_search_service.SessionLocal", lambda: isolated_session)
+        monkeypatch.setattr(isolated_session, "close", lambda: None)
+
+        asyncio.run(run_due_saved_searches())
+
+        assert captured["queries"] != ["remote data analyst intern in Chicago"]
+        assert captured["location"] == "Chicago"
 
 
 class TestSavedSearchRoutes:

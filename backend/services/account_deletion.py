@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from backend.db.models import (
+    ApplicationEventRecord,
     ApplicationPackageRecord,
     ApplicationTrackerRecord,
     Candidate,
@@ -18,6 +19,8 @@ from backend.db.models import (
     MatchScoreRecord,
     ResumeVersionRecord,
     SavedJobRecord,
+    SavedSearchMatchRecord,
+    SavedSearchRecord,
     TargetPreference,
     User,
     UserSession,
@@ -66,6 +69,20 @@ def delete_user_account(db: Session, user: User) -> None:
         synchronize_session=False
     )
     db.query(SavedJobRecord).filter(SavedJobRecord.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(ApplicationEventRecord).filter(ApplicationEventRecord.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    saved_search_ids = [
+        row[0]
+        for row in db.query(SavedSearchRecord.id).filter(SavedSearchRecord.user_id == user_id).all()
+    ]
+    if saved_search_ids:
+        db.query(SavedSearchMatchRecord).filter(
+            SavedSearchMatchRecord.saved_search_id.in_(saved_search_ids)
+        ).delete(synchronize_session=False)
+    db.query(SavedSearchRecord).filter(SavedSearchRecord.user_id == user_id).delete(
         synchronize_session=False
     )
     db.query(TargetPreference).filter(TargetPreference.user_id == user_id).delete(

@@ -90,6 +90,19 @@ class TestBuildReminderIcs:
         for line in _lines(ics):
             assert line == "" or line[0] == " " or ":" in line or line in ("BEGIN:VEVENT", "END:VEVENT")
 
+    def test_escapes_a_lone_carriage_return_as_a_line_break_not_deletion(self) -> None:
+        # An old Mac-style lone "\r" (no paired "\n") must become the RFC's
+        # "\n" escape, not silently vanish and concatenate the surrounding text.
+        ics = build_reminder_ics(
+            job_public_id="job-1",
+            job_title="Software\rEngineer",
+            company="Acme",
+            reminder_date=date(2026, 9, 20),
+        )
+        text = ics.decode("utf-8")
+        assert "SoftwareEngineer" not in text
+        assert "Software\\nEngineer" in text
+
     def test_folds_a_long_summary_line(self) -> None:
         long_title = "Senior Staff Principal Distinguished Software Engineering Manager"
         long_company = "A Very Long Multinational Technology Corporation Holdings Group"

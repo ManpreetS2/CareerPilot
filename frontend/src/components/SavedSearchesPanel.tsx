@@ -5,6 +5,7 @@ import { Sheet, SheetContent } from "./ui/sheet";
 import { ErrorBanner } from "./ErrorBanner";
 import { api } from "../lib/api";
 import { queryKeys } from "../lib/query-keys";
+import { chipLabel } from "../lib/search-intent";
 import type { SavedSearchItem } from "../lib/types";
 
 export type SavedSearchDraft = {
@@ -24,11 +25,13 @@ const CADENCE_OPTIONS = [
 ] as const;
 
 function describeCriteria(search: SavedSearchItem): string {
+  // Same label mapping Discover's own filter chips use (JobsPage.tsx),
+  // so a search's criteria read identically whether shown here or there.
   const bits: string[] = [];
   if (search.opportunity === "internship") bits.push("Internships");
   else if (search.opportunity === "role") bits.push("Roles");
-  bits.push(...search.employment_type.map((value) => value.replace(/_/g, " ")));
-  bits.push(...search.work_mode);
+  bits.push(...search.employment_type.map(chipLabel));
+  bits.push(...search.work_mode.map(chipLabel));
   if (search.location) bits.push(search.location);
   return bits.length ? bits.join(" · ") : "All new postings for this search";
 }

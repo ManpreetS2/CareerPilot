@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.core.rate_limit import guard_expensive
@@ -20,9 +21,15 @@ from backend.db.database import SessionLocal
 from backend.db.models import JobRecord, SavedSearchMatchRecord, SavedSearchRecord
 from backend.schemas.saved_search import SavedSearchCreate, SavedSearchUpdate
 from backend.schemas.schemas import Job
-from backend.services.job_posting_time import DATE_POSTED_WINDOWS
-from backend.services.job_service import scout_jobs
+from backend.services.job_posting_time import (
+    cutoff_for_date_posted_window,
+    parse_posting_time,
+    posting_in_window,
+)
+from backend.services.job_search_parser import parse_job_search_intent, scout_terms_from_intent
+from backend.services.job_service import clean_search_term, scout_jobs
 from backend.services.opportunity_type import matches_opportunity_filter
+from backend.services.profile_readiness import require_ready_profile
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +62,25 @@ def job_matches_search_filters(
     employment_type: list[str],
     work_mode: list[str],
     date_posted: str | None,
-    today: date,
+    date_posted_raw: str | None,
+    now: datetime,
 ) -> bool:
     """Whether a freshly-scouted job satisfies one saved search's own
-    filters. Narrowed to fields resolve_job_listing_metadata can classify
-    without an LLM call (opportunity/employment/work-mode heuristics, plus
-    the source-provided posting date) — that's all a job honestly has
-    moments after being scouted, before any Job Intelligence extraction or
-    Fit scoring has run on it."""
+    filters. Narrowed to opportunity/employment/work-mode/date-posted:
+    fields `record_to_job` already puts on the returned `Job` (or, for
+    date_posted, the raw JobRecord string this function re-parses) without
+    an extra `resolve_job_listing_metadata` call per job. `experience_level`
+    is classifiable the same deterministic way, but doing so here would mean
+    a second metadata-resolution pass over every scouted job on every tick;
+    that cost hasn't been justified yet, so it's deferred. `verified_state`
+    and `eligibility` are excluded for a different reason: they depend on
+    Fit scoring against the user's profile, which hasn't run on a
+    just-scouted job at all.
+
+    Uses the same `job_posting_time` helpers as job_query_service.query_jobs
+    so a saved search's "new match" agrees with what Discover's identical
+    date_posted filter would show for the same posting.
+    """
 
     if not matches_opportunity_filter(job.opportunity_type or "unknown", opportunity):
         return False
@@ -70,9 +88,10 @@ def job_matches_search_filters(
         return False
     if work_mode and job.work_mode not in work_mode:
         return False
-    if date_posted:
-        window = DATE_POSTED_WINDOWS.get(date_posted)
-        if window and (job.date_posted is None or (today - job.date_posted) > window):
+    cutoff = cutoff_for_date_posted_window(date_posted, now)
+    if cutoff:
+        posting = parse_posting_time(date_posted_raw, now=now)
+        if posting is None or not posting_in_window(posting, cutoff, now):
             return False
     return True
 
@@ -107,25 +126,27 @@ def create_saved_search(db: Session, user_id: int, request: SavedSearchCreate) -
 
 
 def list_saved_searches(db: Session, user_id: int) -> list[tuple[SavedSearchRecord, int]]:
-    """Each search paired with its unseen-match count."""
+    """Each search paired with its unseen-match count, via one grouped
+    count query rather than one query per search."""
     searches = (
         db.query(SavedSearchRecord)
         .filter(SavedSearchRecord.user_id == user_id)
         .order_by(SavedSearchRecord.created_at.desc())
         .all()
     )
-    result: list[tuple[SavedSearchRecord, int]] = []
-    for search in searches:
-        unseen = (
-            db.query(SavedSearchMatchRecord)
-            .filter(
-                SavedSearchMatchRecord.saved_search_id == search.id,
-                SavedSearchMatchRecord.seen_at.is_(None),
-            )
-            .count()
+    if not searches:
+        return []
+    search_ids = [search.id for search in searches]
+    unseen_counts = dict(
+        db.query(SavedSearchMatchRecord.saved_search_id, func.count(SavedSearchMatchRecord.id))
+        .filter(
+            SavedSearchMatchRecord.saved_search_id.in_(search_ids),
+            SavedSearchMatchRecord.seen_at.is_(None),
         )
-        result.append((search, unseen))
-    return result
+        .group_by(SavedSearchMatchRecord.saved_search_id)
+        .all()
+    )
+    return [(search, unseen_counts.get(search.id, 0)) for search in searches]
 
 
 def update_saved_search(
@@ -179,14 +200,41 @@ def mark_matches_seen(db: Session, search_id: int, user_id: int) -> int:
     return updated
 
 
+def _scout_terms_for_saved_search(search: SavedSearchRecord) -> tuple[list[str], str | None]:
+    """Same query-shaping a live "Find Jobs" click applies (backend.api.routes.jobs._run_scout)
+    before calling scout_jobs — a saved search stored as free text like
+    "remote data analyst intern in Chicago" must be split into role terms +
+    location the same way, or its background results silently disagree with
+    what typing that same text into Discover would return."""
+    query = clean_search_term(search.query_text) if search.query_text else ""
+    location = clean_search_term(search.location) if search.location else ""
+    if not query:
+        return [], location or None
+    intent = parse_job_search_intent(query)
+    structured = bool(intent.locations or intent.work_modes or intent.industries or intent.opportunity_types)
+    if not structured:
+        return [query], location or None
+    scout_queries, scout_location = scout_terms_from_intent(intent)
+    queries = [clean_search_term(term) for term in scout_queries if term] or [query]
+    resolved_location = location or (clean_search_term(scout_location) if scout_location else "")
+    return queries, resolved_location or None
+
+
 async def _run_one_saved_search(db: Session, search: SavedSearchRecord) -> None:
+    # Same profile-first gate the live route re-checks on every call
+    # (backend.api.routes.jobs.trigger_scout) — a saved search created while
+    # ready must stop auto-scouting if the owner's profile later becomes
+    # not-ready, rather than keep running indefinitely in the background.
+    require_ready_profile(db, search.user_id)
+
+    queries, location = _scout_terms_for_saved_search(search)
     with guard_expensive(search.user_id, "scheduled_scout"):
         # scout_jobs is fully synchronous (httpx + a thread pool internally)
         # — running it bare here would block the whole event loop for the
         # entire multi-provider scout, freezing every concurrent live request.
-        jobs: list[Job] = await asyncio.to_thread(scout_jobs, [search.query_text], search.location)
+        jobs: list[Job] = await asyncio.to_thread(scout_jobs, queries, location)
 
-    today = datetime.now(timezone.utc).date()
+    now = datetime.now(timezone.utc)
     existing_job_ids = {
         row[0]
         for row in db.query(SavedSearchMatchRecord.job_id)
@@ -204,23 +252,24 @@ async def _run_one_saved_search(db: Session, search: SavedSearchRecord) -> None:
     for job in jobs:
         if not job.id:
             continue
+        record = job_records.get(job.id)
+        if record is None or record.id in existing_job_ids:
+            continue
         if not job_matches_search_filters(
             job,
             opportunity=search.opportunity,
             employment_type=search.employment_type,
             work_mode=search.work_mode,
             date_posted=search.date_posted,
-            today=today,
+            date_posted_raw=record.date_posted,
+            now=now,
         ):
-            continue
-        record = job_records.get(job.id)
-        if record is None or record.id in existing_job_ids:
             continue
         db.add(SavedSearchMatchRecord(saved_search_id=search.id, job_id=record.id))
         existing_job_ids.add(record.id)
         new_match_count += 1
 
-    search.last_run_at = datetime.now(timezone.utc)
+    search.last_run_at = now
     db.commit()
     logger.info("saved search run id=%s new_matches=%s", search.id, new_match_count)
 
@@ -246,6 +295,13 @@ async def run_due_saved_searches() -> None:
                 await _run_one_saved_search(db, search)
             except Exception:
                 # One saved search failing (rate-limited, a source outage,
-                # anything) must not block the rest of this tick's batch —
-                # last_run_at is left untouched, so it's retried next tick.
+                # a not-ready profile, anything) must not block the rest of
+                # this tick's batch — last_run_at is left untouched, so it's
+                # retried next tick. The rollback is required, not optional:
+                # this session is shared across every search in the loop, and
+                # without it a failed search's pending (uncommitted) inserts
+                # would sit in the session and get flushed and committed
+                # anyway by the NEXT search's successful commit —
+                # autocommitting a batch that was supposed to be isolated.
+                db.rollback()
                 logger.exception("saved search run failed id=%s", search.id)

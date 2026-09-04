@@ -41,6 +41,17 @@ let selectedFormat: ResumeExportFormat = "pdf";
 let attachStatus: "not_attached" | "attaching" | "attached" | "manual" | "failed" = "not_attached";
 let attachDetail = "";
 let versionsError = "";
+// Which (version, format) this script itself last successfully attached on
+// the current page. Filename alone can't prove "the right file is already
+// there": two different jobs' first tailored resume both export as
+// "<title> <company> v1.<ext>" when title+company match (a common case for
+// reposted listings), so a stale file from a previous version left on the
+// page can match the filename of a DIFFERENT version the user just selected.
+let lastAttachedVersionKey: string | null = null;
+
+function resumeVersionKey(): string {
+  return `${selectedVersionId ?? ""}:${selectedFormat}`;
+}
 
 const VERIFY_STAGES = [
   "Reading full posting",
@@ -57,6 +68,7 @@ function resetDocumentState() {
   attachStatus = "not_attached";
   attachDetail = "";
   versionsError = "";
+  lastAttachedVersionKey = null;
 }
 
 function defaultVersionId(versions: ExtensionResumeVersion[], jobId: string | null | undefined): string | null {
@@ -545,6 +557,7 @@ async function runFill(url: string) {
       refreshDocumentsCard();
       statusEl.textContent = "Downloading resume…";
       const downloadStarted = performance.now();
+      const versionKey = resumeVersionKey();
       file = await downloadResumeVersionFile(selectedVersionId, selectedFormat);
       console.debug(
         `[CareerPilot] resume ${selectedFormat} fetch ${Math.round(performance.now() - downloadStarted)}ms version_id=${selectedVersionId}`,
@@ -555,12 +568,19 @@ async function runFill(url: string) {
       // input once attached and show a filename display instead, so a fresh
       // attach attempt would find no field to inject into and report a
       // false failure. Check first — if it is already there, there is
-      // nothing to do.
-      const already = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: verifyResumeAttachmentInPage,
-        args: [file.filename],
-      });
+      // nothing to do. Filename match alone isn't enough proof, though: two
+      // different jobs can export an identically-named first resume version,
+      // so this fast path only applies when WE ourselves last attached this
+      // exact (version, format) on this page — otherwise fall through to a
+      // real attach even if some resume of that name is already showing.
+      const already =
+        lastAttachedVersionKey === versionKey
+          ? await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: verifyResumeAttachmentInPage,
+              args: [file.filename],
+            })
+          : null;
       if (already?.[0]?.result?.attached) {
         attachedName = file.filename;
         attachStatus = "attached";
@@ -593,6 +613,7 @@ async function runFill(url: string) {
         attachedName = attachResult.verifiedName;
         attachStatus = "attached";
         attachDetail = "";
+        lastAttachedVersionKey = versionKey;
         refreshDocumentsCard();
       }
     }

@@ -11,6 +11,8 @@ replaced except through an explicit stale-reviewed discard by the owner.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -43,6 +45,8 @@ from backend.services.llm_client import (
     LLMEmptyResponseError,
     LLMProviderError,
 )
+
+logger = logging.getLogger(__name__)
 
 _APPROVAL_MESSAGES = {
     "approved": "Application package approved. Ready for the next step once Form Fill lands.",
@@ -186,7 +190,16 @@ def get_or_generate_application_package(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Application materials could not be stored.",
         )
-    record_event(db, job_pk=job.id, user_id=user_id, event_type="materials_generated")
+    # Materials are already durably stored above (generate_grounded_application_materials
+    # commits its own write) — this event has no commit of its own to fold into.
+    # A failure recording it must not turn an already-successful generation
+    # into a reported error, so it's best-effort: log and continue.
+    try:
+        record_event(db, job_pk=job.id, user_id=user_id, event_type="materials_generated")
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("failed to record materials_generated event job_pk=%s", job.id)
     return _record_to_package(record, job_id)
 
 
@@ -257,10 +270,9 @@ def apply_approval(db: Session, job_id: str, user_id: int, request: ApprovalRequ
         record.eligibility_notes = request.eligibility_notes or None
     if "notes" in provided:
         record.decision_notes = request.notes or None
-    db.commit()
-
     if request.decision == "approved":
         record_event(db, job_pk=job.id, user_id=user_id, event_type="materials_approved")
+    db.commit()
 
     return ApprovalResponse(
         job_id=job_id,

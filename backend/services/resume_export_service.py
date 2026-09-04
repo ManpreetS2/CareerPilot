@@ -11,7 +11,6 @@ approved when the version was created.
 from __future__ import annotations
 
 import io
-import re
 from xml.sax.saxutils import escape as _xml_escape
 
 from docx import Document
@@ -21,24 +20,13 @@ from reportlab.lib.units import inch
 from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
 
 from backend.schemas.schemas import ResumeVersionDetail
-
-# Content-Disposition is an HTTP header value, and job title/company come
-# from scraped, untrusted postings — this allowlists safe filename
-# characters rather than trying to blocklist unsafe ones, so it can't be
-# bypassed by an encoding or character this list didn't anticipate.
-_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9 _.-]")
-_MAX_FILENAME_STEM_LENGTH = 80
+from backend.services.safe_filename import safe_filename_stem
 
 
 def export_filename(detail: ResumeVersionDetail, extension: str) -> str:
     """A safe, human-readable download filename for one resume version."""
-    raw_parts = [detail.job_title, detail.company, f"v{detail.version_number}"]
-    stem = " ".join(part.strip() for part in raw_parts if part and part.strip())
-    stem = _UNSAFE_FILENAME_CHARS.sub("", stem)
-    stem = re.sub(r"\s+", " ", stem).strip(" .")
-    if not stem:
-        stem = f"resume-v{detail.version_number}"
-    stem = stem[:_MAX_FILENAME_STEM_LENGTH].strip(" .")
+    parts = [detail.job_title, detail.company, f"v{detail.version_number}"]
+    stem = safe_filename_stem(parts, default=f"resume-v{detail.version_number}")
     return f"{stem}.{extension}"
 
 

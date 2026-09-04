@@ -1,11 +1,14 @@
 """Application Conversion Analytics: recording and read-only aggregation.
 
-record_event() is the only write path — a plain append to the log, called from
-the handful of existing services that already mutate application state
+record_event() is the only write path — a plain append to the log, called
+from the handful of existing services that already mutate application state
 (saved_job_service, application_service, application_tracker_service). It
-commits on its own rather than relying on the caller's commit: at least one of
-those callers (get_or_generate_application_package) has no commit of its own
-to piggyback on.
+only stages the row; it never commits on its own. Callers add it to their
+own existing commit for the state change it describes, so the event and the
+change it records land in one transaction — succeeding or failing together,
+never one without the other. (get_or_generate_application_package is the one
+caller with no commit of its own to fold this into; it commits explicitly
+right after calling this.)
 
 build_conversion_analytics() is pure read: no LLM call, no mutation, bounded
 per-user data volume, so the aggregation is plain Python over fetched rows
@@ -57,11 +60,11 @@ _SCORE_BANDS: tuple[tuple[str, float, float], ...] = (
 
 
 def record_event(db: Session, *, job_pk: int, user_id: int, event_type: str) -> None:
-    """Append one event. Never raises on a duplicate — the log tolerates and
-    expects repeats (e.g. a later interview round re-enters "interviewing")."""
+    """Stage one event for the caller's own commit. Never raises on a
+    duplicate — the log tolerates and expects repeats (e.g. a later
+    interview round re-enters "interviewing")."""
 
     db.add(ApplicationEventRecord(job_id=job_pk, user_id=user_id, event_type=event_type))
-    db.commit()
 
 
 @dataclass

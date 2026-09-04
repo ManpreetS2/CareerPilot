@@ -14,6 +14,7 @@ from backend.core.config import settings
 from backend.core.rate_limit import LOGIN_IDENTITY, hash_key, runtime_guards
 from backend.core.security import generate_session_token, hash_session_token
 from backend.db.models import (
+    ApplicationEventRecord,
     ApplicationPackageRecord,
     ApplicationTrackerRecord,
     Candidate,
@@ -24,6 +25,8 @@ from backend.db.models import (
     MatchScoreRecord,
     ResumeVersionRecord,
     SavedJobRecord,
+    SavedSearchMatchRecord,
+    SavedSearchRecord,
     TargetPreference,
     User,
     UserSession,
@@ -80,6 +83,13 @@ def test_delete_account_revokes_all_sessions_and_private_data(isolated_client) -
                 flagged_fields=[],
             )
         )
+        db.add(
+            SavedSearchRecord(
+                user_id=user_a,
+                label="Backend intern roles",
+                query_text="backend engineer intern",
+            )
+        )
         db.commit()
         job_id = job.public_id
         job_pk = job.id
@@ -87,6 +97,12 @@ def test_delete_account_revokes_all_sessions_and_private_data(isolated_client) -
     client.patch(f"/api/applications/{job_id}/tracking", json={"status": "saved"})
     client.post(f"/api/jobs/{job_id}/save")
     client.post(f"/api/jobs/{job_id}/prepare-interview")
+
+    with SessionLocal() as db:
+        search = db.query(SavedSearchRecord).filter(SavedSearchRecord.user_id == user_a).one()
+        db.add(SavedSearchMatchRecord(saved_search_id=search.id, job_id=job_pk))
+        db.commit()
+        assert db.query(ApplicationEventRecord).filter(ApplicationEventRecord.user_id == user_a).count() > 0
 
     raw_b = generate_session_token()
     with SessionLocal() as db:
@@ -126,6 +142,9 @@ def test_delete_account_revokes_all_sessions_and_private_data(isolated_client) -
         assert db.query(ResumeVersionRecord).filter(ResumeVersionRecord.user_id == user_a).count() == 0
         assert db.query(MatchEvidenceRecord).filter(MatchEvidenceRecord.user_id == user_a).count() == 0
         assert db.query(FormFillAttemptRecord).filter(FormFillAttemptRecord.user_id == user_a).count() == 0
+        assert db.query(ApplicationEventRecord).filter(ApplicationEventRecord.user_id == user_a).count() == 0
+        assert db.query(SavedSearchRecord).filter(SavedSearchRecord.user_id == user_a).count() == 0
+        assert db.query(SavedSearchMatchRecord).count() == 0
         assert db.query(JobRecord).filter(JobRecord.id == job_pk).first() is not None
 
 

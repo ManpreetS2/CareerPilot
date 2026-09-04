@@ -54,12 +54,11 @@ def save_job(db: Session, user_id: int, job_public_id: str) -> JobListItem:
     )
     if existing is None:
         db.add(SavedJobRecord(user_id=user_id, job_id=job_row.id))
+        record_event(db, job_pk=job_row.id, user_id=user_id, event_type="saved")
         try:
             db.commit()
         except IntegrityError:
             db.rollback()
-        else:
-            record_event(db, job_pk=job_row.id, user_id=user_id, event_type="saved")
     job = record_to_job(job_row)
     job.saved = True
     return JobListItem(job=job, saved=True)

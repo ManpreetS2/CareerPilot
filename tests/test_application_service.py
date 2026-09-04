@@ -97,6 +97,23 @@ def test_generate_materials_is_idempotent_not_regenerated(isolated_session) -> N
     assert isolated_session.query(ApplicationPackageRecord).count() == 1
 
 
+def test_generate_materials_survives_an_analytics_event_failure(isolated_session, monkeypatch) -> None:
+    # Materials are already durably persisted before the analytics event is
+    # recorded — a failure recording that event (e.g. a locked SQLite file)
+    # must not turn an already-successful generation into a reported error.
+    seed_materials_prerequisites(isolated_session)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("db is locked")
+
+    monkeypatch.setattr("backend.services.application_service.record_event", boom)
+    package = get_or_generate_application_package(
+        isolated_session, "manual-abc123", TEST_USER_ID, generator=fake_grounded_generator
+    )
+    assert package.job_id == "manual-abc123"
+    assert isolated_session.query(ApplicationPackageRecord).count() == 1
+
+
 def test_generate_materials_missing_job_404s(isolated_session) -> None:
     with pytest.raises(HTTPException) as exc_info:
         get_or_generate_application_package(isolated_session, "does-not-exist", TEST_USER_ID)

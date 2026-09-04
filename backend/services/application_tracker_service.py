@@ -33,11 +33,17 @@ from backend.services.analytics_service import record_event
 
 logger = logging.getLogger(__name__)
 
-# Statuses the conversion funnel records as events. "saved", "pending_review",
-# "approved", and "ready_to_apply" are already captured by the earlier
-# saved/materials-generated/materials-approved hooks in saved_job_service.py
-# and application_service.py — recording them again here from a tracker
-# status change would double-count the same real-world moment.
+# Statuses the conversion funnel records as events. "saved" is already
+# captured by saved_job_service.save_job's own hook, and "pending_review" /
+# "approved" / "ready_to_apply" are plain Kanban statuses with no
+# corresponding FUNNEL_STAGES entry in analytics_service.py — there is
+# nothing for an event at those statuses to feed. A job can reach
+# "ready_to_apply" without ever going through application_service's
+# materials_generated/materials_approved hooks (ALLOWED_TRANSITIONS allows
+# "saved" -> "ready_to_apply" directly); that's an intentional product path
+# (tracking a job to apply to manually), and it shows up honestly in the
+# funnel as a job present at "applied" without having passed through
+# "materials_approved" — not as missing or double-counted data.
 _TRACKED_EVENT_STATUSES = frozenset({"applied", "interviewing", "offer", "rejected", "withdrawn"})
 
 TRACKER_STATUSES: tuple[str, ...] = (
@@ -293,6 +299,18 @@ def _transition_allowed(current: str | None, target: TrackerStatus) -> bool:
     return target in allowed
 
 
+def _maybe_record_status_event(
+    db: Session, *, job_pk: int, user_id: int, status: str, previous_status: str | None
+) -> None:
+    """Stage a conversion-funnel event for this status change, if any — call
+    before the caller's own db.commit() so the event and the tracker status
+    change land in the same transaction. record_event() only stages the row;
+    it never commits on its own, so this can never succeed independently of
+    (or fail independently of) the state change it is describing."""
+    if status in _TRACKED_EVENT_STATUSES and status != previous_status:
+        record_event(db, job_pk=job_pk, user_id=user_id, event_type=status)
+
+
 def update_tracking(
     db: Session,
     job_id: str,
@@ -329,6 +347,9 @@ def update_tracking(
             updated_at=now,
         )
         db.add(record)
+        _maybe_record_status_event(
+            db, job_pk=job.id, user_id=user_id, status=request.status, previous_status=None
+        )
         try:
             db.commit()
         except IntegrityError:
@@ -350,15 +371,14 @@ def update_tracking(
             if "reminder_date" in request.model_fields_set:
                 existing.reminder_date = request.reminder_date
             existing.updated_at = now
+            _maybe_record_status_event(
+                db, job_pk=job.id, user_id=user_id, status=request.status, previous_status=previous_status
+            )
             db.commit()
             db.refresh(existing)
-            if request.status in _TRACKED_EVENT_STATUSES and request.status != previous_status:
-                record_event(db, job_pk=job.id, user_id=user_id, event_type=request.status)
             return _record_to_item(existing, job_id)
         db.refresh(record)
         logger.info("tracker created job_pk=%s status=%s", job.id, record.status)
-        if request.status in _TRACKED_EVENT_STATUSES:
-            record_event(db, job_pk=job.id, user_id=user_id, event_type=request.status)
         return _record_to_item(record, job_id)
 
     record.status = request.status
@@ -367,9 +387,10 @@ def update_tracking(
     if "reminder_date" in request.model_fields_set:
         record.reminder_date = request.reminder_date
     record.updated_at = now
+    _maybe_record_status_event(
+        db, job_pk=job.id, user_id=user_id, status=request.status, previous_status=current
+    )
     db.commit()
-    if request.status in _TRACKED_EVENT_STATUSES and request.status != current:
-        record_event(db, job_pk=job.id, user_id=user_id, event_type=request.status)
     db.refresh(record)
     logger.info("tracker updated job_pk=%s status=%s", job.id, record.status)
     return _record_to_item(record, job_id)

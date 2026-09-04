@@ -5,21 +5,13 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
 import { PageHeader } from "../components/ui/page-header";
 import { Surface } from "../components/ui/surface";
-import { api, ApiClientError } from "../lib/api";
+import { api } from "../lib/api";
+import { isProfileRequired } from "../lib/profile-gate";
 import { queryKeys } from "../lib/query-keys";
 import type { ApplicationAnalyticsSummary, BreakdownBucket, FunnelStep } from "../lib/types";
 
 const PAGE_DESCRIPTION =
   "Conversion funnel from saved jobs through offers. Accrues from your own activity going forward — earlier applications aren't backfilled.";
-
-function isProfileRequired(error: unknown): boolean {
-  if (!(error instanceof ApiClientError) || error.status !== 409) return false;
-  const detail = error.detail;
-  if (detail && typeof detail === "object" && detail !== null && "code" in detail) {
-    return (detail as { code?: string }).code === "profile_required";
-  }
-  return true;
-}
 
 function formatDays(value: number | null): string {
   if (value === null) return "—";
