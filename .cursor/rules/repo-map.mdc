@@ -1,0 +1,20 @@
+---
+description: Use the CareerPilot AI repo map before broad repository search
+alwaysApply: true
+---
+
+# CareerPilot repo navigation rule
+
+Before broad repository exploration:
+
+1. Read `AGENTS.md`.
+2. Read `docs/AI_REPO_MAP.md`.
+3. Identify the subsystem/task in the map's **Task → files** table.
+4. Inspect only the mapped implementation files and primary tests first.
+5. Search beyond those files only when evidence requires it: stale path, failing stack trace, moved ownership, cross-subsystem bug, or explicit repo-wide audit.
+
+Do not recursively scan the repository just to rebuild context already captured in the map.
+
+The map is a navigation aid, not authority. If source code and the map disagree, source wins; update the map in the same structural PR when routes, services, models, ownership, or invariants changed.
+
+Preserve CareerPilot's critical invariants: profile-first gating, read-only page loads, grounded materials, stale-data protection, human approval, no auto-submit, manual EEO/consent fields, truthful resume attachment, ATS-ID-based Greenhouse/Lever identity, SSRF protections, and strict user isolation.
