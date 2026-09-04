@@ -2,9 +2,9 @@ import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowRight, CheckCircle2, Lock, Sparkles } from "lucide-react";
 import { HeroAtmosphere } from "../components/HeroAtmosphere";
-import { HeroBlackHole } from "../components/HeroBlackHole";
 import { EncryptionSection } from "../components/EncryptionSection";
 import { DottedGlobe } from "../components/DottedGlobe";
+import { SignalLattice } from "../components/SignalLattice";
 import { Glass } from "../components/ui/glass";
 import { APP_NAME } from "../lib/config";
 
@@ -36,8 +36,8 @@ export function LandingPage() {
 
   return (
     <div className="cp-atmosphere relative min-h-screen overflow-x-clip bg-background">
-      <section className="relative h-[100svh] min-h-[36rem] overflow-x-clip overflow-y-hidden">
-        <header className="safe-pad absolute inset-x-0 top-0 z-20 mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-5 sm:px-6 lg:px-8">
+      <section className="relative min-h-[100svh] overflow-x-clip">
+        <header className="safe-pad relative z-20 mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex items-center gap-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
               <span className="text-sm font-bold text-primary-foreground">CP</span>
@@ -55,7 +55,7 @@ export function LandingPage() {
             </Link>
             <Link
               to="/signup"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-5 py-2 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30"
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-5 py-2 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-shadow hover:shadow-xl hover:shadow-primary/30"
             >
               Get Started
               <ArrowRight className="h-4 w-4" />
@@ -64,61 +64,68 @@ export function LandingPage() {
         </header>
 
         <HeroAtmosphere />
-        <HeroBlackHole />
+        <SignalLattice className="absolute inset-0 z-0 hidden opacity-80 lg:block" />
 
-        <div className="safe-pad relative z-10 mx-auto flex h-full max-w-4xl flex-col items-center px-4 pb-[46%] pt-[4.75rem] text-center sm:px-6 sm:pt-24 lg:px-8">
-          <motion.div
-            initial={reduce ? false : { opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="mb-4 inline-flex items-center gap-2 rounded-full border border-border bg-foreground/5 px-4 py-2 backdrop-blur-sm sm:mb-6"
-          >
-            <Sparkles className="h-4 w-4 text-accent" />
-            <span className="text-sm font-medium text-foreground/90">AI-Powered Career Navigation</span>
-          </motion.div>
-
-          <motion.h1
-            className="hero-fluid max-w-[18ch] font-bold leading-[1.05] tracking-tight text-foreground"
-            initial={reduce ? false : { opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: reduce ? 0 : 0.1 }}
-          >
-            Find better roles with{" "}
-            <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
-              CareerPilot
-            </span>
-          </motion.h1>
-
-          <motion.p
-            className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground sm:mt-6 sm:text-xl"
-            initial={reduce ? false : { opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: reduce ? 0 : 0.2 }}
-          >
-            Turn your resume into smarter job matches. Know where you fit before you apply.
-            Human-approved applications, never auto-submitted.
-          </motion.p>
-
-          <motion.div
-            className="mt-7 flex flex-wrap items-center justify-center gap-3 sm:mt-10 sm:gap-4"
-            initial={reduce ? false : { opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: reduce ? 0 : 0.3 }}
-          >
-            <Link
-              to="/signup"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-7 py-3.5 text-base font-semibold text-primary-foreground shadow-2xl shadow-primary/40 transition-all hover:scale-105 hover:shadow-primary/50 sm:px-8 sm:py-4"
+        <div className="safe-pad relative z-10 mx-auto grid max-w-7xl items-center gap-10 px-4 pb-16 pt-6 sm:px-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(18rem,0.95fr)] lg:gap-8 lg:px-8 lg:pb-20 lg:pt-8">
+          <div className="max-w-xl text-left">
+            <motion.div
+              initial={reduce ? false : { opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45 }}
+              className="mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-foreground/5 px-4 py-2"
             >
-              Get Started Free
-              <ArrowRight className="h-5 w-5" />
-            </Link>
-            <Link
-              to="/login"
-              className="inline-flex items-center gap-2 rounded-xl border border-border bg-foreground/5 px-7 py-3.5 text-base font-semibold text-foreground backdrop-blur-sm transition-all hover:bg-foreground/10 sm:px-8 sm:py-4"
+              <Sparkles className="h-4 w-4 text-accent" />
+              <span className="text-sm font-medium text-foreground/90">Grounded career navigation</span>
+            </motion.div>
+
+            <motion.h1
+              className="hero-fluid max-w-[16ch] font-bold leading-[1.05] tracking-tight text-foreground"
+              initial={reduce ? false : { opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: reduce ? 0 : 0.08 }}
             >
-              Sign In
-            </Link>
-          </motion.div>
+              Find better roles with{" "}
+              <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+                CareerPilot
+              </span>
+            </motion.h1>
+
+            <motion.p
+              className="mt-5 max-w-lg text-base leading-relaxed text-muted-foreground sm:text-lg"
+              initial={reduce ? false : { opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: reduce ? 0 : 0.16 }}
+            >
+              Turn your resume into smarter job matches. Know where you fit before you apply.
+              Human-approved applications, never auto-submitted.
+            </motion.p>
+
+            <motion.div
+              className="mt-8 flex flex-wrap items-center gap-3 sm:gap-4"
+              initial={reduce ? false : { opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: reduce ? 0 : 0.24 }}
+            >
+              <Link
+                to="/signup"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-7 py-3.5 text-base font-semibold text-primary-foreground shadow-2xl shadow-primary/30 transition-shadow hover:shadow-primary/45"
+              >
+                Get Started Free
+                <ArrowRight className="h-5 w-5" />
+              </Link>
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-2 rounded-xl border border-border bg-background/70 px-7 py-3.5 text-base font-semibold text-foreground transition-colors hover:bg-foreground/5"
+              >
+                Sign In
+              </Link>
+            </motion.div>
+          </div>
+
+          <div className="relative h-[16rem] w-full overflow-hidden sm:h-[22rem] lg:h-[28rem]">
+            <DottedGlobe />
+            <SignalLattice className="absolute inset-0 lg:hidden" />
+          </div>
         </div>
       </section>
 
@@ -177,26 +184,25 @@ export function LandingPage() {
               <h2 className="mb-12 text-center text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
                 How CareerPilot works
               </h2>
-              <div className="space-y-8">
+              <div className="space-y-6">
                 {capabilities.map((item, index) => (
                   <motion.div
                     key={item.title}
-                    initial={reduce ? false : { opacity: 0, x: -20 }}
-                    whileInView={{ opacity: 1, x: 0 }}
-                    viewport={{ once: true, margin: "-100px" }}
-                    transition={{ duration: 0.5, delay: index * 0.1 }}
+                    initial={reduce ? false : { opacity: 0, y: 12 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, margin: "-80px" }}
+                    transition={{ duration: 0.4, delay: reduce ? 0 : index * 0.06 }}
+                    className="rounded-2xl border border-border bg-card p-6"
                   >
-                    <Glass variant="surface" className="rounded-2xl p-6">
-                      <div className="flex items-start gap-4">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent font-semibold text-primary-foreground">
-                          {index + 1}
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
-                          <p className="mt-2 leading-relaxed text-muted-foreground">{item.body}</p>
-                        </div>
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent font-semibold text-primary-foreground">
+                        {index + 1}
                       </div>
-                    </Glass>
+                      <div>
+                        <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
+                        <p className="mt-2 leading-relaxed text-muted-foreground">{item.body}</p>
+                      </div>
+                    </div>
                   </motion.div>
                 ))}
               </div>
@@ -214,7 +220,7 @@ export function LandingPage() {
                 </p>
                 <Link
                   to="/signup"
-                  className="mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-10 py-5 text-lg font-semibold text-primary-foreground shadow-2xl shadow-primary/40 transition-all hover:scale-105 hover:shadow-primary/50"
+                  className="mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-10 py-5 text-lg font-semibold text-primary-foreground shadow-2xl shadow-primary/30 transition-shadow hover:shadow-primary/45"
                 >
                   Get Started Free
                   <ArrowRight className="h-5 w-5" />
