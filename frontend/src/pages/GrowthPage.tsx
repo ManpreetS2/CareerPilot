@@ -6,7 +6,8 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingState } from "../components/LoadingState";
 import { PageHeader } from "../components/ui/page-header";
 import { Surface } from "../components/ui/surface";
-import { api, ApiClientError } from "../lib/api";
+import { api } from "../lib/api";
+import { isProfileRequired } from "../lib/profile-gate";
 import { queryKeys } from "../lib/query-keys";
 import type { EvidenceState, PriorityLabel, SkillGrowthItem } from "../lib/types";
 
@@ -32,15 +33,6 @@ const EVIDENCE_COPY: Record<EvidenceState, string> = {
   unknown: "No verified profile evidence",
   not_satisfied: "Not supported by current evaluation",
 };
-
-function isProfileRequired(error: unknown): boolean {
-  if (!(error instanceof ApiClientError) || error.status !== 409) return false;
-  const detail = error.detail;
-  if (detail && typeof detail === "object" && detail !== null && "code" in detail) {
-    return (detail as { code?: string }).code === "profile_required";
-  }
-  return true;
-}
 
 function matchesFilter(item: SkillGrowthItem, filter: FilterId): boolean {
   if (filter === "all") return true;

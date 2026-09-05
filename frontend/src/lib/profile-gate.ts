@@ -1,3 +1,4 @@
+import { ApiClientError } from "./api";
 import type { CandidateProfile } from "./types";
 
 export type ProfileQueryStatus = "pending" | "success" | "error";
@@ -23,6 +24,18 @@ export const PROFILE_REQUIREMENT_LABELS: Record<string, string> = {
 
 export function missingRequirementLabel(code: string): string {
   return PROFILE_REQUIREMENT_LABELS[code] ?? code.replaceAll("_", " ");
+}
+
+/** Whether a failed request was blocked by the profile-readiness gate
+ * (a 409 with detail.code === "profile_required"), so a page can render its
+ * own "complete your profile" prompt instead of a generic error banner. */
+export function isProfileRequired(error: unknown): boolean {
+  if (!(error instanceof ApiClientError) || error.status !== 409) return false;
+  const detail = error.detail;
+  if (detail && typeof detail === "object" && detail !== null && "code" in detail) {
+    return (detail as { code?: string }).code === "profile_required";
+  }
+  return true;
 }
 
 /** Fallback only when the server omitted readiness. Never treat failure as ready. */

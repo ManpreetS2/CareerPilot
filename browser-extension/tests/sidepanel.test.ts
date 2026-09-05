@@ -725,10 +725,11 @@ describe("resume documents", () => {
     await flush(12);
     expect(executeScript).toHaveBeenCalled();
     const names = executeScript.mock.calls.map((call: any) => call[0].func.name);
-    // Checks whether the resume is already attached (e.g. from a prior Fill
-    // on this page) before attempting a fresh attach.
-    expect(names[0]).toBe("verifyResumeAttachmentInPage");
-    expect(names).toContain("attachDocumentInPage");
+    // Nothing has been attached on this page yet this session, so the
+    // "already attached?" pre-check is skipped and the real attach runs
+    // directly — that check only applies to a second Fill of the same
+    // resume version (see "skips re-attaching on a second Fill...").
+    expect(names[0]).toBe("attachDocumentInPage");
     expect(names).toContain("fillFormInPage");
     expect(panelHtml()).toContain("Resume attached");
     expect(panelHtml()).toContain("Ready for your review");
@@ -736,11 +737,18 @@ describe("resume documents", () => {
     expect(panelHtml()).not.toContain("Application submitted");
   });
 
-  it("skips re-attaching when the resume is already attached from a prior Fill", async () => {
+  it("skips re-attaching on a second Fill of the same resume version", async () => {
+    // The "already attached?" fast path only trusts a page's displayed
+    // filename when THIS script itself attached that exact (version,
+    // format) earlier in the same session — never on the very first attach,
+    // since a stale file from a different job can coincidentally share a
+    // filename (see attachFile.test.ts for the DOM-level regression case).
     responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
+    let attachCalls = 0;
     executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
       if (func.name === "attachDocumentInPage") {
-        throw new Error("should not attempt a fresh attach when already attached");
+        attachCalls += 1;
+        return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
       }
       if (func.name === "verifyResumeAttachmentInPage") {
         return [{ result: { attached: true } }];
@@ -750,12 +758,62 @@ describe("resume documents", () => {
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
     await flush();
+
     document.getElementById("fill-btn")!.click();
     await flush(12);
-    const names = executeScript.mock.calls.map((call: any) => call[0].func.name);
-    expect(names).not.toContain("attachDocumentInPage");
+    expect(attachCalls).toBe(1);
+
+    document.getElementById("fill-btn")!.click();
+    await flush(12);
+    expect(attachCalls).toBe(1);
     expect(panelHtml()).toContain("Resume attached");
     expect(panelHtml()).toContain("Ready for your review");
+  });
+
+  it("re-attaches for real when switching to a different version that happens to share a filename", async () => {
+    // Two different jobs' first tailored resume both export as "<title>
+    // <company> v1.<ext>" when title and company match — a real collision,
+    // not a hypothetical. Filename equality alone must not be trusted as
+    // proof the newly selected version's bytes are what's on the page.
+    responders["resume-versions"] = () => ({
+      versions: [
+        resumeVersion({ id: "rv-1", version_number: 1 }),
+        resumeVersion({ id: "rv-2", version_number: 1, job_id: "greenhouse-other" }),
+      ],
+      current_job_id: "greenhouse-abc123",
+    });
+    let attachCalls = 0;
+    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
+      if (func.name === "attachDocumentInPage") {
+        attachCalls += 1;
+        return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
+      }
+      if (func.name === "verifyResumeAttachmentInPage") {
+        // The mock backend serves the same filename for every version id in
+        // this test, standing in for two different jobs' resumes coincidentally
+        // sharing a name — the page always reports that name as present.
+        return [{ result: { attached: true } }];
+      }
+      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+    });
+    (globalThis as any).chrome.scripting.executeScript = executeScript;
+    await loadPanel();
+    await flush();
+    const select = document.getElementById("resume-version-select") as HTMLSelectElement;
+    select.value = "rv-1";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    document.getElementById("fill-btn")!.click();
+    await flush(12);
+    expect(attachCalls).toBe(1);
+
+    select.value = "rv-2";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    document.getElementById("fill-btn")!.click();
+    await flush(12);
+    expect(attachCalls).toBe(2);
   });
 
   it("lets the user choose DOCX before attaching", async () => {
@@ -836,10 +894,7 @@ describe("resume documents", () => {
     await flush();
     document.getElementById("fill-btn")!.click();
     await flush(12);
-    expect(executeScript.mock.calls.map((call: any) => call[0].func.name)).toEqual([
-      "verifyResumeAttachmentInPage",
-      "attachDocumentInPage",
-    ]);
+    expect(executeScript.mock.calls.map((call: any) => call[0].func.name)).toEqual(["attachDocumentInPage"]);
     expect(panelHtml()).toContain("Needs manual upload");
     expect(panelHtml()).not.toContain("Ready for your review");
   });
@@ -850,9 +905,9 @@ describe("resume documents", () => {
     // resume input even though the attach step verified clean beforehand.
     // One automatic re-attach should recover this without user action.
     responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
-    // First verify call is the pre-attach "already there?" check (nothing
-    // attached yet); second is the post-fill re-check, where the disappearance
-    // is simulated.
+    // The only verify call here is the post-fill re-check, where the
+    // disappearance is simulated — the pre-attach "already there?" check is
+    // skipped on this, the first attach of the session.
     let verifyCalls = 0;
     executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
       if (func.name === "attachDocumentInPage") {
@@ -869,7 +924,7 @@ describe("resume documents", () => {
     await flush();
     document.getElementById("fill-btn")!.click();
     await flush(12);
-    expect(verifyCalls).toBe(2);
+    expect(verifyCalls).toBe(1);
     expect(executeScript.mock.calls.filter((call: any) => call[0].func.name === "attachDocumentInPage")).toHaveLength(
       2,
     );

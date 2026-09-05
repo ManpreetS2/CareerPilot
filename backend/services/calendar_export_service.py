@@ -8,33 +8,31 @@ ApplicationTrackerRecord.reminder_date; never writes it or infers one.
 
 from __future__ import annotations
 
-import re
 from datetime import date, datetime, timedelta, timezone
 
-# Same allowlist rationale as resume_export_service.export_filename: job
-# title/company come from scraped, untrusted postings and land in an HTTP
-# Content-Disposition header value.
-_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9 _.-]")
-_MAX_FILENAME_STEM_LENGTH = 80
+from backend.services.safe_filename import safe_filename_stem
 
 _FOLD_LIMIT = 75  # RFC 5545 §3.1: content lines SHOULD NOT exceed 75 octets
 
 
 def reminder_ics_filename(job_title: str, company: str) -> str:
     """A safe, human-readable download filename for one reminder."""
-    stem = " ".join(part.strip() for part in (job_title, company) if part and part.strip())
-    stem = _UNSAFE_FILENAME_CHARS.sub("", stem)
-    stem = re.sub(r"\s+", " ", stem).strip(" .")
-    if not stem:
-        stem = "follow-up-reminder"
-    stem = stem[:_MAX_FILENAME_STEM_LENGTH].strip(" .")
+    stem = safe_filename_stem([job_title, company], default="follow-up-reminder")
     return f"{stem}.ics"
 
 
 def _escape_ics_text(value: str) -> str:
-    """RFC 5545 §3.3.11 TEXT escaping, applied before folding."""
+    """RFC 5545 §3.3.11 TEXT escaping, applied before folding.
+
+    Normalizes all three line-ending styles (CRLF, lone CR, lone LF) to a
+    single "\n" before escaping it to the RFC's literal "\\n" — a lone "\r"
+    (an old Mac-style ending, or a malformed scrape) has no adjacent "\n" to
+    pair with and previously just got deleted, silently concatenating the
+    text on either side of it instead of preserving the line break.
+    """
     value = value.replace("\\", "\\\\")
-    value = value.replace("\n", "\\n").replace("\r", "")
+    value = value.replace("\r\n", "\n").replace("\r", "\n")
+    value = value.replace("\n", "\\n")
     value = value.replace(";", "\\;").replace(",", "\\,")
     return value
 

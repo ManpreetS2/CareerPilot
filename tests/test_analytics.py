@@ -311,10 +311,15 @@ def test_notice_flags_activity_older_than_earliest_recorded_event(isolated_sessi
 
 
 def test_record_event_tolerates_a_repeated_event_type_for_the_same_job(isolated_session) -> None:
+    # record_event() only stages the row — real callers fold it into their
+    # own commit (see application_tracker_service.update_tracking), so this
+    # direct unit test commits explicitly after each call.
     ensure_user(isolated_session, TEST_USER_ID)
     job = insert_job(isolated_session)
     record_event(isolated_session, job_pk=job.id, user_id=TEST_USER_ID, event_type="interviewing")
+    isolated_session.commit()
     record_event(isolated_session, job_pk=job.id, user_id=TEST_USER_ID, event_type="interviewing")
+    isolated_session.commit()
     assert len(_events(isolated_session)) == 2
 
 
