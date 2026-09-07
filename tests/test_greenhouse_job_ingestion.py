@@ -162,6 +162,9 @@ def test_parse_reads_the_embed_url_form() -> None:
         "https://job-boards.greenhouse.io/instead/jobs/7761472003?gh_src=abc#app",
         "https://job-boards.greenhouse.io/instead/jobs/7761472003/",
         "https://boards.greenhouse.io/instead/jobs/7761472003",
+        "https://job-boards.greenhouse.io/instead?gh_jid=7761472003",
+        "https://boards.greenhouse.io/instead/?gh_jid=7761472003&utm_source=jobright",
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003?gh_jid=7761472003",
     ],
 )
 def test_every_shape_of_the_same_posting_parses_identically(url: str) -> None:
@@ -181,6 +184,19 @@ def test_canonical_path_wins_over_query_parameters() -> None:
     )
     assert ref is not None
     assert (ref.board_token, ref.job_id) == ("instead", "7761472003")
+
+
+def test_jobs_path_wins_over_conflicting_gh_jid() -> None:
+    ref = parse_greenhouse_posting_url(
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003?gh_jid=9999999999"
+    )
+    assert ref is not None
+    assert (ref.board_token, ref.job_id) == ("instead", "7761472003")
+
+
+def test_board_root_without_gh_jid_is_not_a_posting() -> None:
+    assert parse_greenhouse_posting_url("https://job-boards.greenhouse.io/instead") is None
+    assert parse_greenhouse_posting_url("https://job-boards.greenhouse.io/instead?utm_source=x") is None
 
 
 @pytest.mark.parametrize(
@@ -326,6 +342,15 @@ def test_ingest_greenhouse_strips_tracking_query_from_absolute_url(mock_fetch) -
     )
     assert raw["url"] == INSTEAD_CANONICAL_URL
     assert "?" not in raw["url"]
+
+
+def test_ingest_greenhouse_board_root_gh_jid_stores_canonical_url(mock_fetch) -> None:
+    mock_fetch["handler"] = lambda url, **_: _json_response(url, INSTEAD_API)
+    raw = ingest_job_url("https://job-boards.greenhouse.io/instead?gh_jid=7761472003")
+    assert mock_fetch["calls"][0]["url"].endswith("/boards/instead/jobs/7761472003")
+    assert raw["url"] == INSTEAD_CANONICAL_URL
+    assert "?" not in raw["url"]
+    assert raw["source_job_id"] == "7761472003"
 
 
 @pytest.mark.parametrize(

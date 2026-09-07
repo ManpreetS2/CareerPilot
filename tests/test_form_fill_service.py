@@ -1303,6 +1303,36 @@ def test_panel_data_route_returns_tracked_status(isolated_client) -> None:
     assert body["platform"] == "greenhouse"
 
 
+def test_panel_data_http_query_bearing_and_bare_greenhouse_urls_match(isolated_client) -> None:
+    """Backend API identity: a stored ?gh_jid= row and the live bare URL
+    must resolve to the same job and owned apply-ready package."""
+    client, SessionLocal = isolated_client
+    stored = "https://job-boards.greenhouse.io/acme/jobs/123?gh_jid=123"
+    bare = "https://job-boards.greenhouse.io/acme/jobs/123"
+    with SessionLocal() as db:
+        job = _job(db, url=stored)
+        public_id = job.public_id
+        candidate = _seed_candidate(db)
+        pkg = _approved_package(db, job, candidate)
+        pkg.user_id = client.test_user_id
+        db.commit()
+
+    headers = _extension_auth_headers(client)
+    client.cookies.clear()
+    stored_resp = client.get("/api/extension/panel-data", params={"url": stored}, headers=headers)
+    bare_resp = client.get("/api/extension/panel-data", params={"url": bare}, headers=headers)
+    assert stored_resp.status_code == 200, stored_resp.text
+    assert bare_resp.status_code == 200, bare_resp.text
+    stored_body = stored_resp.json()
+    bare_body = bare_resp.json()
+    assert stored_body["tracked"] is True
+    assert bare_body["tracked"] is True
+    assert stored_body["job"]["id"] == public_id
+    assert bare_body["job"]["id"] == public_id
+    assert stored_body["apply_ready"] is True
+    assert bare_body["apply_ready"] is True
+
+
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
@@ -1399,6 +1429,14 @@ def test_panel_data_does_not_match_a_different_posting(isolated_session) -> None
             "https://job-boards.greenhouse.io/acme/jobs/123?gh_jid=123",
             "https://job-boards.greenhouse.io/embed/job_app?for=acme&token=123",
         ),
+        (
+            "https://job-boards.greenhouse.io/acme/jobs/123?gh_jid=123",
+            "https://job-boards.greenhouse.io/acme?gh_jid=123",
+        ),
+        (
+            "https://boards.greenhouse.io/acme/jobs/123",
+            "https://boards.greenhouse.io/acme/?gh_jid=123&utm_source=jobright",
+        ),
     ],
 )
 def test_panel_data_matches_stored_greenhouse_tracking_variants(
@@ -1432,6 +1470,48 @@ def test_panel_data_does_not_match_a_different_greenhouse_job_id(isolated_sessio
     )
     assert result.tracked is False
     assert result.apply_ready is False
+
+
+def test_autofill_query_bearing_and_bare_greenhouse_urls_return_same_owned_package(
+    isolated_session,
+) -> None:
+    stored = "https://job-boards.greenhouse.io/acme/jobs/123?gh_jid=123"
+    bare = "https://job-boards.greenhouse.io/acme/jobs/123"
+    job = _job(isolated_session, url=stored)
+    candidate = _seed_candidate(isolated_session)
+    _approved_package(isolated_session, job, candidate)
+
+    stored_hit = get_autofill_data(isolated_session, stored, TEST_USER_ID)
+    bare_hit = get_autofill_data(isolated_session, bare, TEST_USER_ID)
+    assert stored_hit.job_id == job.public_id
+    assert bare_hit.job_id == job.public_id
+    assert stored_hit.job_id == bare_hit.job_id
+
+    other = ensure_user(isolated_session, user_id=TEST_USER_ID + 1, email="other@example.com")
+    with pytest.raises(HTTPException) as exc:
+        get_autofill_data(isolated_session, bare, other.id)
+    assert exc.value.status_code in {403, 404, 409}
+
+
+def test_autofill_query_bearing_and_bare_greenhouse_urls_return_same_owned_package(
+    isolated_session,
+) -> None:
+    stored = "https://job-boards.greenhouse.io/acme/jobs/123?gh_jid=123"
+    bare = "https://job-boards.greenhouse.io/acme/jobs/123"
+    job = _job(isolated_session, url=stored)
+    candidate = _seed_candidate(isolated_session)
+    _approved_package(isolated_session, job, candidate)
+
+    stored_hit = get_autofill_data(isolated_session, stored, TEST_USER_ID)
+    bare_hit = get_autofill_data(isolated_session, bare, TEST_USER_ID)
+    assert stored_hit.job_id == job.public_id
+    assert bare_hit.job_id == job.public_id
+    assert stored_hit.job_id == bare_hit.job_id
+
+    other = ensure_user(isolated_session, user_id=TEST_USER_ID + 1, email="other@example.com")
+    with pytest.raises(HTTPException) as exc:
+        get_autofill_data(isolated_session, bare, other.id)
+    assert exc.value.status_code in {403, 404, 409}
 
 
 def test_panel_data_matches_stored_lever_apply_and_tracking_query(isolated_session) -> None:

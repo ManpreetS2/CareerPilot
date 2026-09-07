@@ -127,6 +127,7 @@ _HIMALAYAS_SEARCH_PAGE_SIZE = 20
 _MIN_INGEST_DESCRIPTION_LENGTH = 40
 _GREENHOUSE_JOB_PATH_RE = re.compile(r"^/([^/]+)/jobs/(\d+)/?$")
 _GREENHOUSE_EMBED_PATH_RE = re.compile(r"^/embed/job_app/?$")
+_GREENHOUSE_BOARD_PATH_RE = re.compile(r"^/([^/]+)/?$")
 _LEVER_JOB_PATH_RE = re.compile(
     # The trailing /apply is the form page for the same posting — the URL a
     # candidate is most often actually on. Accepted here so pasting it
@@ -148,19 +149,22 @@ class GreenhousePostingRef:
 def parse_greenhouse_posting_url(url: str) -> GreenhousePostingRef | None:
     """Parse a supported Greenhouse posting URL into board token and job ID.
 
-    Two URL shapes reach us in practice and both identify a posting the same
-    way, so both are accepted:
+    Three URL shapes reach us in practice and all identify a posting the same
+    way, so all are accepted:
 
       canonical  https://job-boards.greenhouse.io/<board>/jobs/<job_id>
       embed      https://job-boards.greenhouse.io/embed/job_app?for=<board>&token=<job_id>
+      board+jid  https://job-boards.greenhouse.io/<board>?gh_jid=<job_id>
 
     The embed form is what an employer's own careers page frames, and it is
     what aggregators link to, so it is frequently the URL actually sitting in
-    the address bar. Tracking parameters (utm_source, gh_src, an aggregator's
-    own id) are ignored rather than rejected: they do not change which
-    posting this is, and treating them as significant meant a job arriving
-    with them attached would neither ingest nor match an already-stored copy
-    of itself.
+    the address bar. A board landing URL with only `gh_jid` is the same
+    posting. Tracking parameters (utm_source, gh_src, an aggregator's own id)
+    are ignored rather than rejected: they do not change which posting this
+    is, and treating them as significant meant a job arriving with them
+    attached would neither ingest nor match an already-stored copy of itself.
+    When the path already names `/jobs/<id>`, that path is identity; a
+    conflicting `gh_jid` query parameter cannot redirect it.
     """
     try:
         parsed = urlparse(url.strip())
@@ -179,7 +183,12 @@ def parse_greenhouse_posting_url(url: str) -> GreenhousePostingRef | None:
         board_token = (params.get("for") or [""])[0]
         job_id = (params.get("token") or [""])[0]
     else:
-        return None
+        params = parse_qs(parsed.query)
+        gh_jid = (params.get("gh_jid") or [""])[0]
+        board_match = _GREENHOUSE_BOARD_PATH_RE.match(path)
+        if board_match is None or not gh_jid.isdigit():
+            return None
+        board_token, job_id = board_match.group(1), gh_jid
 
     if not job_id.isdigit() or not _BOARD_TOKEN_RE.fullmatch(board_token or ""):
         return None
