@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import { ArrowRight, CheckCircle2, Lock, Sparkles } from "lucide-react";
 import { HeroAtmosphere } from "../components/HeroAtmosphere";
 import { EncryptionSection } from "../components/EncryptionSection";
@@ -7,6 +7,7 @@ import { DottedGlobe } from "../components/DottedGlobe";
 import { SignalLattice } from "../components/SignalLattice";
 import { Glass } from "../components/ui/glass";
 import { APP_NAME } from "../lib/config";
+import { useTheme } from "../lib/theme";
 
 const capabilities = [
   {
@@ -32,7 +33,7 @@ const capabilities = [
 ];
 
 export function LandingPage() {
-  const reduce = useReducedMotion();
+  const { reducedMotion: reduce } = useTheme();
 
   return (
     <div className="cp-atmosphere relative min-h-screen overflow-x-clip bg-background">
