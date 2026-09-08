@@ -50,28 +50,28 @@ export function LandingPage() {
   return (
     <div className="cp-atmosphere relative min-h-screen overflow-x-clip bg-background">
       <section className="relative overflow-x-clip">
-        <header className="safe-pad relative z-20 mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-5 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
+        <header className="safe-pad relative z-20 mx-auto flex max-w-7xl items-center justify-between gap-2 py-5 sm:px-6 md:gap-4 lg:px-8">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
               <span className="text-sm font-bold text-primary-foreground">CP</span>
             </div>
             <span className="font-display text-lg font-semibold tracking-tight text-foreground">
               {APP_NAME}
             </span>
           </div>
-          <div className="flex gap-3">
+          <div className="flex shrink-0 items-center gap-1.5 md:gap-3">
             <Link
               to="/login"
-              className="rounded-xl px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              className="whitespace-nowrap rounded-xl px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground md:px-4"
             >
               Sign In
             </Link>
             <Link
               to="/signup"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-5 py-2 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-shadow hover:shadow-xl hover:shadow-primary/30"
+              className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-r from-primary to-accent px-3 py-2 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-shadow hover:shadow-xl hover:shadow-primary/30 md:gap-2 md:px-5"
             >
               Get Started
-              <ArrowRight className="h-4 w-4" />
+              <ArrowRight className="h-4 w-4 shrink-0" />
             </Link>
           </div>
         </header>
