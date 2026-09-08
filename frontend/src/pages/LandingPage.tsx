@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "motion/react";
 import { ArrowRight, CheckCircle2, Lock, Sparkles } from "lucide-react";
@@ -34,10 +35,21 @@ const capabilities = [
 
 export function LandingPage() {
   const { reducedMotion: reduce } = useTheme();
+  const [desktop, setDesktop] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches,
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setDesktop(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   return (
     <div className="cp-atmosphere relative min-h-screen overflow-x-clip bg-background">
-      <section className="relative min-h-[100svh] overflow-x-clip">
+      <section className="relative overflow-x-clip">
         <header className="safe-pad relative z-20 mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex items-center gap-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
@@ -65,9 +77,8 @@ export function LandingPage() {
         </header>
 
         <HeroAtmosphere />
-        <SignalLattice className="absolute inset-0 z-0 hidden opacity-80 lg:block" />
 
-        <div className="safe-pad relative z-10 mx-auto grid max-w-7xl items-center gap-10 px-4 pb-16 pt-6 sm:px-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(18rem,0.95fr)] lg:gap-8 lg:px-8 lg:pb-20 lg:pt-8">
+        <div className="safe-pad relative z-10 mx-auto grid max-w-7xl items-center gap-4 px-4 pb-6 pt-2 sm:px-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(380px,0.95fr)] lg:gap-8 lg:px-8 lg:pb-8 lg:pt-2">
           <div className="max-w-xl text-left">
             <motion.div
               initial={reduce ? false : { opacity: 0, y: 16 }}
@@ -123,37 +134,40 @@ export function LandingPage() {
             </motion.div>
           </div>
 
-          <div className="relative h-[16rem] w-full overflow-hidden sm:h-[22rem] lg:h-[28rem]">
-            <DottedGlobe />
-            <SignalLattice className="absolute inset-0 lg:hidden" />
+          <div className="hero-globe-frame">
+            <DottedGlobe compact={!desktop} />
+            <SignalLattice className="absolute bottom-[22%] left-[4%]" />
           </div>
         </div>
       </section>
 
       <main className="relative z-10">
         <div className="safe-pad mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <section className="py-10 sm:py-16">
-            <Glass variant="floating" className="rounded-3xl p-6 sm:p-10">
+          <section className="pb-10 pt-2 sm:pb-14">
+            <h2 className="mb-4 text-center text-sm font-medium text-muted-foreground sm:text-base">
+              Helping job seekers everywhere navigate their next career move with confidence
+            </h2>
+            <Glass variant="floating" className="rounded-3xl p-6 sm:p-8">
               <div className="grid gap-6 sm:grid-cols-3">
                 <div className="text-center">
                   <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
                     <CheckCircle2 className="h-7 w-7 text-primary" />
                   </div>
-                  <h2 className="font-semibold text-foreground">Real Data Only</h2>
+                  <h3 className="font-semibold text-foreground">Real Data Only</h3>
                   <p className="mt-2 text-sm text-muted-foreground">Parse resume experience that actually exists</p>
                 </div>
                 <div className="text-center">
                   <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
                     <Sparkles className="h-7 w-7 text-primary" />
                   </div>
-                  <h2 className="font-semibold text-foreground">Smart Matching</h2>
+                  <h3 className="font-semibold text-foreground">Smart Matching</h3>
                   <p className="mt-2 text-sm text-muted-foreground">Explainable fit scores you can review</p>
                 </div>
                 <div className="text-center">
                   <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
                     <Lock className="h-7 w-7 text-primary" />
                   </div>
-                  <h2 className="font-semibold text-foreground">You're in Control</h2>
+                  <h3 className="font-semibold text-foreground">You're in Control</h3>
                   <p className="mt-2 text-sm text-muted-foreground">Review and approve before anything is sent</p>
                 </div>
               </div>
@@ -163,26 +177,10 @@ export function LandingPage() {
           <section className="py-8 sm:py-12">
             <EncryptionSection />
           </section>
-        </div>
 
-        <section className="relative overflow-hidden pb-0 pt-16 sm:pt-20">
-          <div className="safe-pad mx-auto max-w-3xl px-4 text-center sm:px-6">
-            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-              Opportunities across every industry
-            </h2>
-            <p className="mt-4 text-lg text-muted-foreground">
-              Helping job seekers everywhere navigate their next career move with confidence
-            </p>
-          </div>
-          <div className="relative mx-auto mt-8 h-[20rem] w-full overflow-hidden sm:h-[28rem] lg:h-[36rem]">
-            <DottedGlobe />
-          </div>
-        </section>
-
-        <div className="safe-pad mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <section className="border-t border-border py-20">
+          <section className="border-t border-border py-16 sm:py-20">
             <div className="mx-auto max-w-5xl">
-              <h2 className="mb-12 text-center text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+              <h2 className="mb-10 text-center text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
                 How CareerPilot works
               </h2>
               <div className="space-y-6">
@@ -210,7 +208,7 @@ export function LandingPage() {
             </div>
           </section>
 
-          <section className="py-20">
+          <section className="pb-16 sm:pb-20">
             <Glass variant="floating" className="rounded-3xl p-12 text-center">
               <div className="mx-auto max-w-2xl">
                 <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
