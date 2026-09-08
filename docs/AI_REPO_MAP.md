@@ -1,7 +1,7 @@
 # CareerPilot AI Repository Map
 > Fast navigation for Cursor/AI agents. Read this before broad code search.
 >
-> **Source snapshot:** GitHub `main` at `9d5f47148fba6cd68b173d6319dcd4e2fa7df638` (`#82` public/auth polish on `#84`, which includes `#78` analytics, `#81` calendar export, and `#83` saved searches). Source code wins if this map and the repository disagree.
+> **Source snapshot:** GitHub `main` at `7a80559d88e52bc5c9fa5e004c02eabdde200520` (`#80` map/QA hardening on `#82` public/auth polish, `#84` / `#78` analytics, `#81` calendar export, and `#83` saved searches). Source code wins if this map and the repository disagree.
 >
 > **Open, unmerged PRs (not current-main behavior):** PR `#79` is OPEN / UNMERGED pending live Greenhouse/Lever A8 work. Do not treat that branch as shipped source.
 ## 1. Fast Task → Files Index
@@ -533,6 +533,6 @@ git diff --check
 Expand only when a mapped path moved, stack trace/test points elsewhere, ownership changed, a real bug crosses subsystem boundaries, the map is stale after a structural PR, or the user explicitly requests a repo-wide audit. Search by symbol/error/path first; do not immediately scan every file.
 ## 34. Map Maintenance
 Update this map in the same structural PR when routes/product destinations, service ownership, major models, ATS identity, provider/grounding/staleness contracts, extension permission/fill/attachment architecture, or primary test/release commands change. Small implementation-only fixes do not require map churn if ownership and invariants stay the same.
-## 35. Known documentation inconsistency at this snapshot
-`README.md` still lists calendar, email alerts, and analytics as out of scope. Current `main` has `/analytics`, saved searches with in-app unseen counts, and `.ics` / Google Calendar export. Source wins. Align README in a dedicated docs PR; do not hide the mismatch inside an unrelated product fix.
+## 35. Documentation vs source
+`README.md` and this map describe the same shipped surfaces: `/analytics`, saved searches with in-app unseen counts, and `.ics` / Google Calendar follow-up export. Email alerts and calendar-account OAuth remain out of scope. Source still wins if they drift again.
 QA helpers: `scripts/make_temp_qa_db.py` (temp SQLite + printed `DATABASE_URL`; never `data/careerpilot.db`), `scripts/verify_mapped_paths.py`.

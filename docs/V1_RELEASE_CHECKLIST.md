@@ -6,7 +6,10 @@ Automation (pytest, frontend/extension tests, CI, Gitleaks) cannot prove these. 
 
 - Fresh signup → onboarding/profile (minimum profile) → Overview → Discover → Analyze → Prepare → Track
 - Incomplete profile cannot scout; completing the minimum profile unlocks Discover without a full reload
-- Logout / login as a second user never flashes the first user's profile, scores, or tracker
+- Logout / login as a second user never flashes the first user's profile, scores, tracker, analytics, or saved searches
+- Discover saved-search unseen counts are owner-only and require profile readiness to create
+- Track follow-up `.ics` / Google Calendar export is owner-only
+- Analytics (`/analytics`) is a read-only funnel of the signed-in user's events; it must not scout, score, or call providers
 
 ## Extension (Chrome unpacked)
 
@@ -24,12 +27,12 @@ Automation (pytest, frontend/extension tests, CI, Gitleaks) cannot prove these. 
 - 200% browser zoom, no horizontal overflow
 - Keyboard navigation with a visible focus ring
 - `prefers-reduced-motion: reduce`
-- Landing, Login, Signup, Onboarding, Overview, Discover, Job Detail, Analyze/Match/Evidence, Prepare, Interview (job-contextual), Track, Growth, Profile, Resume, Settings, Privacy
+- Landing, Login, Signup, Onboarding, Overview, Discover, Job Detail, Analyze/Match/Evidence, Prepare, Interview (job-contextual), Track, Growth, Analytics, Profile, Resume, Settings, Privacy
 
 ## Privacy
 
 - `/privacy` is reachable signed out
-- Delete account removes that user's private records and revokes their sessions
+- Delete account removes that user's private records and revokes their sessions, including saved searches, saved-search matches, analytics events, and resume-version files
 - Shared job catalog rows remain
 - Login errors stay generic (no "this email exists" on failed login)
 
