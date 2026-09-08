@@ -1,9 +1,9 @@
 # CareerPilot AI Repository Map
 > Fast navigation for Cursor/AI agents. Read this before broad code search.
 >
-> **Source snapshot:** GitHub `main` at `b0477809225790aacc7e5d34dfe95d51adf225a8` (`#84`, which includes `#78` analytics, `#81` calendar export, and `#83` saved searches). Source code wins if this map and the repository disagree.
+> **Source snapshot:** GitHub `main` at `9d5f47148fba6cd68b173d6319dcd4e2fa7df638` (`#82` public/auth polish on `#84`, which includes `#78` analytics, `#81` calendar export, and `#83` saved searches). Source code wins if this map and the repository disagree.
 >
-> **Open, unmerged PRs (not current-main behavior):** PR `#79` is pending live Greenhouse/Lever A8 work. PR `#82` is pending public/auth visual polish. Do not treat either branch as shipped source.
+> **Open, unmerged PRs (not current-main behavior):** PR `#79` is OPEN / UNMERGED pending live Greenhouse/Lever A8 work. Do not treat that branch as shipped source.
 ## 1. Fast Task → Files Index
 | Task / symptom | Start here | Primary tests |
 | --- | --- | --- |
@@ -36,7 +36,7 @@
 | Dashboard counts | `application_tracker_service.py`, `DashboardPage.tsx` | dashboard/tracker tests |
 | Career Growth | `career_growth_service.py`, `GrowthPage.tsx` | `test_career_growth.py`, `GrowthPage.test.tsx` |
 | Conversion Analytics | `analytics_service.py`, `AnalyticsPage.tsx` | `test_analytics.py`, `AnalyticsPage.test.tsx` |
-| Public landing / auth visuals | `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `globe-engine.ts` | `AuthPages.test.tsx`, `DottedGlobe.test.tsx`, `globe-engine.test.ts` |
+| Public landing / auth visuals | `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `SignalLattice.tsx`, `globe-engine.ts`, `frontend/src/index.css` | `AuthPages.test.tsx`, `DottedGlobe.test.tsx`, `SignalLattice.test.tsx`, `globe-engine.test.ts` |
 | Theme/reduced motion | `frontend/src/lib/theme.tsx`, `frontend/src/index.css`, `SettingsPage.tsx` | frontend + human visual QA |
 | Frontend routes | `frontend/src/App.tsx`, `AppShell.tsx` | affected page tests |
 | Frontend API/types | `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts` | affected page/component tests + typecheck |
@@ -390,7 +390,6 @@ existing save/materials/approval/tracker mutations
 - `record_event` stages only and joins the caller's transaction (except the documented generate-materials commit);
 - events and funnel counts are strictly `user_id`-scoped.
 ## 25. Career Growth / Skills Gap
-## 25. Career Growth / Skills Gap
 - Route: `backend/api/routes/career_growth.py`
 - Service: `backend/services/career_growth_service.py`
 - UI: `frontend/src/pages/GrowthPage.tsx`
@@ -402,8 +401,8 @@ existing save/materials/approval/tracker mutations
 - Public: `/`, `/login`, `/signup`, `/privacy`
 - Protected: `/onboarding`, `/dashboard`, `/profile`, `/jobs`, `/jobs/:jobId`, `/jobs/:jobId/prepare`, `/analyze`, `/prepare`, `/track`, `/growth`, `/analytics`, `/resume`, `/resume/:versionId`, `/settings`.
 - `/applications` aliases Track; `/applications/:jobId` redirects to Prepare.
-- Public visual owners on this snapshot: `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `globe-engine.ts`, `HeroAtmosphere.tsx`. Decorative motion must not steal clicks; reduced-motion is supported; public visuals must not change session/auth semantics. PR `#82` may replace landing/auth composition after it merges.
-- For meaningful UI redesigns, use approved references/prototype direction before editing production UI; source components and design tokens remain authoritative.
+- Shipped `#82` public/auth owners: `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `SignalLattice.tsx`, `globe-engine.ts`, `frontend/src/index.css` (plus remaining `HeroAtmosphere.tsx`). Auth/session semantics unchanged; dark/light is intentional; reduced motion is supported; decoration never blocks clicks/forms; black/white/violet design tokens are authoritative.
+- For meaningful UI redesigns, use approved references/prototype direction before editing production UI.
 ## 27. Theme / Responsive / Reduced Motion
 - `frontend/src/lib/theme.tsx`
 - `frontend/src/index.css`
