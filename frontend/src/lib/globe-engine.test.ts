@@ -45,11 +45,21 @@ describe("globe projection", () => {
     }
   });
 
-  it("sizes the desktop globe as a large cropped hemisphere", () => {
-    const desktop = globeLayout(1440, 576, false);
-    expect(desktop.diameter).toBeGreaterThanOrEqual(900);
-    expect(desktop.diameter).toBeLessThanOrEqual(1100);
-    expect(desktop.cy).toBeGreaterThan(576);
+  it("sizes the desktop globe as a secondary framed sphere", () => {
+    const desktop = globeLayout(520, 480, false);
+    expect(desktop.diameter).toBeGreaterThanOrEqual(380);
+    expect(desktop.diameter).toBeLessThanOrEqual(620);
+    expect(desktop.cy).toBeLessThan(480);
+    expect(desktop.cx).toBeGreaterThan(250);
+    const compact = globeLayout(320, 300, true);
+    expect(compact.diameter).toBeGreaterThanOrEqual(200);
+    expect(compact.diameter).toBeLessThanOrEqual(320);
+    expect(compact.cy).toBeCloseTo(150);
+    const smallDesktop = globeLayout(280, 264, false);
+    expect(smallDesktop.diameter).toBeLessThanOrEqual(264);
+    const dots = buildGlobeDots(false);
+    expect(dots.some((dot) => dot.lat < 0)).toBe(true);
+    expect(dots.some((dot) => dot.lat > 0)).toBe(true);
     expect(GLOBE_REV_MS).toBeGreaterThanOrEqual(110_000);
     expect(GLOBE_REV_MS).toBeLessThanOrEqual(140_000);
     expect(buildGlobeDots(false).length).toBeGreaterThan(2000);

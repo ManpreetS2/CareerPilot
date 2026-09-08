@@ -168,12 +168,13 @@ export function cometTrailPoints(
 export type GlobeDot = { lat: number; lon: number; size: number };
 
 export function buildGlobeDots(compact: boolean): GlobeDot[] {
-  const latBands = compact ? 16 : 38;
+  const latBands = compact ? 22 : 42;
   const dots: GlobeDot[] = [];
   for (let j = 0; j < latBands; j++) {
-    const lat = 4 + (j / (latBands - 1)) * 82;
-    const lonSteps = Math.max(16, Math.round((compact ? 42 : 118) * Math.cos((lat * Math.PI) / 180)));
-    const size = lat > 64 ? 0.82 : lat > 42 ? 1.05 : 1.28;
+    const lat = -78 + (j / (latBands - 1)) * 156;
+    const lonSteps = Math.max(16, Math.round((compact ? 42 : 118) * Math.cos((Math.abs(lat) * Math.PI) / 180)));
+    const absLat = Math.abs(lat);
+    const size = absLat > 64 ? 0.82 : absLat > 42 ? 1.05 : 1.28;
     for (let i = 0; i < lonSteps; i++) {
       dots.push({
         lat,
@@ -186,17 +187,21 @@ export function buildGlobeDots(compact: boolean): GlobeDot[] {
 }
 
 export function globeLayout(width: number, height: number, compact: boolean) {
+  const minDiameter = compact ? 200 : 380;
+  const maxDiameter = compact ? 320 : 620;
+  const box = Math.min(width, height);
   const diameter = Math.min(
-    Math.max(width * (compact ? 0.88 : 1.06), compact ? 200 : 900),
-    compact ? 320 : 1100,
+    Math.max(box * (compact ? 0.92 : 0.96), minDiameter),
+    maxDiameter,
+    box,
   );
   return {
     diameter,
     radius: diameter / 2,
-    cx: width / 2,
-    cy: height + (compact ? 8 : 12),
+    cx: width * (compact ? 0.5 : 0.56),
+    cy: height * 0.5,
   };
 }
 
-export const GLOBE_LATITUDES = [10, 22, 34, 46, 58, 70];
+export const GLOBE_LATITUDES = [-70, -58, -46, -34, -22, -10, 10, 22, 34, 46, 58, 70];
 export const GLOBE_MERIDIANS = [-150, -90, -30, 30, 90, 150];

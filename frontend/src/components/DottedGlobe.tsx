@@ -103,7 +103,7 @@ function drawGlobe(
     ctx.beginPath();
     let started = false;
     for (let i = 0; i <= 40; i++) {
-      const lat = 6 + (i / 40) * 80;
+      const lat = -80 + (i / 40) * 160;
       const point = projectSphere(lat, lon, lonOffset, radius);
       if (!isFrontFacing(point.z, radius, 0.02)) {
         started = false;
@@ -207,8 +207,8 @@ export function WorldPulseGlobe({
     const cssSize = () => {
       const parent = canvas.parentElement;
       return {
-        width: parent?.clientWidth || (compact ? 280 : 1100),
-        height: parent?.clientHeight || (compact ? 220 : 576),
+        width: parent?.clientWidth || (compact ? 280 : 424),
+        height: parent?.clientHeight || (compact ? 280 : 424),
       };
     };
 
@@ -301,8 +301,8 @@ export function WorldPulseGlobe({
   return (
     <div className={`relative h-full w-full overflow-hidden ${className}`} aria-hidden data-testid="dotted-globe">
       <div
-        className="pointer-events-none absolute inset-x-[10%] bottom-[-20%] h-[80%] opacity-70 blur-3xl"
-        style={{ background: "radial-gradient(circle at 50% 40%, var(--halo), transparent 68%)" }}
+        className="pointer-events-none absolute left-1/2 top-[46%] h-[42%] w-[58%] -translate-x-1/2 -translate-y-1/2 opacity-55 blur-3xl"
+        style={{ background: "radial-gradient(circle at 50% 45%, var(--halo), transparent 68%)" }}
       />
       <canvas ref={canvasRef} className="relative h-full w-full" />
     </div>
