@@ -72,6 +72,12 @@ async function flush(rounds = 6) {
   }
 }
 
+async function flushFill() {
+  await flush(8);
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  await flush(8);
+}
+
 function panelHtml() {
   return document.getElementById("app")!.innerHTML;
 }
@@ -572,7 +578,7 @@ describe("Potential vs Verified Match", () => {
     });
     await loadPanel();
     document.getElementById("verify-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(panelHtml()).toContain("Potential Match");
     expect(panelHtml()).toContain("Remaining a Potential Match");
     expect(panelHtml()).not.toContain("Verified Match");
@@ -722,7 +728,7 @@ describe("resume documents", () => {
     await loadPanel();
     await flush();
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(executeScript).toHaveBeenCalled();
     const names = executeScript.mock.calls.map((call: any) => call[0].func.name);
     // Nothing has been attached on this page yet this session, so the
@@ -760,11 +766,11 @@ describe("resume documents", () => {
     await flush();
 
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(attachCalls).toBe(1);
 
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(attachCalls).toBe(1);
     expect(panelHtml()).toContain("Resume attached");
     expect(panelHtml()).toContain("Ready for your review");
@@ -805,14 +811,14 @@ describe("resume documents", () => {
     await flush();
 
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(attachCalls).toBe(1);
 
     select.value = "rv-2";
     select.dispatchEvent(new Event("change", { bubbles: true }));
     await flush();
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(attachCalls).toBe(2);
   });
 
@@ -850,7 +856,7 @@ describe("resume documents", () => {
     docx.checked = true;
     docx.dispatchEvent(new Event("change", { bubbles: true }));
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("format=docx"))).toBe(true);
     expect(panelHtml()).toContain("Resume attached");
   });
@@ -867,7 +873,7 @@ describe("resume documents", () => {
     await loadPanel();
     await flush();
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(executeScript).not.toHaveBeenCalled();
     expect(panelHtml()).toMatch(/log in/i);
   });
@@ -893,7 +899,7 @@ describe("resume documents", () => {
     await loadPanel();
     await flush();
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(executeScript.mock.calls.map((call: any) => call[0].func.name)).toEqual(["attachDocumentInPage"]);
     expect(panelHtml()).toContain("Needs manual upload");
     expect(panelHtml()).not.toContain("Ready for your review");
@@ -923,13 +929,54 @@ describe("resume documents", () => {
     await loadPanel();
     await flush();
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(verifyCalls).toBe(1);
     expect(executeScript.mock.calls.filter((call: any) => call[0].func.name === "attachDocumentInPage")).toHaveLength(
       2,
     );
     expect(document.getElementById("fill-status")!.textContent).toContain("Ready for your review");
     expect(panelHtml()).toContain("Resume attached");
+  });
+
+  it("treats a Resume/CV filename widget as attached when this Fill already assigned the file and the input is gone", async () => {
+    responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
+    let attachCalls = 0;
+    let verifyCalls = 0;
+    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
+      if (func.name === "attachDocumentInPage") {
+        attachCalls += 1;
+        if (attachCalls === 1) {
+          return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
+        }
+        return [
+          {
+            result: {
+              status: "unsupported_field",
+              fieldKind: null,
+              verifiedName: null,
+              reason: "No resume file field was recognized on this page.",
+            },
+          },
+        ];
+      }
+      if (func.name === "verifyResumeAttachmentInPage") {
+        verifyCalls += 1;
+        // First post-fill check misses the widget; after the failed re-attach
+        // the Resume/CV display is recognized.
+        return [{ result: { attached: verifyCalls > 1 } }];
+      }
+      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+    });
+    (globalThis as any).chrome.scripting.executeScript = executeScript;
+    await loadPanel();
+    await flush();
+    document.getElementById("fill-btn")!.click();
+    await flushFill();
+    expect(attachCalls).toBe(2);
+    expect(verifyCalls).toBe(2);
+    expect(document.getElementById("fill-status")!.textContent).toContain("Ready for your review");
+    expect(document.getElementById("fill-status")!.textContent).toContain("Resume attached");
+    expect(document.getElementById("fill-status")!.textContent).not.toContain("No resume file field");
   });
 
   it("does not mark ready if the resume disappears after fill and the re-attach also fails", async () => {
@@ -954,7 +1001,7 @@ describe("resume documents", () => {
     await loadPanel();
     await flush();
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(attachCalls).toBe(2);
     expect(document.getElementById("fill-status")!.textContent).toContain("Attachment could not be verified.");
     expect(document.getElementById("fill-status")!.textContent).not.toContain("Ready for your review");
@@ -999,7 +1046,7 @@ describe("resume documents", () => {
     await loadPanel();
     await flush();
     document.getElementById("fill-btn")!.click();
-    await flush(12);
+    await flushFill();
     expect(executeScript).not.toHaveBeenCalled();
     expect(document.getElementById("fill-status")!.textContent).toContain("unavailable");
   });

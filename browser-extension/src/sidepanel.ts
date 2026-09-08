@@ -551,13 +551,14 @@ async function runFill(url: string) {
 
     let attachedName: string | null = null;
     let file: Awaited<ReturnType<typeof downloadResumeVersionFile>> | null = null;
+    let versionKey: string | null = null;
     if (selectedVersionId) {
       attachStatus = "attaching";
       attachDetail = "";
       refreshDocumentsCard();
       statusEl.textContent = "Downloading resume…";
       const downloadStarted = performance.now();
-      const versionKey = resumeVersionKey();
+      versionKey = resumeVersionKey();
       file = await downloadResumeVersionFile(selectedVersionId, selectedFormat);
       console.debug(
         `[CareerPilot] resume ${selectedFormat} fetch ${Math.round(performance.now() - downloadStarted)}ms version_id=${selectedVersionId}`,
@@ -631,6 +632,7 @@ async function runFill(url: string) {
       return;
     }
     if (attachedName && file) {
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
       const verifyStarted = performance.now();
       const stillThere = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -659,14 +661,34 @@ async function runFill(url: string) {
           ],
         });
         const retryResult = retried?.[0]?.result;
-        if (retryResult?.status !== "attached") {
+        if (retryResult?.status === "attached") {
+          attachedName = retryResult.verifiedName;
+        } else if (
+          lastAttachedVersionKey === versionKey &&
+          retryResult?.status === "unsupported_field"
+        ) {
+          // This Fill already assigned the owned file; Greenhouse then
+          // removed the input. Re-check the Resume/CV widget instead of
+          // treating "no file input" as a failed attach.
+          const widget = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: verifyResumeAttachmentInPage,
+            args: [attachedName],
+          });
+          if (!widget?.[0]?.result?.attached) {
+            attachStatus = "failed";
+            attachDetail = retryResult?.reason || "Resume needs re-attachment.";
+            refreshDocumentsCard();
+            statusEl.textContent = `${attachDetail} Safe fields were not marked ready.`;
+            return;
+          }
+        } else {
           attachStatus = retryResult?.status === "manual" || retryResult?.status === "ambiguous" ? "manual" : "failed";
           attachDetail = retryResult?.reason || "Resume needs re-attachment.";
           refreshDocumentsCard();
           statusEl.textContent = `${attachDetail} Safe fields were not marked ready.`;
           return;
         }
-        attachedName = retryResult.verifiedName;
       }
     }
     const parts: string[] = [];

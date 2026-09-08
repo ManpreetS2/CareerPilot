@@ -187,6 +187,71 @@ export async function attachDocumentInPage(payload: AttachDocumentPayload): Prom
     return Boolean(first && first.name === filename);
   }
 
+  function isResumeHeadingText(text: string, filename: string): boolean {
+    const t = (text || "").replace(/\s+/g, " ").trim();
+    if (!t || t === filename || t.length > 64) return false;
+    if (coverLetterNameRe.test(t)) return false;
+    return resumeNameRe.test(t);
+  }
+
+  function isCoverLetterHeadingText(text: string): boolean {
+    const t = (text || "").replace(/\s+/g, " ").trim();
+    if (!t || t.length > 64) return false;
+    return coverLetterNameRe.test(t) && !resumeNameRe.test(t);
+  }
+
+  function resumeGroupShowsFilename(filename: string): boolean {
+    const filenameNodes = [...document.querySelectorAll("*")].filter((el) => {
+      if (el.tagName === "SCRIPT" || el.tagName === "STYLE") return false;
+      const ownText = [...el.childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => (node.textContent || "").trim())
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (ownText === filename) return true;
+      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+      return el.children.length === 0 && text === filename;
+    });
+    for (const node of filenameNodes) {
+      let ancestor: Element | null = node;
+      for (let i = 0; i < 8 && ancestor; i += 1) {
+        const labelledBy = ancestor.getAttribute("aria-labelledby");
+        const labelled = labelledBy ? document.getElementById(labelledBy)?.textContent || "" : "";
+        const ariaLabel = ancestor.getAttribute("aria-label") || "";
+        if (isCoverLetterHeadingText(labelled) || isCoverLetterHeadingText(ariaLabel)) break;
+        if (isResumeHeadingText(labelled, filename) || isResumeHeadingText(ariaLabel, filename)) {
+          return true;
+        }
+        let sibling = ancestor.previousElementSibling;
+        let coverLetterSibling = false;
+        while (sibling) {
+          const siblingText = (sibling.textContent || "").replace(/\s+/g, " ").trim();
+          if (isCoverLetterHeadingText(siblingText)) {
+            coverLetterSibling = true;
+            break;
+          }
+          if (isResumeHeadingText(siblingText, filename)) return true;
+          sibling = sibling.previousElementSibling;
+        }
+        if (coverLetterSibling) break;
+        if (ancestor.matches(".file-upload, [role='group']")) {
+          const headingEl =
+            ancestor.querySelector("label, legend, [id*='upload-label']") ||
+            [...ancestor.querySelectorAll("span, p")].find((el) => {
+              const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+              return Boolean(text) && text !== filename && !text.includes(filename);
+            });
+          const heading = (headingEl?.textContent || ancestor.getAttribute("aria-label") || "").trim();
+          if (isCoverLetterHeadingText(heading)) break;
+          if (isResumeHeadingText(heading, filename)) return true;
+        }
+        ancestor = ancestor.parentElement;
+      }
+    }
+    return false;
+  }
+
   function highlight(input: HTMLInputElement) {
     input.style.outline = "2px solid #7c3aed";
     try {
@@ -251,7 +316,20 @@ export async function attachDocumentInPage(payload: AttachDocumentPayload): Prom
     };
   }
 
-  if (!hasName(input, payload.filename)) {
+  const confirmedOnInput = hasName(input, payload.filename);
+  if (!confirmedOnInput) {
+    // Greenhouse may replace the input synchronously in the change handler.
+    // Only treat the Resume/CV filename widget as confirmation when THIS
+    // attempt assigned a File and the original input is gone — a leftover
+    // same-named display is not proof.
+    if (!input.isConnected && resumeGroupShowsFilename(payload.filename)) {
+      return {
+        status: "attached",
+        fieldKind: "resume",
+        verifiedName: payload.filename,
+        reason: null,
+      };
+    }
     highlight(input);
     return {
       status: "failed",
@@ -262,21 +340,28 @@ export async function attachDocumentInPage(payload: AttachDocumentPayload): Prom
   }
 
   await new Promise((resolve) => setTimeout(resolve, 150));
-  if (!hasName(input, payload.filename)) {
-    highlight(input);
+  if (hasName(input, payload.filename)) {
     return {
-      status: "failed",
+      status: "attached",
       fieldKind: "resume",
-      verifiedName: null,
-      reason: "Resume needs re-attachment.",
+      verifiedName: payload.filename,
+      reason: null,
     };
   }
-
+  if (resumeGroupShowsFilename(payload.filename)) {
+    return {
+      status: "attached",
+      fieldKind: "resume",
+      verifiedName: payload.filename,
+      reason: null,
+    };
+  }
+  highlight(input);
   return {
-    status: "attached",
+    status: "failed",
     fieldKind: "resume",
-    verifiedName: payload.filename,
-    reason: null,
+    verifiedName: null,
+    reason: "Resume needs re-attachment.",
   };
 }
 
@@ -298,62 +383,78 @@ export function verifyResumeAttachmentInPage(filename: string): { attached: bool
     if (input.files?.[0]?.name === filename) return { attached: true };
   }
 
-  // Some ATS widgets (confirmed live on Greenhouse) remove the raw file
-  // input entirely once a file is confirmed and replace it with a plain
-  // text display of the filename — the input's absence is not itself
-  // evidence the attachment was lost. Fall back to finding the filename
-  // rendered as text inside a container a11y-labelled for the resume field,
-  // not the cover letter field.
+  // Some ATS widgets (confirmed live on Greenhouse job-boards) remove the
+  // raw file input after a successful attach and show the filename next to
+  // a Resume/CV heading. Filename equality alone is not proof: the display
+  // must sit in that Resume/CV group, not under Cover Letter, and not as
+  // unrelated page copy. Session ownership of the attach is enforced by
+  // the caller (this attempt assigned File/DataTransfer, or this
+  // side-panel session last attached this resume version).
+  return { attached: resumeGroupShowsExactFilename(filename) };
+}
+
+function isResumeHeadingText(text: string, filename: string): boolean {
+  const t = (text || "").replace(/\s+/g, " ").trim();
+  if (!t || t === filename || t.length > 64) return false;
+  if (COVER_LETTER_NAME_RE.test(t)) return false;
+  return RESUME_NAME_RE.test(t);
+}
+
+function isCoverLetterHeadingText(text: string): boolean {
+  const t = (text || "").replace(/\s+/g, " ").trim();
+  if (!t || t.length > 64) return false;
+  return COVER_LETTER_NAME_RE.test(t) && !RESUME_NAME_RE.test(t);
+}
+
+/** True when `filename` is the exact visible text of a Resume/CV widget. */
+export function resumeGroupShowsExactFilename(filename: string): boolean {
   const filenameNodes = [...document.querySelectorAll("*")].filter((el) => {
+    if (el.tagName === "SCRIPT" || el.tagName === "STYLE") return false;
     const ownText = [...el.childNodes]
       .filter((node) => node.nodeType === Node.TEXT_NODE)
       .map((node) => (node.textContent || "").trim())
-      .join("");
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
     if (ownText === filename) return true;
     const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    if (text === filename) return true;
-    return el.children.length === 0 && (el.textContent || "").trim() === filename;
+    return el.children.length === 0 && text === filename;
   });
   for (const node of filenameNodes) {
     let ancestor: Element | null = node;
-    let coverLetterGroup = false;
-    for (let i = 0; i < 6 && ancestor; i += 1) {
+    for (let i = 0; i < 8 && ancestor; i += 1) {
       const labelledBy = ancestor.getAttribute("aria-labelledby");
-      const labelText = labelledBy ? document.getElementById(labelledBy)?.textContent || "" : "";
-      if (labelText) {
-        if (resumeNameRe.test(labelText) && !coverLetterNameRe.test(labelText)) return { attached: true };
-        if (coverLetterNameRe.test(labelText)) {
-          coverLetterGroup = true;
+      const labelled = labelledBy ? document.getElementById(labelledBy)?.textContent || "" : "";
+      const ariaLabel = ancestor.getAttribute("aria-label") || "";
+      if (isCoverLetterHeadingText(labelled) || isCoverLetterHeadingText(ariaLabel)) break;
+      if (isResumeHeadingText(labelled, filename) || isResumeHeadingText(ariaLabel, filename)) {
+        return true;
+      }
+      let sibling = ancestor.previousElementSibling;
+      let coverLetterSibling = false;
+      while (sibling) {
+        const siblingText = (sibling.textContent || "").replace(/\s+/g, " ").trim();
+        if (isCoverLetterHeadingText(siblingText)) {
+          coverLetterSibling = true;
           break;
         }
+        if (isResumeHeadingText(siblingText, filename)) return true;
+        sibling = sibling.previousElementSibling;
       }
-      const ariaLabel = ancestor.getAttribute("aria-label") || "";
-      if (resumeNameRe.test(ariaLabel) && !coverLetterNameRe.test(ariaLabel)) return { attached: true };
-      if (coverLetterNameRe.test(ariaLabel)) {
-        coverLetterGroup = true;
-        break;
+      if (coverLetterSibling) break;
+      if (ancestor.matches(".file-upload, [role='group']")) {
+        const headingEl =
+          ancestor.querySelector("label, legend, [id*='upload-label']") ||
+          [...ancestor.querySelectorAll("span, p")].find((el) => {
+            const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+            return Boolean(text) && text !== filename && !text.includes(filename);
+          });
+        const heading = (headingEl?.textContent || ancestor.getAttribute("aria-label") || "").trim();
+        if (isCoverLetterHeadingText(heading)) break;
+        if (isResumeHeadingText(heading, filename)) return true;
       }
       ancestor = ancestor.parentElement;
     }
-    if (coverLetterGroup) continue;
-    const group = node.closest(".file-upload, [role='group']");
-    if (group) {
-      const headingEl =
-        group.querySelector("label, legend, [id*='upload-label']") ||
-        [...group.querySelectorAll("span, p")].find((el) => {
-          const text = (el.textContent || "").trim();
-          return Boolean(text) && text !== filename && !text.includes(filename);
-        });
-      const heading = (headingEl?.textContent || group.getAttribute("aria-label") || "").trim();
-      if (
-        heading &&
-        heading !== filename &&
-        resumeNameRe.test(heading) &&
-        !coverLetterNameRe.test(heading)
-      ) {
-        return { attached: true };
-      }
-    }
   }
-  return { attached: false };
+  return false;
 }
