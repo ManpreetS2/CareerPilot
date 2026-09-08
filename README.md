@@ -14,9 +14,9 @@ Primary web navigation is workflow-first:
 - Prepare (`/jobs/:jobId/prepare`, or `/prepare` when no job is selected)
 - Track (`/track`; `/applications` is the same tracker)
 
-Supporting destinations: Profile, Career Growth (`/growth`), Resume, Settings.
+Supporting destinations: Profile, Career Growth (`/growth`), Conversion Analytics (`/analytics`), Resume, Settings.
 
-Analyze and Prepare stay contextual under a selected job. Interview Coach remains on Job Detail. Application Tracker is a first-class Track destination with Kanban and list/timeline views. Career Growth is advisory only: it never changes Fit scores.
+Analyze and Prepare stay contextual under a selected job. Interview Coach remains on Job Detail. Application Tracker is a first-class Track destination with Kanban and list/timeline views. Discover can save searches with in-app unseen match counts (no email). Track follow-up dates can export as `.ics` or a Google Calendar URL. Career Growth is advisory only: it never changes Fit scores.
 
 Public routes: `/`, `/login`, `/signup`, `/privacy`. New signup continues through `/onboarding`.
 
@@ -79,7 +79,9 @@ CareerPilot is an authenticated local product. Signup, login, logout, and `GET /
 - Grounded candidate profile, job scout/verification/intelligence, fit scoring, materials, approval, assisted apply, tracker APIs, interview prep, and immutable resume versions
 - Application materials are generated from stored evidence, not a placeholder
 - Mock-interview answer feedback is ephemeral (not stored) and follows `LLM_PROVIDER_ORDER`
-- Tracker rows can store a user-set follow-up date; CareerPilot does not send automated notifications or reminders. Track is a primary web destination (`/track`).
+- Tracker rows can store a user-set follow-up date; CareerPilot does not send automated notifications or reminders. Track is a primary web destination (`/track`). Follow-up dates can be exported as an `.ics` file or opened as a Google Calendar template URL.
+- Saved searches on Discover (`/api/saved-searches`) store owner-scoped in-app unseen matches. There is no email or push alert.
+- Conversion Analytics (`/analytics`) is a read-only funnel over the signed-in user's own application events.
 - Profile-first gates: Discover / Find Jobs / Career Growth require a usable candidate profile and at least one target role
 - Account deletion from Settings (revokes every session and owner-scoped private rows; shared job catalog remains)
 - Process-local login throttling (generic errors, no email-existence leak)
@@ -113,7 +115,9 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - Email verification
 - Live-provider verification in CI
 - Automatic job application submission
-- Calendar, email alerts, billing, or analytics
+- Email alerts
+- Billing
+- Calendar account OAuth / synced calendar accounts
 
 
 ## Privacy and safety
@@ -124,7 +128,7 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - No candidate skill, employer, metric, or education claim may be invented without stored evidence.
 - Assisted apply and the browser extension **never click submit**. The human reviews and submits.
 - Page load for Jobs, Job Detail, Prepare Application, Fit Score, Resume, and Interview Prep is read-only. Calculate Fit and generation run only on an explicit user action. Find Jobs also persists a deterministic fit score for scoreable listings (no LLM).
-- Private records are user-scoped. Shared job titles may be visible to every signed-in user; scores, recommendations, packages, tracker state, approval, interview evidence, and Career Growth aggregates are not.
+- Private records are user-scoped. Shared job titles may be visible to every signed-in user; scores, recommendations, packages, tracker state, approval, interview evidence, Career Growth aggregates, analytics events, and saved searches are not.
 - You can delete your account from Settings. That removes owner-scoped private data and revokes sessions. It does not delete the shared job catalog.
 
 ## Setup
@@ -253,6 +257,7 @@ python -m pytest -q
 python scripts/test_fit_scoring_matrix.py
 python scripts/test_candidate_profile_matrix.py --synthetic
 python -m pytest tests/test_job_intelligence.py tests/test_job_intelligence_pipeline.py -q
+python scripts/verify_mapped_paths.py
 python scripts/check_tracked_secrets.py
 ```
 

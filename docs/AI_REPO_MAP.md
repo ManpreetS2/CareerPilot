@@ -533,6 +533,6 @@ git diff --check
 Expand only when a mapped path moved, stack trace/test points elsewhere, ownership changed, a real bug crosses subsystem boundaries, the map is stale after a structural PR, or the user explicitly requests a repo-wide audit. Search by symbol/error/path first; do not immediately scan every file.
 ## 34. Map Maintenance
 Update this map in the same structural PR when routes/product destinations, service ownership, major models, ATS identity, provider/grounding/staleness contracts, extension permission/fill/attachment architecture, or primary test/release commands change. Small implementation-only fixes do not require map churn if ownership and invariants stay the same.
-## 35. Known documentation inconsistency at this snapshot
-`README.md` still lists calendar, email alerts, and analytics as out of scope. Current `main` has `/analytics`, saved searches with in-app unseen counts, and `.ics` / Google Calendar export. Source wins. Align README in a dedicated docs PR; do not hide the mismatch inside an unrelated product fix.
+## 35. Documentation vs source
+`README.md` and this map describe the same shipped surfaces: `/analytics`, saved searches with in-app unseen counts, and `.ics` / Google Calendar follow-up export. Email alerts and calendar-account OAuth remain out of scope. Source still wins if they drift again.
 QA helpers: `scripts/make_temp_qa_db.py` (temp SQLite + printed `DATABASE_URL`; never `data/careerpilot.db`), `scripts/verify_mapped_paths.py`.
