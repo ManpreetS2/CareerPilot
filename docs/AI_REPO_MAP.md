@@ -1,7 +1,7 @@
 # CareerPilot AI Repository Map
 > Fast navigation for Cursor/AI agents. Read this before broad code search.
 >
-> **Source snapshot:** GitHub `main` at `9d5f47148fba6cd68b173d6319dcd4e2fa7df638` (`#82` public/auth polish on `#84`, which includes `#78` analytics, `#81` calendar export, and `#83` saved searches). Source code wins if this map and the repository disagree.
+> **Source snapshot:** GitHub `main` at `7a80559d88e52bc5c9fa5e004c02eabdde200520` (`#80` map/QA hardening on `#82` public/auth polish, `#84` / `#78` analytics, `#81` calendar export, and `#83` saved searches). Source code wins if this map and the repository disagree.
 >
 > **Open, unmerged PRs (not current-main behavior):** PR `#79` is OPEN / UNMERGED pending live Greenhouse/Lever A8 work. Do not treat that branch as shipped source.
 ## 1. Fast Task → Files Index
@@ -151,14 +151,14 @@ Human reviews and manually presses Submit
 - `backend/services/job_scout_service.py`: `parse_greenhouse_posting_url`, `canonical_greenhouse_posting_url`, API fetch/ingest/dedupe.
 - `backend/services/form_fill_service.py`: `find_job_by_url` for live tab lookup.
 - `browser-extension/src/job-recognition.ts`.
-**Identity** board token + numeric job ID. Tracking query params/host aliases must not create a second posting. Never fuzzy-match title/company.
+**Identity** board token + numeric job ID, including board-root `?gh_jid=` and embed `for`/`token` URLs. Stored URL is canonical `/jobs/<id>`. Tracking query params/host aliases must not create a second posting. Never fuzzy-match title/company.
 **Tests** `tests/test_job_source_expansion.py`, `tests/test_form_fill_service.py`, `tests/test_greenhouse_job_ingestion.py`, extension recognition/sidepanel tests.
 ## 9. Lever Identity / Ingestion
 **Files**
 - `backend/services/job_scout_service.py`: `parse_lever_posting_url`, `canonical_lever_posting_url`, provider/manual ingest.
 - `backend/services/form_fill_service.py`: posting vs `/apply` identity.
 - `browser-extension/src/job-recognition.ts`.
-**Identity** company slug + posting UUID. Posting and `/apply` are one job. Tracking queries must not fork identity. Outbound API calls remain host-allowlisted/SSRF-safe.
+**Identity** company slug + posting UUID. Posting and `/apply` are one job. UUID postings ingest from public `api.lever.co` (real description, `source_job_id` UUID, canonical `jobs.lever.co/{slug}/{uuid}`). Non-UUID Lever URLs still use bounded HTML fetch. Tracking queries must not fork identity. Outbound API calls remain host-allowlisted/SSRF-safe.
 **Tests** `tests/test_job_source_expansion.py`, `tests/test_form_fill_service.py`, `tests/test_job_scout_service.py`, extension recognition tests.
 ## 9b. Saved searches / in-app alerts
 **Route** `backend/api/routes/saved_searches.py` — `/api/saved-searches`, matches, mark-seen.

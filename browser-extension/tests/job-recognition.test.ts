@@ -15,6 +15,17 @@ describe("job recognition", () => {
     expect(embed.platform).toBe("greenhouse");
     expect(embed.sourceJobId).toBe("7761472003");
     expect(embed.companyHint).toBe("acme");
+
+    const boardRoot = recognizeJobPage(
+      "https://job-boards.greenhouse.io/acme?gh_jid=7761472003&utm_source=jobright",
+    );
+    expect(boardRoot.sourceJobId).toBe("7761472003");
+    expect(boardRoot.companyHint).toBe("acme");
+
+    const jobsPathWins = recognizeJobPage(
+      "https://job-boards.greenhouse.io/acme/jobs/12345?gh_jid=9999999999",
+    );
+    expect(jobsPathWins.sourceJobId).toBe("12345");
   });
 
   it("recognizes Lever posting URLs including /apply", () => {
