@@ -132,6 +132,17 @@ class TestBuildReminderIcs:
             if line.startswith("SUMMARY:"):
                 assert line == "SUMMARY:Follow up: A @ B"
 
+    def test_folds_multibyte_utf8_without_splitting_a_character(self) -> None:
+        title = "é" * 80
+        ics = build_reminder_ics(
+            job_public_id="job-1", job_title=title, company="Acme", reminder_date=date(2026, 9, 20)
+        )
+        decoded = ics.decode("utf-8")
+        assert "é" * 80 in decoded.replace("\r\n ", "")
+        for line in _lines(ics):
+            if line.startswith("SUMMARY:") or (line.startswith(" ") and "é" in line):
+                assert len(line.encode("utf-8")) <= 75
+
 
 class TestReminderIcsFilename:
     def test_builds_a_readable_filename(self) -> None:
