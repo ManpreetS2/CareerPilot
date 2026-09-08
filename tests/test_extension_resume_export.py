@@ -58,6 +58,37 @@ def test_owner_can_download_pdf_and_docx(isolated_client, caplog) -> None:
     assert "PK\x03\x04" not in joined
 
 
+def test_deleted_users_resume_file_url_becomes_unauthorized(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    _seed_approved_for_client(SessionLocal, user_id=client.test_user_id)
+    created = client.post("/api/jobs/manual-abc123/resume-versions").json()
+    version_id = created["id"]
+    headers = _extension_auth_headers(client)
+
+    before = client.get(
+        f"/api/extension/resume-versions/{version_id}/file",
+        params={"format": "pdf"},
+        headers=headers,
+    )
+    assert before.status_code == 200
+
+    deleted = client.delete("/api/account")
+    assert deleted.status_code == 204, deleted.text
+
+    replay = client.get(
+        f"/api/extension/resume-versions/{version_id}/file",
+        params={"format": "pdf"},
+        headers=headers,
+    )
+    assert replay.status_code in {401, 404}
+    detail = str(replay.json().get("detail", "")).lower()
+    assert version_id not in detail
+    assert "user" not in detail
+
+    web = client.get(f"/api/resume-versions/{version_id}/export", params={"format": "pdf"})
+    assert web.status_code in {401, 404}
+
+
 def test_other_user_cannot_download_resume_file(isolated_client) -> None:
     client, SessionLocal = isolated_client
     _seed_approved_for_client(SessionLocal, user_id=client.test_user_id)

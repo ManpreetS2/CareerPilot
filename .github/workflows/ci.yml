@@ -52,6 +52,10 @@ jobs:
         working-directory: browser-extension
         run: npm run build
 
+      - name: Browser extension typecheck
+        working-directory: browser-extension
+        run: npm run typecheck
+
       - name: Browser extension tests
         working-directory: browser-extension
         # A non-UTC zone on purpose: the panel renders naive UTC timestamps

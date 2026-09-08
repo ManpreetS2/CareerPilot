@@ -340,3 +340,33 @@ def test_analytics_route_returns_a_summary_for_a_ready_profile(isolated_client) 
     body = response.json()
     assert len(body["funnel"]) == 6
     assert body["funnel"][0]["stage"] == "saved"
+
+
+def test_analytics_summary_does_not_include_another_users_events(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    user_a = client.test_user_id
+    with SessionLocal() as db:
+        insert_ready_profile(db, user_id=user_a)
+        job = insert_job(db, public_id="analytics-private-a")
+        db.add(ApplicationEventRecord(job_id=job.id, user_id=user_a, event_type="saved"))
+        db.add(ApplicationEventRecord(job_id=job.id, user_id=user_a, event_type="applied"))
+        db.commit()
+
+    owned = client.get("/api/analytics/summary")
+    assert owned.status_code == 200, owned.text
+    assert owned.json()["funnel"][0]["jobs_count"] >= 1
+
+    client.cookies.clear()
+    signup = client.post(
+        "/api/auth/signup",
+        json={"email": "analytics-b@example.com", "password": "a-real-password-1"},
+    )
+    assert signup.status_code == 201, signup.text
+    user_b = int(signup.json()["id"])
+    with SessionLocal() as db:
+        insert_ready_profile(db, user_id=user_b)
+
+    other = client.get("/api/analytics/summary")
+    assert other.status_code == 200, other.text
+    body = other.json()
+    assert [step["jobs_count"] for step in body["funnel"]] == [0, 0, 0, 0, 0, 0]
