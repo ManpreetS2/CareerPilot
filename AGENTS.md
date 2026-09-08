@@ -12,6 +12,8 @@ CareerPilot is one local/self-hostable app: FastAPI backend, React/Vite frontend
 
 Do not recursively scan the whole repository by default. Do not reread unrelated subsystems just to regain context.
 
+For meaningful UI redesigns, use approved references/prototype direction before editing production UI; source components and design tokens remain authoritative.
+
 ## v1 working mode
 
 Treat v1 feature development as frozen unless the user explicitly reopens scope. Prefer narrow release-gate fixes, regressions, and human-QA blockers over new features or broad refactors.
@@ -29,9 +31,10 @@ Treat v1 feature development as frozen unless the user explicitly reopens scope.
 - Tracker `applied` is human-recorded state only.
 - Extension EEO/demographic fields stay manual.
 - Terms/privacy/consent acknowledgements stay manual.
-- Resume attachment state must be truthful.
+- Resume attachment state must be truthful; a matching filename alone is not proof.
 - Greenhouse/Lever identity uses ATS posting identity, never fuzzy title/company matching.
-- User-scoped records must never leak across users.
+- User-scoped records must never leak across users (including analytics events, saved searches, and resume-version files).
+- Automated tests and destructive QA use isolated/temp/copied SQLite only — never `data/careerpilot.db`.
 
 ## Change discipline
 

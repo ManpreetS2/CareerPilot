@@ -53,6 +53,12 @@ def test_ci_installs_frontend_before_pytest_and_browser() -> None:
     assert browser_step != -1
     assert npm_ci < pytest_step
     assert npm_ci < browser_step
+    assert "working-directory: browser-extension" in raw
+    typecheck = raw.find("npm run typecheck")
+    assert typecheck != -1
+    extension_dir = raw.find("working-directory: browser-extension")
+    assert extension_dir != -1
+    assert extension_dir < typecheck
 
 
 def test_committed_range_whitespace_check_against_main() -> None:

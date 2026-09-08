@@ -1,15 +1,15 @@
 # CareerPilot AI Repository Map
 > Fast navigation for Cursor/AI agents. Read this before broad code search.
 >
-> **Source snapshot:** GitHub `main` at `f3e870c6d267c1c78f2b6827c380e59f7bd12b15` (PR #78 already present). Source code wins if this map and the repository disagree.
+> **Source snapshot:** GitHub `main` at `b0477809225790aacc7e5d34dfe95d51adf225a8` (`#84`, which includes `#78` analytics, `#81` calendar export, and `#83` saved searches). Source code wins if this map and the repository disagree.
 >
-> **A8 note:** PR #79 contains pending Greenhouse/Lever A8 fixes. It is open and not merged, so those implementation details are not part of this main-snapshot map yet. Update this section after the PR lands.
+> **Open, unmerged PRs (not current-main behavior):** PR `#79` is pending live Greenhouse/Lever A8 work. PR `#82` is pending public/auth visual polish. Do not treat either branch as shipped source.
 ## 1. Fast Task → Files Index
 | Task / symptom | Start here | Primary tests |
 | --- | --- | --- |
 | App boot/config/DB | `backend/main.py`, `backend/core/config.py`, `backend/db/database.py`, `backend/db/init_db.py` | full backend suite |
 | Auth/login/session | `backend/api/routes/auth.py`, `backend/services/auth_service.py`, `backend/api/dependencies.py` | `test_auth.py`, `test_auth_hardening.py`, `test_cross_user_isolation.py` |
-| Account deletion/privacy | `backend/api/routes/account.py`, `backend/services/account_deletion.py` | account/privacy + cross-user tests |
+| Account deletion/privacy | `backend/api/routes/account.py`, `backend/services/account_deletion.py` | `test_privacy_security.py`, `test_database.py`, `test_cross_user_isolation.py` |
 | Resume parse/profile | `backend/api/routes/candidate.py`, `candidate_profile_agent.py`, `candidate_provenance.py` | `test_candidate_profile.py` + resume matrix |
 | Profile readiness/Discover gate | `profile_readiness.py`, `backend/api/profile_gate.py`, `ProfilePage.tsx` | `test_profile_readiness.py` |
 | Find Jobs/providers | `backend/api/routes/jobs.py`, `job_scout_service.py`, `job_service.py` | scout/source tests + MVP smoke |
@@ -30,10 +30,13 @@
 | Extension resume attach | `attachFile.ts`, `sidepanel.ts`, extension API | sidepanel/attachment + extension export tests |
 | EEO/manual-field safety | `field-status.ts`, `fillForm.ts`, backend form-fill | fillForm + form-fill tests |
 | Interview prep | `backend/api/routes/interview.py`, `interview_service.py`, `InterviewPrepPanel.tsx` | `test_interview_service.py` |
-| Tracker/follow-up | `backend/api/routes/tracker.py`, `application_tracker_service.py`, `ApplicationsPage.tsx` | tracker + ApplicationsPage tests |
+| Tracker/follow-up | `backend/api/routes/tracker.py`, `application_tracker_service.py`, `ApplicationsPage.tsx` | `test_application_tracker.py`, `ApplicationsPage.test.tsx` |
+| Calendar follow-up export | `calendar_export_service.py`, `safe_filename.py`, `frontend/src/lib/calendar.ts` | `test_calendar_export.py`, `test_safe_filename.py`, `calendar.test.ts` |
+| Saved searches / in-app alerts | `saved_searches.py`, `saved_search_service.py`, `scheduler.py`, `SavedSearchesPanel.tsx` | `test_saved_search_service.py`, `test_scheduler.py`, `SavedSearchesPanel.test.tsx` |
 | Dashboard counts | `application_tracker_service.py`, `DashboardPage.tsx` | dashboard/tracker tests |
-| Career Growth | `career_growth_service.py`, `GrowthPage.tsx` | `test_career_growth.py`, GrowthPage tests |
-| Conversion Analytics | `analytics_service.py`, `AnalyticsPage.tsx` | `test_analytics.py`, AnalyticsPage tests |
+| Career Growth | `career_growth_service.py`, `GrowthPage.tsx` | `test_career_growth.py`, `GrowthPage.test.tsx` |
+| Conversion Analytics | `analytics_service.py`, `AnalyticsPage.tsx` | `test_analytics.py`, `AnalyticsPage.test.tsx` |
+| Public landing / auth visuals | `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `globe-engine.ts` | `AuthPages.test.tsx`, `DottedGlobe.test.tsx`, `globe-engine.test.ts` |
 | Theme/reduced motion | `frontend/src/lib/theme.tsx`, `frontend/src/index.css`, `SettingsPage.tsx` | frontend + human visual QA |
 | Frontend routes | `frontend/src/App.tsx`, `AppShell.tsx` | affected page tests |
 | Frontend API/types | `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts` | affected page/component tests + typecheck |
@@ -84,7 +87,8 @@ Human reviews and manually presses Submit
 - `backend/services/account_deletion.py`
 - `backend/core/csrf.py`, `rate_limit.py`, `security.py`, `security_headers.py`
 **Models**
-- `User`, `UserSession`, plus user-owned rows in `models.py`.
+- `User`, `UserSession`
+- Delete Account also removes owner-scoped `SavedSearchRecord`, `SavedSearchMatchRecord`, and `ApplicationEventRecord` (plus scores, packages, resume versions, tracker, interview, saved jobs, form-fill attempts, evidence, preferences, candidates). Shared `JobRecord` remains.
 **Frontend**
 - `frontend/src/lib/auth.tsx`
 - `LoginPage.tsx`, `SignupPage.tsx`, `SettingsPage.tsx`
@@ -92,11 +96,14 @@ Human reviews and manually presses Submit
 **Invariants**
 - Failed login stays generic.
 - Delete account removes owner-scoped private rows and sessions; shared job catalog remains.
-- One user's score/material/tracker/interview data never leaks to another.
+- One user's score/material/tracker/interview/analytics/saved-search data never leaks to another.
+- After deletion, prior resume-version file/export URLs are unauthorized.
 **Tests**
 - `tests/test_auth.py`
 - `tests/test_auth_hardening.py`
 - `tests/test_cross_user_isolation.py`
+- `tests/test_privacy_security.py`
+- `tests/test_database.py`
 ## 5. Candidate Profile / Resume Parsing
 **Route** `backend/api/routes/candidate.py`
 **Services**
@@ -145,14 +152,35 @@ Human reviews and manually presses Submit
 - `backend/services/form_fill_service.py`: `find_job_by_url` for live tab lookup.
 - `browser-extension/src/job-recognition.ts`.
 **Identity** board token + numeric job ID. Tracking query params/host aliases must not create a second posting. Never fuzzy-match title/company.
-**Tests** `tests/test_job_source_expansion.py`, `tests/test_form_fill_service.py`, extension recognition/sidepanel tests.
+**Tests** `tests/test_job_source_expansion.py`, `tests/test_form_fill_service.py`, `tests/test_greenhouse_job_ingestion.py`, extension recognition/sidepanel tests.
 ## 9. Lever Identity / Ingestion
 **Files**
 - `backend/services/job_scout_service.py`: `parse_lever_posting_url`, `canonical_lever_posting_url`, provider/manual ingest.
 - `backend/services/form_fill_service.py`: posting vs `/apply` identity.
 - `browser-extension/src/job-recognition.ts`.
 **Identity** company slug + posting UUID. Posting and `/apply` are one job. Tracking queries must not fork identity. Outbound API calls remain host-allowlisted/SSRF-safe.
-**A8 caveat** PR #79 is open and not merged; Lever manual-ingest internals on main may change after it lands.
+**Tests** `tests/test_job_source_expansion.py`, `tests/test_form_fill_service.py`, `tests/test_job_scout_service.py`, extension recognition tests.
+## 9b. Saved searches / in-app alerts
+**Route** `backend/api/routes/saved_searches.py` — `/api/saved-searches`, matches, mark-seen.
+**Service** `backend/services/saved_search_service.py`
+**Scheduler** `backend/services/scheduler.py` (FastAPI lifespan; 15-minute tick; `run_due_saved_searches`).
+**Models** `SavedSearchRecord`, `SavedSearchMatchRecord`
+**Frontend** `frontend/src/components/SavedSearchesPanel.tsx` (Discover)
+**Invariants**
+- creating a search requires canonical profile readiness;
+- matches/unseen counts are owner-scoped;
+- a failed search tick must not commit half-updated `last_run_at` for other searches;
+- no email; in-app unseen count only.
+**Tests** `tests/test_saved_search_service.py`, `tests/test_scheduler.py`, `frontend/src/components/SavedSearchesPanel.test.tsx`
+## 9c. Calendar follow-up export
+**Route** `GET /api/applications/{job_id}/reminder.ics` in `backend/api/routes/tracker.py`
+**Services** `backend/services/calendar_export_service.py`, `backend/services/safe_filename.py`
+**Frontend** `frontend/src/lib/calendar.ts` (Google Calendar render URL; `.ics` download)
+**Invariants**
+- owner-only; deterministic UID from job id + date in source;
+- no calendar account OAuth; user imports/opens the file or Google URL;
+- not an email/push reminder.
+**Tests** `tests/test_calendar_export.py`, `tests/test_safe_filename.py`, `frontend/src/lib/calendar.test.ts`
 ## 10. Job Intelligence / Requirement Extraction
 Two employer-evidence layers exist; do not casually collapse them.
 **Job Intelligence**
@@ -304,7 +332,8 @@ owned ResumeVersion
 - blocked programmatic attach → truthful manual-upload guidance;
 - never report Attached without real page verification;
 - never use previous tab/job's resume version;
-- PR #77 changed Greenhouse attachment verification; preserve it during A8 rebases.
+- a displayed filename that merely matches is not enough; the extension only trusts attachment state it owns/verified for that resume version/session.
+**Tests** `browser-extension/tests/attachFile.test.ts`, `browser-extension/tests/sidepanel.test.ts`
 ## 21. EEO / Manual-Only Safety
 **Files** `browser-extension/src/field-status.ts`, `fillForm.ts`, backend `form_fill_service.py`.
 **Always manual** gender, race/ethnicity, veteran status, disability status.
@@ -335,9 +364,9 @@ owned ResumeVersion
 - state changes only by explicit PATCH;
 - backend transition graph is authoritative;
 - `applied` is user-recorded state, not a submission;
-- follow-up date is storage only, not an email/calendar/push promise;
+- follow-up date is stored and can be exported as `.ics` / Google Calendar URL; CareerPilot does not send email, SMS, or push;
 - dashboard must not double-count approval fallback + tracker row.
-**Tests** tracker tests, `ApplicationsPage.test.tsx`, `DashboardPage.test.tsx`
+**Tests** `tests/test_application_tracker.py`, `tests/test_calendar_export.py`, `ApplicationsPage.test.tsx`, `DashboardPage.test.tsx`
 ## 24. Application Conversion Analytics
 **Current main**
 - `backend/api/routes/analytics.py`
@@ -356,7 +385,11 @@ existing save/materials/approval/tracker mutations
 → funnel / conversion / median-time / breakdown UI
 ```
 **Tests** `tests/test_analytics.py`, `frontend/src/pages/AnalyticsPage.test.tsx`
-**Invariant** analytics summary is read-only and must not scout, score, or call providers.
+**Invariants**
+- summary is read-only and must not scout, score, or call providers;
+- `record_event` stages only and joins the caller's transaction (except the documented generate-materials commit);
+- events and funnel counts are strictly `user_id`-scoped.
+## 25. Career Growth / Skills Gap
 ## 25. Career Growth / Skills Gap
 - Route: `backend/api/routes/career_growth.py`
 - Service: `backend/services/career_growth_service.py`
@@ -369,6 +402,8 @@ existing save/materials/approval/tracker mutations
 - Public: `/`, `/login`, `/signup`, `/privacy`
 - Protected: `/onboarding`, `/dashboard`, `/profile`, `/jobs`, `/jobs/:jobId`, `/jobs/:jobId/prepare`, `/analyze`, `/prepare`, `/track`, `/growth`, `/analytics`, `/resume`, `/resume/:versionId`, `/settings`.
 - `/applications` aliases Track; `/applications/:jobId` redirects to Prepare.
+- Public visual owners on this snapshot: `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `globe-engine.ts`, `HeroAtmosphere.tsx`. Decorative motion must not steal clicks; reduced-motion is supported; public visuals must not change session/auth semantics. PR `#82` may replace landing/auth composition after it merges.
+- For meaningful UI redesigns, use approved references/prototype direction before editing production UI; source components and design tokens remain authoritative.
 ## 27. Theme / Responsive / Reduced Motion
 - `frontend/src/lib/theme.tsx`
 - `frontend/src/index.css`
@@ -452,9 +487,10 @@ existing state mutations → analytics_service.record_event
 16. Extension documents follow the current job/tab.
 17. ATS identity is posting-ID based, not title similarity.
 18. User-owned data is isolated; shared JobRecord can be global.
-19. Account deletion removes private owner data/sessions, not shared jobs.
+19. Account deletion removes private owner data/sessions (including `SavedSearchRecord`, `SavedSearchMatchRecord`, `ApplicationEventRecord`), not shared jobs.
 20. Career Growth and Analytics reads do not modify Fit or call providers.
 21. Automated tests never mutate `data/careerpilot.db`.
+22. Resume-version file URLs die with the owning account.
 ## 32. Test / Command Index
 **Backend**
 
@@ -473,6 +509,10 @@ python -m pytest -q tests/test_match_evidence.py tests/test_match_evidence_invar
 python -m pytest -q tests/test_application_materials_agent.py tests/test_application_service.py tests/test_application_materials_merge_gates.py
 python -m pytest -q tests/test_resume_version_service.py tests/test_resume_export.py tests/test_extension_resume_export.py
 python -m pytest -q tests/test_interview_service.py tests/test_career_growth.py tests/test_analytics.py
+python -m pytest -q tests/test_saved_search_service.py tests/test_scheduler.py tests/test_calendar_export.py tests/test_safe_filename.py
+python -m pytest -q tests/test_privacy_security.py tests/test_database.py tests/test_extension_resume_export.py
+python scripts/verify_mapped_paths.py
+python scripts/make_temp_qa_db.py
 ```
 **Frontend**
 
@@ -494,5 +534,6 @@ git diff --check
 Expand only when a mapped path moved, stack trace/test points elsewhere, ownership changed, a real bug crosses subsystem boundaries, the map is stale after a structural PR, or the user explicitly requests a repo-wide audit. Search by symbol/error/path first; do not immediately scan every file.
 ## 34. Map Maintenance
 Update this map in the same structural PR when routes/product destinations, service ownership, major models, ATS identity, provider/grounding/staleness contracts, extension permission/fill/attachment architecture, or primary test/release commands change. Small implementation-only fixes do not require map churn if ownership and invariants stay the same.
-## 35. Known Documentation Inconsistency at This Snapshot
-`README.md` still says analytics is out of scope, but current `main` contains `/analytics`, `ApplicationEventRecord`, `analytics_service.py`, `AnalyticsPage.tsx`, and analytics tests from PR #78. Source code is authoritative. Align README separately if the owner wants the public description updated; do not hide this mismatch inside an unrelated release fix.
+## 35. Known documentation inconsistency at this snapshot
+`README.md` still lists calendar, email alerts, and analytics as out of scope. Current `main` has `/analytics`, saved searches with in-app unseen counts, and `.ics` / Google Calendar export. Source wins. Align README in a dedicated docs PR; do not hide the mismatch inside an unrelated product fix.
+QA helpers: `scripts/make_temp_qa_db.py` (temp SQLite + printed `DATABASE_URL`; never `data/careerpilot.db`), `scripts/verify_mapped_paths.py`.
