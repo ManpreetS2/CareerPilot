@@ -1,4 +1,4 @@
-"""Legacy Day 1 mock helpers kept for fixtures/demos only.
+"""Legacy mock helpers kept for fixtures/demos only.
 
 Real parse-resume flows through backend.services.candidate_profile_agent.
 """

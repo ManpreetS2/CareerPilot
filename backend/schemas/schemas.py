@@ -1,7 +1,6 @@
 """Shared Pydantic models for CareerPilot AI.
 
-Keep these intentionally small for Day 1. Nested models replace untyped dicts
-for projects, experience, and education. Agent-specific payloads come later.
+Nested models replace untyped dicts for projects, experience, and education.
 """
 
 from __future__ import annotations

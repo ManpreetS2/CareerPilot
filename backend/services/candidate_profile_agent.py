@@ -1,7 +1,6 @@
-"""Candidate Profile Agent — grounded resume extraction for Day 2.
+"""Candidate Profile Agent — grounded resume extraction.
 
 Pipeline: PDF → text (pdfplumber, OCR fallback) → LLM JSON →
-Pydantic validate → evidence grounding → SQLite persistence.
 Pydantic validate → evidence grounding → SQLite persistence.
 
 Never invent candidate facts. Prefer dropping unsupported claims over
@@ -1626,7 +1625,7 @@ def build_candidate_profile_from_pdf(
     llm: LLMClient | None = None,
     generate_fn: Callable[[str, str | None], str] | None = None,
 ) -> tuple[CandidateProfile, ExtractionResult, GroundingReport]:
-    """Full Day 2 pipeline for a PDF on disk."""
+    """Full resume-to-profile pipeline for a PDF on disk."""
     total_start = time.perf_counter()
     pdf_start = time.perf_counter()
     extraction = extract_resume_text(pdf_path)

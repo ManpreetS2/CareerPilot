@@ -1,1 +1,1 @@
-"""Day 1 service stubs. Real agent logic starts on later days."""
+"""Service-layer package for CareerPilot domain logic."""
