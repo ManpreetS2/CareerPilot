@@ -1,6 +1,6 @@
 """Job Scout — Adzuna, RemoteOK, Greenhouse, Lever, Remotive, Jobicy, and
 Himalayas discovery, manual URL ingestion, normalization, deduplication,
-and SQLite persistence. Owned by Developer B (Day 2).
+and SQLite persistence.
 """
 
 from __future__ import annotations

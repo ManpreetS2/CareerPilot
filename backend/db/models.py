@@ -1,4 +1,4 @@
-"""SQLAlchemy persistence models for Day 1 foundations."""
+"""SQLAlchemy persistence models for CareerPilot records."""
 
 from __future__ import annotations
 

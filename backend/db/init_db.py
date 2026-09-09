@@ -183,7 +183,7 @@ def _dedupe_match_scores() -> None:
 
 
 def init_db() -> None:
-    """Create the data directory, create any missing Day 1 tables, and add
+    """Create the data directory, create any missing tables, and add
     any columns/indexes missing from tables that already existed."""
     Path("data").mkdir(parents=True, exist_ok=True)
     Path("logs").mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,5 @@
 """Job Verification — "still open" checks, suspicious-posting heuristics, and
-the discovered/verified/flagged/stale status lifecycle. Owned by Developer B (Day 3).
+the discovered/verified/flagged/stale status lifecycle.
 
 Every check here is a heuristic, not a guarantee. Uncertain or unreachable
 postings get flagged for human review rather than silently dropped or marked
