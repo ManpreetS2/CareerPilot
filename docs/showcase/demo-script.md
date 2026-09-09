@@ -82,7 +82,7 @@ If you are on a cold database, click Find Jobs and wait for the API to return. D
 
 ### 10. Assisted Fill (20s)
 
-**Show:** unpacked extension on a Greenhouse or Lever page you already ingested **or** the synthetic fixture in `docs/showcase/fixtures/generic-ats-form.html` if you cannot use a live ATS on this recording.
+**Show:** unpacked extension on a Greenhouse or Lever page you already ingested. If you cannot use a live ATS on this recording, you may show `docs/showcase/fixtures/generic-ats-form.html` / `08-assisted-fill-boundary-mock.png` and say out loud that it is an **illustrative mock**, not the extension runtime. Live Fill was certified on Chrome 152 (A8).
 
 **Say:** Greenhouse and Lever only. Mapped fields can fill. EEO and terms stay empty for you.
 

@@ -18,27 +18,29 @@ Data: isolated SQLite from `scripts/seed_showcase_demo.py`. Not `data/careerpilo
 | [06-track.png](./screenshots/06-track.png) | Tracker list: saved vs ready_to_apply; follow-up export; `applied` not claimed | Track list showing one saved role and one approved ready-to-apply role |
 | [06b-analytics.png](./screenshots/06b-analytics.png) | Honest funnel: saved/generated/approved, applied/interview/offer at 0 | Analytics funnel with materials approved and applied/offer still zero |
 | [07-career-growth.png](./screenshots/07-career-growth.png) | Growth refuses to invent insights without stored Match Evidence | Career Growth empty state asking to analyze jobs rather than fabricating advice |
-| [08-extension-fill.png](./screenshots/08-extension-fill.png) | Compatibility demo: assisted fields vs manual EEO; Submit visible, not clicked | Side-by-side synthetic application form and CareerPilot Fill preview that never submits |
+| [08-assisted-fill-boundary-mock.png](./screenshots/08-assisted-fill-boundary-mock.png) | Illustrative compatibility mock of assisted Fill vs manual EEO; Submit visible, not clicked | Illustrative mock of assisted Fill on a synthetic form — not the extension runtime |
 
-`08-extension-fill.png` is a **fixture mock** (`fixtures/generic-ats-form.html`), not a live Greenhouse/Lever capture and not an employer endorsement. Live Fill was certified separately on Chrome 152 (release gate A8).
+This file is an **illustrative compatibility mock** generated from `fixtures/generic-ats-form.html`. It is **not** a screenshot of the shipped Chrome extension runtime and **not** a live Greenhouse/Lever capture. It is not an employer endorsement. Live Fill was certified separately on Chrome 152 (release gate A8) against real Greenhouse and Lever pages.
 
 ## Capture command
 
 ```bash
 python scripts/capture_showcase_screenshots.py \
-  --base-url http://127.0.0.1:5173 \
-  --email demo.candidate@example.com \
-  --password 'Showcase-Demo-Pass-1!' \
-  --job-id showcase-harborline-intern
+  --base-url http://127.0.0.1:5173
 ```
 
 The script:
 
+- Accepts only loopback `http://127.0.0.1`, `http://localhost`, or `http://[::1]`
+- Logs in only as the synthetic showcase account from `scripts/seed_showcase_demo.py`
+- Verifies that account, Jordan Avery, Harborline Analytics, Cedar & Pine Robotics, and `showcase-harborline-intern` before authenticated screenshots
+- Does not take `--email` / `--password` for an arbitrary account
 - Does not click Submit
 - Does not type into EEO fields
 - Opens Evidence on Job Detail
 - Scrolls Prepare to the approval rail
 - Uses Track **List** view so both seeded rows are visible (Kanban columns scroll horizontally by design)
+- Writes `08-assisted-fill-boundary-mock.png` from the local HTML fixture, labeled as a mock
 
 ## Image weight
 

@@ -17,7 +17,7 @@ These files describe the **shipped v1.0.0 product**. They do not change runtime 
 | [visual-qa.md](./visual-qa.md) | Visual/accessibility notes from screenshot capture. |
 | [post-v1-maintenance-triage.md](./post-v1-maintenance-triage.md) | Informational post-v1 items. Not part of this showcase’s runtime. |
 | [screenshots/](./screenshots/) | Desktop PNG captures (1440×900). |
-| [fixtures/generic-ats-form.html](./fixtures/generic-ats-form.html) | Synthetic ATS form used for the Fill-boundary image. |
+| [fixtures/generic-ats-form.html](./fixtures/generic-ats-form.html) | Illustrative ATS form + side-panel mock for the Fill-boundary image. Not the extension runtime. |
 
 ## Released product state these assets demonstrate
 
@@ -33,10 +33,10 @@ The showcase branch may add documentation, screenshots, and an isolated demo see
 
 ## How screenshots were generated
 
-1. Seed an **isolated** SQLite file with `scripts/seed_showcase_demo.py` (refuses `data/careerpilot.db`).
+1. Seed a **brand-new** isolated SQLite file with `scripts/seed_showcase_demo.py` (refuses `data/careerpilot.db`, production-looking names, and any path that already exists).
 2. Run backend and frontend against that database only.
-3. Capture 1440×900 PNGs with `scripts/capture_showcase_screenshots.py` (Playwright, reduced motion, no Submit, no EEO fill).
-4. The Fill image uses `fixtures/generic-ats-form.html` — a **compatibility demonstration**, not a live employer page and not an endorsement.
+3. Capture 1440×900 PNGs with `scripts/capture_showcase_screenshots.py` (loopback-only, synthetic showcase identity, Playwright, reduced motion, no Submit, no EEO fill).
+4. The Fill image uses `fixtures/generic-ats-form.html` — an **illustrative compatibility mock**, not the shipped extension runtime, not a live employer page, and not an endorsement. Live Greenhouse/Lever Fill was certified on Chrome 152 (A8).
 
 See [screenshot-inventory.md](./screenshot-inventory.md) for the exact commands.
 
@@ -55,7 +55,8 @@ No real resume, phone number, API key, session cookie, private hostname, or prod
 
 Do **not**:
 
-- Point the seeder or capture script at `data/careerpilot.db`
+- Point the seeder at `data/careerpilot.db` or at any file that already exists
+- Point the capture script at a non-loopback URL or a real account
 - Use a real resume, real email, or live employer ATS page as a committed screenshot
 - Show Tailscale hostnames, `.env` values, extension IDs, or unrelated browser chrome
 - Click Submit, fill EEO/demographic fields, or acknowledge terms automatically
@@ -65,15 +66,11 @@ Do **not**:
 
 ```bash
 python scripts/seed_showcase_demo.py --database "$TEMP/careerpilot-showcase/showcase.sqlite"
-# Point DATABASE_URL at that file. Never data/careerpilot.db.
+# Point DATABASE_URL at that file. Never data/careerpilot.db. The path must not already exist.
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 # other terminal
 cd frontend && npm run dev
-python scripts/capture_showcase_screenshots.py \
-  --base-url http://127.0.0.1:5173 \
-  --email demo.candidate@example.com \
-  --password 'Showcase-Demo-Pass-1!' \
-  --job-id showcase-harborline-intern
+python scripts/capture_showcase_screenshots.py --base-url http://127.0.0.1:5173
 ```
 
 Use the same hostname for UI and API (`127.0.0.1` with `127.0.0.1`).

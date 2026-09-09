@@ -90,9 +90,9 @@ REASON: Seed must not fabricate offers. Keep zeros.
 SCREEN: Extension Fill screenshot
 ISSUE: Not a live Greenhouse/Lever page; fixture mock to avoid employer-logo endorsement.
 SEVERITY: n/a
-EVIDENCE: `08-extension-fill.png` + `fixtures/generic-ats-form.html`
+EVIDENCE: `08-assisted-fill-boundary-mock.png` + `fixtures/generic-ats-form.html`. Filename and alt text say mock; not the shipped extension runtime.
 FIXED / DEFERRED: FIXED (intentional)
-REASON: Compatibility demonstration. Live A8 remains the Fill certification. Submit is visible and was not clicked. EEO field left blank.
+REASON: Illustrative mock, not the shipped extension. Live A8 remains the Fill certification. Submit is visible and was not clicked. EEO field left blank.
 
 ---
 
@@ -103,4 +103,4 @@ EVIDENCE: Dark login probe.
 FIXED / DEFERRED: DEFERRED for committed set
 REASON: One theme in the public screenshot strip. Dark is supported.
 
-No P0 or P1 visual defects. No separate visual-fix PR: remaining items are either by-design, screenshot-script issues already addressed, or P3 presentation notes that would change product UI without a behavior-safe grouping.
+No P0 or P1 visual defects. Track Kanban overflow, Prepare below-fold approval, default Overview tab, and Growth empty state stay by design. JobCard “Remote · Remote” and concatenated accessible names are a separate post-v1 presentation PR, not this showcase package.
