@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CareerPilot compatibility demo — generic application form</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #16141c;
+        --muted: #5c5668;
+        --line: #ddd6e8;
+        --bg: #f3eef8;
+        --card: #fff;
+        --accent: #6d3ccf;
+        --panel: #1c1724;
+        --panel-ink: #f6f3fb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+      }
+      .stage {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        min-height: 900px;
+      }
+      main {
+        padding: 36px 40px 48px;
+      }
+      .form-card {
+        max-width: 720px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 28px 32px 32px;
+      }
+      h1 { font-size: 22px; margin: 0 0 8px; }
+      .banner {
+        font-size: 13px;
+        color: var(--muted);
+        margin: 0 0 20px;
+        line-height: 1.45;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        margin: 14px 0 6px;
+      }
+      input[type="text"],
+      input[type="email"] {
+        width: 100%;
+        padding: 9px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #f7f4fb;
+      }
+      fieldset {
+        margin-top: 22px;
+        border: 1px dashed #b9b0c9;
+        border-radius: 10px;
+        padding: 12px 14px 16px;
+        background: #faf8fd;
+      }
+      legend { font-size: 13px; color: var(--accent); }
+      .eeo { font-size: 13px; color: var(--muted); margin: 0; }
+      .actions { margin-top: 24px; display: flex; gap: 10px; }
+      button {
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #fff;
+      }
+      button[type="submit"] {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      .note { margin-top: 16px; font-size: 12px; color: var(--muted); }
+      aside {
+        background: var(--panel);
+        color: var(--panel-ink);
+        padding: 22px 18px 28px;
+        border-left: 1px solid #3a3148;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        margin-bottom: 18px;
+      }
+      .mark {
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
+        background: var(--accent);
+        display: grid;
+        place-items: center;
+        font-size: 11px;
+      }
+      .chip {
+        display: inline-block;
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #2d2440;
+        color: #d8c7f5;
+        margin-bottom: 10px;
+      }
+      .panel-card {
+        background: #2a2238;
+        border-radius: 12px;
+        padding: 12px 12px 14px;
+        margin-bottom: 12px;
+      }
+      .panel-card h2 {
+        font-size: 13px;
+        margin: 0 0 6px;
+      }
+      .panel-card p, .panel-card li {
+        font-size: 12px;
+        color: #cfc6dc;
+        margin: 0;
+        line-height: 1.45;
+      }
+      .panel-card ul { margin: 8px 0 0; padding-left: 16px; }
+      .fill {
+        width: 100%;
+        margin-top: 4px;
+        background: #3d2a5c;
+        color: #efe8fb;
+        border-color: #6d3ccf;
+      }
+      .stop {
+        margin-top: 14px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #f0d27a;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage">
+      <main>
+        <div class="form-card">
+          <h1>Application form (compatibility demo)</h1>
+          <p class="banner">
+            Synthetic page for CareerPilot screenshots. Not a real employer. Not an
+            endorsement. CareerPilot never clicks Submit. EEO and terms stay manual.
+          </p>
+          <form onsubmit="return false">
+            <label for="first">First name</label>
+            <input id="first" name="first" type="text" value="Jordan" />
+            <label for="last">Last name</label>
+            <input id="last" name="last" type="text" value="Avery" />
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" value="demo.candidate@example.com" />
+            <label for="resume">Resume / CV</label>
+            <input id="resume" name="resume" type="file" />
+            <fieldset>
+              <legend>Equal employment opportunity — complete yourself</legend>
+              <p class="eeo">
+                Gender, race/ethnicity, veteran status, and disability status are not filled by
+                CareerPilot. Terms and privacy acknowledgements stay manual.
+              </p>
+              <label for="eeo-gender">Gender (manual)</label>
+              <input id="eeo-gender" name="eeo-gender" type="text" value="" placeholder="Leave blank — CareerPilot does not fill this" />
+            </fieldset>
+            <div class="actions">
+              <button type="button">Save draft</button>
+              <button type="submit">Submit application</button>
+            </div>
+            <p class="note">
+              Showcase capture must not click Submit. This button exists only to show the human
+              boundary.
+            </p>
+          </form>
+        </div>
+      </main>
+      <aside aria-label="CareerPilot side panel mock">
+        <div class="brand"><span class="mark">CP</span> CareerPilot</div>
+        <span class="chip">Compatibility demonstration</span>
+        <div class="panel-card">
+          <h2>Recognized page</h2>
+          <p>Generic application form. Not a live Greenhouse or Lever posting. No employer logo, no endorsement.</p>
+        </div>
+        <div class="panel-card">
+          <h2>Approved package</h2>
+          <p>Software Engineer Intern · Harborline Analytics (synthetic). Materials approved. Human still reviews the form.</p>
+        </div>
+        <div class="panel-card">
+          <h2>Assisted Fill preview</h2>
+          <ul>
+            <li>First name — filled</li>
+            <li>Last name — filled</li>
+            <li>Email — filled</li>
+            <li>Resume / CV — attach yourself if the page blocks programmatic attach</li>
+            <li>EEO / demographic — skipped, complete yourself</li>
+            <li>Terms / privacy — skipped, complete yourself</li>
+          </ul>
+          <button class="fill" type="button">Fill this page</button>
+        </div>
+        <p class="stop">Stop here. CareerPilot never presses Submit. The human reviews the ATS form and submits.</p>
+      </aside>
+    </div>
+  </body>
+</html>

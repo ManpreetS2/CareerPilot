@@ -2,7 +2,45 @@
 
 Grounded job search. Human-approved applications.
 
-CareerPilot helps a candidate move from a resume to ranked, verified jobs and human-approved application materials. These are logical modules inside **one local/self-hostable application**, not separately deployed microservices, a hosted SaaS, or autonomous agents. CareerPilot never automatically submits an application. The human reviews the ATS form and presses Submit.
+CareerPilot is a local/self-hostable workspace that turns a real resume into a grounded profile, ranks jobs with explainable Fit, and drafts application materials that stay drafts until you approve them. An unpacked Chrome extension can assist Greenhouse and Lever forms. CareerPilot never submits an application. You review the ATS form and press Submit.
+
+[![v1.0.0](https://img.shields.io/github/v/release/ManpreetS2/CareerPilot)](https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0)
+[![CI](https://github.com/ManpreetS2/CareerPilot/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetS2/CareerPilot/actions/workflows/ci.yml)
+[![Security](https://github.com/ManpreetS2/CareerPilot/actions/workflows/security.yml/badge.svg)](https://github.com/ManpreetS2/CareerPilot/actions/workflows/security.yml)
+[![local / self-hostable](https://img.shields.io/badge/local-self--hostable-6d3ccf)](https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0)
+[![human submits](https://img.shields.io/badge/human-submits-6d3ccf)](https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0)
+
+**Release:** [v1.0.0](https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0) · tagged `b73a983ed3605d498aa90070c3b5f786a73bc525` · certified runtime `7b6c3ee100ca4fe6399ac29441bece8df71783c7`
+
+There is no hosted demo and no Chrome Web Store listing. Run it locally.
+
+![Discover workspace with two synthetic internships and a Potential Match preview](docs/showcase/screenshots/03-discover.png)
+
+## Why CareerPilot is different
+
+- **Grounded evidence** — skills and claims have to come from stored resume or posting text, or they stay unknown.
+- **Deterministic Fit** — scoring does not require an LLM. Missing evidence is not a silent yes.
+- **Human-approved materials** — generated bullets remain drafts until you confirm eligibility.
+- **Provenance / staleness** — fingerprint changes invalidate Fit, Match Evidence, and reviewed packages instead of reusing them.
+- **User-scoped private data** — scores, tracker, analytics, saved searches, and resume versions do not leak across accounts.
+- **Safe Greenhouse/Lever Fill** — unpacked Chrome side panel, ATS posting identity, truthful resume attachment.
+- **Never auto-submits** — EEO, terms, and Submit stay human. Tracker `applied` is recorded by you.
+
+## Product workflow
+
+```text
+Profile → Discover → Analyze → Prepare → Track
+```
+
+![Profile readiness with identity, grounded evidence, and target role marked Ready](docs/showcase/screenshots/02-profile-readiness.png)
+
+![Job analysis Evidence tab citing Python and SQL, with Docker marked not enough evidence](docs/showcase/screenshots/04-match-evidence.png)
+
+![Prepare page with approved materials, eligibility confirmation, and an immutable resume version](docs/showcase/screenshots/05-prepare.png)
+
+![Synthetic compatibility demo: assisted fields filled, EEO left manual, Submit not clicked](docs/showcase/screenshots/08-extension-fill.png)
+
+More screenshots, demo scripts, and architecture: [`docs/showcase/README.md`](docs/showcase/README.md).
 
 ## Product destinations
 
@@ -38,6 +76,21 @@ Resume
 ```
 
 ## Architecture
+
+These are layers inside **one local application**, not separately deployed microservices.
+
+```mermaid
+flowchart LR
+  browser[Browser] --> ui[React / Vite]
+  ui --> api[FastAPI]
+  api --> db[SQLite]
+  ext[Chrome side panel] --> api
+  api --> ext
+  ext --> ats[Greenhouse / Lever assistance]
+  ats --> human[Human reviews and presses Submit]
+```
+
+Shared job catalog vs user-scoped private records, deterministic Fit vs provider-backed extract/materials, and job sources: [`docs/showcase/architecture.md`](docs/showcase/architecture.md).
 
 | Layer | Stack |
 | --- | --- |
@@ -305,11 +358,15 @@ python scripts/live_ollama_gemini_check.py
 
 ## Git and release workflow
 
-Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen. A8/A9/Phase 6 certified the runtime SHA recorded in `docs/V1_RELEASE_CHECKLIST.md`. Remaining public release work is tagging `v1.0.0` after last-mile release-truth is on `main`.
+Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen. A8/A9/Phase 6 certified runtime SHA `7b6c3ee100ca4fe6399ac29441bece8df71783c7`. Annotated tag `v1.0.0` points at `b73a983ed3605d498aa90070c3b5f786a73bc525`: https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
 
 ## Demo path
 
-A recruiter can follow the product without extra tooling:
+A recruiter can follow the product without extra tooling.
+
+Spoken script and screenshot recapture: [`docs/showcase/demo-script.md`](docs/showcase/demo-script.md). Operator boot: [`docs/demo-runbook.md`](docs/demo-runbook.md). Isolated synthetic data: `python scripts/seed_showcase_demo.py --database <temp.sqlite>` (refuses `data/careerpilot.db`).
+
+Canonical clicks:
 
 1. Sign up
 2. Complete Profile (identity + grounded evidence + at least one target role)
