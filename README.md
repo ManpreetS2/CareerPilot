@@ -38,7 +38,7 @@ Profile → Discover → Analyze → Prepare → Track
 
 ![Prepare page with approved materials, eligibility confirmation, and an immutable resume version](docs/showcase/screenshots/05-prepare.png)
 
-![Synthetic compatibility demo: assisted fields filled, EEO left manual, Submit not clicked](docs/showcase/screenshots/08-extension-fill.png)
+![Illustrative compatibility mock — not the extension runtime. Assisted fields filled, EEO left manual, Submit not clicked. Live Greenhouse/Lever Fill was separately certified on Chrome 152.](docs/showcase/screenshots/08-assisted-fill-boundary-mock.png)
 
 More screenshots, demo scripts, and architecture: [`docs/showcase/README.md`](docs/showcase/README.md).
 

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Seed a synthetic CareerPilot showcase database. Never product runtime.
 
-Requires an explicit SQLite file path. Refuses data/careerpilot.db and other
-production-looking paths. Prints DEMO credentials for local screenshot capture.
+Requires an explicit SQLite file path that does not already exist. Refuses
+data/careerpilot.db, other production-looking names, and any existing file
+(including a previous showcase DB). Does not inspect an existing file to decide
+it is “safe.” Prints DEMO credentials for local screenshot capture.
 
-This script does not run on startup, does not call live providers, and must not
-be pointed at a real user's database.
+This script does not run on startup, does not call live providers, does not
+delete files, and must not be pointed at a real user's database.
 """
 
 from __future__ import annotations
@@ -24,6 +26,15 @@ PRODUCTION_DATABASE = (ROOT / "data" / "careerpilot.db").resolve()
 SHOWCASE_EMAIL = "demo.candidate@example.com"
 SHOWCASE_PASSWORD = "Showcase-Demo-Pass-1!"
 SHOWCASE_NAME = "Jordan Avery"
+SHOWCASE_PRIMARY_JOB = "showcase-harborline-intern"
+SHOWCASE_SECOND_JOB = "showcase-cedar-backend"
+SHOWCASE_COMPANY_PRIMARY = "Harborline Analytics"
+SHOWCASE_COMPANY_SECOND = "Cedar & Pine Robotics"
+
+EXISTING_DESTINATION_MESSAGE = (
+    "Showcase destination already exists. Choose a new temporary path or "
+    "explicitly delete the old showcase file first."
+)
 
 _FORBIDDEN_NAMES = {
     "careerpilot.db",
@@ -33,6 +44,12 @@ _FORBIDDEN_NAMES = {
 
 
 def refuse_database_path(path: Path) -> Path:
+    """Reject production-looking names and any path that already exists.
+
+    Existence is fail-closed: zero-byte files, valid SQLite, CareerPilot DBs,
+    and leftover showcase files are all refused. This function must not open
+    the destination with SQLAlchemy.
+    """
     resolved = path.expanduser().resolve()
     if resolved == PRODUCTION_DATABASE:
         raise SystemExit("Refusing data/careerpilot.db. Showcase seed is isolated SQLite only.")
@@ -42,6 +59,8 @@ def refuse_database_path(path: Path) -> Path:
         raise SystemExit("Refusing a database under data/ named like the production file.")
     if resolved.suffix.lower() not in {".db", ".sqlite", ".sqlite3"}:
         raise SystemExit("Showcase database must be a .db/.sqlite/.sqlite3 file.")
+    if resolved.exists():
+        raise SystemExit(EXISTING_DESTINATION_MESSAGE)
     return resolved
 
 
@@ -88,9 +107,9 @@ def _seed(session) -> dict[str, str]:
     )
 
     intern = JobRecord(
-        public_id="showcase-harborline-intern",
+        public_id=SHOWCASE_PRIMARY_JOB,
         title="Software Engineer Intern",
-        company="Harborline Analytics",
+        company=SHOWCASE_COMPANY_PRIMARY,
         location="Remote",
         salary=None,
         url="https://example.com/showcase/harborline-intern",
@@ -103,9 +122,9 @@ def _seed(session) -> dict[str, str]:
         ats=None,
     )
     long_title = JobRecord(
-        public_id="showcase-cedar-backend",
+        public_id=SHOWCASE_SECOND_JOB,
         title="Backend Software Engineering Intern, Platform Reliability",
-        company="Cedar & Pine Robotics",
+        company=SHOWCASE_COMPANY_SECOND,
         location="Hybrid — Portland, OR",
         salary=None,
         url="https://example.com/showcase/cedar-backend",
@@ -193,7 +212,7 @@ def main() -> int:
         "--database",
         required=True,
         type=Path,
-        help="Isolated SQLite path. Must not be data/careerpilot.db.",
+        help="New isolated SQLite path. Must not already exist. Must not be data/careerpilot.db.",
     )
     args = parser.parse_args()
     dest = refuse_database_path(args.database)

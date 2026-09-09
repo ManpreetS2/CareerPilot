@@ -4,6 +4,8 @@ Informational only. Opened during Phase 9 so these items are not rediscovered in
 
 Showcase work must not merge Dependabot #88–#91, must not perform a React Router 7 migration, and must not invent GitHub Actions commit SHAs.
 
+#88, #89, #90, and #91 remain **open** on GitHub at the time of this note. They are deferred / out of scope for showcase work. This document does not close them.
+
 ---
 
 ITEM: Dependabot #88 — extension-compatible group (`@types/chrome`, autoprefixer, postcss)
