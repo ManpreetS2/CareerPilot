@@ -16,7 +16,7 @@ For meaningful UI redesigns, use approved references/prototype direction before 
 
 ## v1 working mode
 
-Treat v1 feature development as frozen unless the user explicitly reopens scope. Prefer narrow release-gate fixes, regressions, and human-QA blockers over new features or broad refactors. A1–A9 and the Phase 6 adversarial audit have passed. Do not tag or publish v1.0.0 from this file; follow `docs/V1_RELEASE_CHECKLIST.md`.
+Treat v1 feature development as frozen unless the user explicitly reopens scope. Prefer narrow release-gate fixes, regressions, and human-QA blockers over new features or broad refactors. A1–A9 and the Phase 6 adversarial audit certified runtime SHA `7b6c3ee100ca4fe6399ac29441bece8df71783c7`. Follow `docs/V1_RELEASE_CHECKLIST.md` for tagging.
 
 ## Safety invariants
 

@@ -58,10 +58,6 @@ The script prints only safe IDs and category counts.
 
 ## Three-layout real-resume checkpoint
 
-Before treating Day 2 as fully verified with real documents, run the real-resume script against:
-
-1. Developer A resume
-2. Developer B resume
-3. One consenting resume with a different layout
+Optional manual QA: run the real-resume script against **three consenting resumes with meaningfully different layouts** (for example one traditional single-column, one two-column/sidebar, and one multi-page or otherwise distinct structure). Synthetic generated PDFs do not count.
 
 Do not add real PDFs to the repository.

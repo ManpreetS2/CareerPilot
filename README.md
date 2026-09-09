@@ -134,7 +134,7 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 
 ## Setup
 
-Requires **Python 3.11+** and **Node.js 20+**.
+Requires **Python 3.11+**. **Node.js 22.12+** is recommended (CI uses Node 22). **Node.js 20.19+** is supported. The committed frontend lockfile graph includes packages that declare `^20.19.0 || ^22.12.0 || >=24.0.0`; do not assume Node 20.0 works.
 
 ### Backend
 
@@ -207,7 +207,7 @@ python -m backend.db.init_db
 ```bash
 cd frontend
 cp .env.example .env.local
-npm install
+npm ci
 ```
 
 `VITE_API_BASE_URL` defaults to `http://<this-page-hostname>:8000` for local
@@ -221,7 +221,7 @@ left unchanged. Do not set `VITE_API_BASE_URL=http://localhost:8000` in
 
 The extension is not published to the Chrome Web Store. Load it unpacked after a build:
 
-1. `cd browser-extension && npm install && npm run build`
+1. `cd browser-extension && npm ci && npm run build`
 2. Start the backend (`python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`) and approve at least one Greenhouse or Lever application.
 3. Open `chrome://extensions`, enable Developer mode, and **Load unpacked** on the `browser-extension/` folder (the folder that contains `manifest.json`, not `dist/`).
 4. Copy the extension id into `.env` as `EXTENSION_ORIGIN=chrome-extension://<id>` and restart the API.
@@ -303,9 +303,9 @@ python scripts/live_ollama_gemini_check.py
 - Gemini fallback used: the host was offline, timed out, or returned unusable structured output. Check that a Gemini key exists on that machine.
 - Never expose Ollama on the public internet.
 
-## Two-developer Git workflow
+## Git and release workflow
 
-Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen. Certification through A9 and the Phase 6 adversarial audit is complete. Remaining public release work is tagging v1.0.0 — see `docs/V1_RELEASE_CHECKLIST.md`. Do not tag from a docs-only pass.
+Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen. A8/A9/Phase 6 certified the runtime SHA recorded in `docs/V1_RELEASE_CHECKLIST.md`. Remaining public release work is tagging `v1.0.0` after last-mile release-truth is on `main`.
 
 ## Demo path
 
