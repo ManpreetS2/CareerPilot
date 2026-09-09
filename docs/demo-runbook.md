@@ -5,6 +5,8 @@ QA against `data/careerpilot.db`.
 
 Canonical product path: **Profile → Discover → Analyze → Prepare → Track**.
 
+For a 2–4 minute spoken walkthrough, recruiter copy, and screenshot recapture, see [`docs/showcase/README.md`](./showcase/README.md). This runbook stays the operator boot.
+
 ## Start
 
 1. Copy `.env.example` to `.env`. For a disposable demo, point `DATABASE_URL` at a temp/copy file (see `scripts/make_temp_qa_db.py`). Leave `COOKIE_SECURE=false` for local http.
