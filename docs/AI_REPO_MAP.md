@@ -41,7 +41,7 @@
 | Frontend routes | `frontend/src/App.tsx`, `AppShell.tsx` | affected page tests |
 | Frontend API/types | `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts` | affected page/component tests + typecheck |
 | CORS/CSRF/security headers | `backend/main.py`, `core/csrf.py`, `core/security_headers.py`, `core/config.py` | security + CORS browser checks |
-| CI/release gate | `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `docs/V1_RELEASE_CHECKLIST.md` | CI + Gitleaks + manual checklist |
+| CI/release gate | `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `docs/V1_RELEASE_CHECKLIST.md`, `docs/CI_SUPPLY_CHAIN.md` | CI + Gitleaks + manual checklist |
 | Python dependency policy | `docs/PYTHON_DEPENDENCY_REPRODUCIBILITY.md` | n/a |
 ## 2. Top-Level Architecture
 
