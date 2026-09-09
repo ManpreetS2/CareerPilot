@@ -162,6 +162,9 @@ def test_parse_reads_the_embed_url_form() -> None:
         "https://job-boards.greenhouse.io/instead/jobs/7761472003?gh_src=abc#app",
         "https://job-boards.greenhouse.io/instead/jobs/7761472003/",
         "https://boards.greenhouse.io/instead/jobs/7761472003",
+        "https://job-boards.greenhouse.io/instead?gh_jid=7761472003",
+        "https://boards.greenhouse.io/instead/?gh_jid=7761472003&utm_source=jobright",
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003?gh_jid=7761472003",
     ],
 )
 def test_every_shape_of_the_same_posting_parses_identically(url: str) -> None:
@@ -183,6 +186,19 @@ def test_canonical_path_wins_over_query_parameters() -> None:
     assert (ref.board_token, ref.job_id) == ("instead", "7761472003")
 
 
+def test_jobs_path_wins_over_conflicting_gh_jid() -> None:
+    ref = parse_greenhouse_posting_url(
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003?gh_jid=9999999999"
+    )
+    assert ref is not None
+    assert (ref.board_token, ref.job_id) == ("instead", "7761472003")
+
+
+def test_board_root_without_gh_jid_is_not_a_posting() -> None:
+    assert parse_greenhouse_posting_url("https://job-boards.greenhouse.io/instead") is None
+    assert parse_greenhouse_posting_url("https://job-boards.greenhouse.io/instead?utm_source=x") is None
+
+
 @pytest.mark.parametrize(
     "query",
     [
@@ -200,9 +216,8 @@ def test_parse_rejects_incomplete_or_malformed_embed_urls(query: str) -> None:
 def test_manual_ingest_of_an_embed_url_is_stored_canonically(mock_fetch) -> None:
     """End of the chain: pasting the embed URL yields the same stored URL as
     pasting the canonical one, so the two cannot become duplicate rows.
-    Asserts the two agree rather than naming a specific URL — Greenhouse's
-    API reports its own absolute_url for a posting and that is preferred
-    when it resolves to the same job."""
+    Stored identity is always canonical_greenhouse_posting_url — Greenhouse's
+    absolute_url often carries gh_jid and is not persisted as identity."""
     mock_fetch["handler"] = lambda url, **_: _json_response(url, INSTEAD_API)
     from_embed = ingest_job_url(
         "https://job-boards.greenhouse.io/embed/job_app?for=instead&token=7761472003&utm_source=jobright"
@@ -219,7 +234,8 @@ def test_ingest_greenhouse_instead_shaped(mock_fetch) -> None:
     assert raw["company"] == "Instead"
     assert "Build APIs & services" in raw["description"]
     assert raw["location"] == "San Francisco, CA"
-    assert raw["url"] == INSTEAD_API["absolute_url"]
+    assert raw["url"] == INSTEAD_CANONICAL_URL
+    assert raw["source_job_id"] == "7761472003"
     assert raw["ats"] == "greenhouse"
     assert "<" not in raw["description"]
     assert mock_fetch["calls"][0]["url"] == API_INSTEAD
@@ -312,6 +328,29 @@ def test_equivalent_absolute_url_on_canonical_host_accepted(mock_fetch) -> None:
     mock_fetch["handler"] = lambda url, **_: _json_response(url, payload)
     raw = ingest_job_url(alt)
     assert raw["url"] == alt
+
+
+def test_ingest_greenhouse_strips_tracking_query_from_absolute_url(mock_fetch) -> None:
+    payload = dict(INSTEAD_API)
+    payload["absolute_url"] = (
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003"
+        "?gh_jid=7761472003&utm_source=jobright&gh_src=abc"
+    )
+    mock_fetch["handler"] = lambda url, **_: _json_response(url, payload)
+    raw = ingest_job_url(
+        "https://job-boards.greenhouse.io/instead/jobs/7761472003?gh_jid=7761472003"
+    )
+    assert raw["url"] == INSTEAD_CANONICAL_URL
+    assert "?" not in raw["url"]
+
+
+def test_ingest_greenhouse_board_root_gh_jid_stores_canonical_url(mock_fetch) -> None:
+    mock_fetch["handler"] = lambda url, **_: _json_response(url, INSTEAD_API)
+    raw = ingest_job_url("https://job-boards.greenhouse.io/instead?gh_jid=7761472003")
+    assert mock_fetch["calls"][0]["url"].endswith("/boards/instead/jobs/7761472003")
+    assert raw["url"] == INSTEAD_CANONICAL_URL
+    assert "?" not in raw["url"]
+    assert raw["source_job_id"] == "7761472003"
 
 
 @pytest.mark.parametrize(

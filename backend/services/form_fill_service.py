@@ -732,6 +732,27 @@ def find_job_by_url(db: Session, url: str) -> JobRecord | None:
         record = db.query(JobRecord).filter(JobRecord.url == candidate_url).first()
         if record is not None:
             return record
+
+    # Existing rows may have been stored with tracking query parameters
+    # (Greenhouse gh_jid/utm_*/gh_src, Lever /apply or lever-origin) that
+    # exact URL lookup cannot see. Compare parsed ATS posting identity —
+    # board_token + job_id, or company_slug + posting UUID — so those rows
+    # still resolve. Title/company are never used as a fallback.
+    incoming_greenhouse = parse_greenhouse_posting_url(url)
+    incoming_lever = parse_lever_posting_url(url)
+    if incoming_greenhouse is None and incoming_lever is None:
+        return None
+
+    for record in db.query(JobRecord).all():
+        stored = record.url or ""
+        if incoming_greenhouse is not None:
+            stored_greenhouse = parse_greenhouse_posting_url(stored)
+            if stored_greenhouse is not None and stored_greenhouse == incoming_greenhouse:
+                return record
+        if incoming_lever is not None:
+            stored_lever = parse_lever_posting_url(stored)
+            if stored_lever is not None and stored_lever == incoming_lever:
+                return record
     return None
 
 

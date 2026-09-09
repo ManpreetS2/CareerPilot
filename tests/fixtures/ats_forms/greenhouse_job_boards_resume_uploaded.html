@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <!--
+    Live Instead job-boards.greenhouse.io widget after a successful attach:
+    the raw #resume input is gone. Resume/CV is a sibling heading, not
+    aria-labelledby / .file-upload / role=group. Filename sits next to
+    Attach / Enter manually controls. Cover letter input may still exist.
+  -->
+  <form id="application_form">
+    <div>
+      <label>Resume/CV*</label>
+      <div>
+        <span>resume-v1.pdf</span>
+        <button type="button">Attach</button>
+        <button type="button">Enter manually</button>
+      </div>
+    </div>
+    <label for="cover_letter">Cover Letter</label>
+    <input type="file" id="cover_letter" name="job_application[cover_letter]" />
+    <button type="submit" id="submit_app">Submit Application</button>
+  </form>
+</body>
+</html>

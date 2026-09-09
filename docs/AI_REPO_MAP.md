@@ -151,14 +151,14 @@ Human reviews and manually presses Submit
 - `backend/services/job_scout_service.py`: `parse_greenhouse_posting_url`, `canonical_greenhouse_posting_url`, API fetch/ingest/dedupe.
 - `backend/services/form_fill_service.py`: `find_job_by_url` for live tab lookup.
 - `browser-extension/src/job-recognition.ts`.
-**Identity** board token + numeric job ID. Tracking query params/host aliases must not create a second posting. Never fuzzy-match title/company.
+**Identity** board token + numeric job ID, including board-root `?gh_jid=` and embed `for`/`token` URLs. Stored URL is canonical `/jobs/<id>`. Tracking query params/host aliases must not create a second posting. Never fuzzy-match title/company.
 **Tests** `tests/test_job_source_expansion.py`, `tests/test_form_fill_service.py`, `tests/test_greenhouse_job_ingestion.py`, extension recognition/sidepanel tests.
 ## 9. Lever Identity / Ingestion
 **Files**
 - `backend/services/job_scout_service.py`: `parse_lever_posting_url`, `canonical_lever_posting_url`, provider/manual ingest.
 - `backend/services/form_fill_service.py`: posting vs `/apply` identity.
 - `browser-extension/src/job-recognition.ts`.
-**Identity** company slug + posting UUID. Posting and `/apply` are one job. Tracking queries must not fork identity. Outbound API calls remain host-allowlisted/SSRF-safe.
+**Identity** company slug + posting UUID. Posting and `/apply` are one job. UUID postings ingest from public `api.lever.co` (real description, `source_job_id` UUID, canonical `jobs.lever.co/{slug}/{uuid}`). Non-UUID Lever URLs still use bounded HTML fetch. Tracking queries must not fork identity. Outbound API calls remain host-allowlisted/SSRF-safe.
 **Tests** `tests/test_job_source_expansion.py`, `tests/test_form_fill_service.py`, `tests/test_job_scout_service.py`, extension recognition tests.
 ## 9b. Saved searches / in-app alerts
 **Route** `backend/api/routes/saved_searches.py` — `/api/saved-searches`, matches, mark-seen.
@@ -333,6 +333,8 @@ owned ResumeVersion
 - never report Attached without real page verification;
 - never use previous tab/job's resume version;
 - a displayed filename that merely matches is not enough; the extension only trusts attachment state it owns/verified for that resume version/session.
+- If this attempt assigned File/DataTransfer onto a Resume/CV input and the ATS then removes that input, a Resume/CV-group filename display of that exact file is confirmation — cover-letter groups and unrelated page copy are not.
+- `attachDocumentInPage` and `verifyResumeAttachmentInPage` are injected via `chrome.scripting.executeScript` and must stay self-contained; outer module helpers are not serialized into the page.
 **Tests** `browser-extension/tests/attachFile.test.ts`, `browser-extension/tests/sidepanel.test.ts`
 ## 21. EEO / Manual-Only Safety
 **Files** `browser-extension/src/field-status.ts`, `fillForm.ts`, backend `form_fill_service.py`.

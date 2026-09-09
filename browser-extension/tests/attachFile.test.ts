@@ -179,12 +179,83 @@ describe("resume attachment", () => {
     expect(result.reason).toMatch(/re-attachment/i);
   });
 
+  it("A: this-attempt attach then Greenhouse replaces the input with a Resume/CV filename widget", async () => {
+    loadFixture("greenhouse_resume_file.html");
+    const input = document.getElementById("resume") as HTMLInputElement;
+    input.addEventListener("change", () => {
+      const widget = document.createElement("div");
+      widget.innerHTML = `
+        <label>Resume/CV*</label>
+        <div>
+          <span>resume-v1.pdf</span>
+          <button type="button">Attach</button>
+          <button type="button">Enter manually</button>
+        </div>`;
+      input.replaceWith(widget);
+    });
+    const result = await attachDocumentInPage(payload());
+    expect(result.status).toBe("attached");
+    expect(result.verifiedName).toBe("resume-v1.pdf");
+    expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(true);
+  });
+
+  it("B: a pre-existing Resume/CV filename is not attach success without this-attempt File assignment", async () => {
+    loadFixture("greenhouse_job_boards_resume_uploaded.html");
+    const result = await attachDocumentInPage(payload());
+    expect(result.status).toBe("unsupported_field");
+  });
+
+  it("C: filename under Cover Letter is not resume success", () => {
+    loadFixture("greenhouse_cover_letter_uploaded_display.html");
+    expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(false);
+  });
+
+  it("D: unrelated page copy containing the filename is not resume success", () => {
+    loadFixture("greenhouse_resume_filename_in_copy.html");
+    expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(false);
+  });
+
+  it("E: visible Resume/CV filename is not success when this attempt never assigned a File", async () => {
+    vi.stubGlobal(
+      "DataTransfer",
+      class {
+        constructor() {
+          throw new Error("blocked");
+        }
+      },
+    );
+    loadFixture("greenhouse_resume_file.html");
+    const existing = document.createElement("div");
+    existing.innerHTML = `<label>Resume/CV*</label><span>resume-v1.pdf</span>`;
+    document.querySelector("form")?.prepend(existing);
+    const result = await attachDocumentInPage(payload());
+    expect(result.status).toBe("manual");
+    expect(result.reason).toMatch(/manually/i);
+  });
+
+  it("verifyResumeAttachmentInPage is self-contained for chrome.scripting injection", () => {
+    const source = verifyResumeAttachmentInPage.toString();
+    expect(source).not.toMatch(/resumeGroupShowsExactFilename/);
+    expect(source).toContain("aria-labelledby");
+    expect(source).toContain("file-upload");
+  });
+
   it("verifies attachment when the ATS removed the input and shows a filename display instead", () => {
     // Confirmed live on Greenhouse: once attached, the raw file input is
     // removed from the DOM and replaced by a text display of the filename.
     // A verify call that only looks for a live <input> would wrongly report
     // the resume as lost even though it genuinely attached and is holding.
     loadFixture("greenhouse_resume_uploaded_display.html");
+    expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(true);
+  });
+
+  it("verifies attachment when Resume/CV is a sibling heading rather than aria-labelledby", () => {
+    loadFixture("greenhouse_resume_uploaded_sibling_label.html");
+    expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(true);
+  });
+
+  it("verifies the live job-boards Resume/CV sibling-heading widget", () => {
+    loadFixture("greenhouse_job_boards_resume_uploaded.html");
     expect(verifyResumeAttachmentInPage("resume-v1.pdf").attached).toBe(true);
   });
 

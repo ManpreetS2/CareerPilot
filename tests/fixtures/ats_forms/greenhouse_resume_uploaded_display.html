@@ -8,13 +8,17 @@
     must recognize this as attached, not just check for a live file input.
   -->
   <form id="application_form">
-    <div class="file-upload" role="group" aria-labelledby="upload-label-resume" aria-required="false" data-allow-s3="false">
-      <span id="upload-label-resume">Resume/CV</span>
+    <div class="file-upload" role="group" aria-labelledby="upload-label-resume" aria-required="true" data-allow-s3="false">
+      <div id="upload-label-resume" class="label upload-label">Resume/CV<span class="required">*</span></div>
       <div class="file-upload__wrapper">
         <div class="file-upload__filename">
           <p class="body body__secondary">resume-v1.pdf</p>
         </div>
       </div>
+    </div>
+    <div class="file-upload" role="group" aria-labelledby="upload-label-cover_letter" aria-required="false">
+      <div id="upload-label-cover_letter" class="label upload-label">Cover Letter</div>
+      <input type="file" id="cover_letter" name="job_application[cover_letter]" />
     </div>
     <button type="submit" id="submit_app">Submit Application</button>
   </form>

@@ -40,6 +40,13 @@ function greenhouseSourceJobId(url: string): { sourceJobId: string; companyHint:
         return { companyHint: board, sourceJobId: token };
       }
     }
+    // Board-root ?gh_jid= is the same posting as /jobs/<id>. A jobs-path
+    // URL already matched above, so a conflicting gh_jid cannot redirect it.
+    const boardMatch = path.match(/^\/([^/]+)\/?$/);
+    const ghJid = parsed.searchParams.get("gh_jid");
+    if (boardMatch && ghJid && /^\d+$/.test(ghJid)) {
+      return { companyHint: boardMatch[1], sourceJobId: ghJid };
+    }
   } catch {
     return null;
   }
