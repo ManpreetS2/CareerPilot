@@ -1,5 +1,7 @@
 # Agile plan gap audit
 
+> Historical working notes from an earlier branch. Not current product truth. See `README.md`, `docs/AI_REPO_MAP.md`, and `docs/V1_RELEASE_CHECKLIST.md`.
+
 Stacked on PR #28 (`feat/job-discovery-progress` @ `12961b225524c397ec5b43063fb4e068f1a3d22f`).
 This audit is a map of what already exists. It does not reimplement Fit Score V2.
 

@@ -2,7 +2,7 @@
 
 Grounded job search. Human-approved applications.
 
-CareerPilot helps a candidate move from a resume to ranked, verified jobs and human-approved application materials. These are logical modules inside **one application**, not separately deployed microservices or autonomous agents. CareerPilot never automatically submits an application.
+CareerPilot helps a candidate move from a resume to ranked, verified jobs and human-approved application materials. These are logical modules inside **one local/self-hostable application**, not separately deployed microservices, a hosted SaaS, or autonomous agents. CareerPilot never automatically submits an application. The human reviews the ATS form and presses Submit.
 
 ## Product destinations
 
@@ -14,9 +14,9 @@ Primary web navigation is workflow-first:
 - Prepare (`/jobs/:jobId/prepare`, or `/prepare` when no job is selected)
 - Track (`/track`; `/applications` is the same tracker)
 
-Supporting destinations: Profile, Career Growth (`/growth`), Conversion Analytics (`/analytics`), Resume, Settings.
+Supporting destinations: Profile, Interview Coach (on Job Detail), Career Growth (`/growth`), Conversion Analytics (`/analytics`), Resume, Settings.
 
-Analyze and Prepare stay contextual under a selected job. Interview Coach remains on Job Detail. Application Tracker is a first-class Track destination with Kanban and list/timeline views. Discover can save searches with in-app unseen match counts (no email). Track follow-up dates can export as `.ics` or a Google Calendar URL. Career Growth is advisory only: it never changes Fit scores.
+Analyze and Prepare stay contextual under a selected job. Interview Coach remains on Job Detail. Application Tracker is a first-class Track destination with Kanban and list/timeline views. Discover can save searches with in-app unseen match counts (no email). Track follow-up dates can export as `.ics` or a Google Calendar URL (no Google Calendar OAuth). Career Growth is advisory only: it never changes Fit scores. The unpacked Chrome extension assists Greenhouse and Lever Fill only; it never submits, never fills EEO/demographic fields, and never acknowledges terms/privacy for you.
 
 Public routes: `/`, `/login`, `/signup`, `/privacy`. New signup continues through `/onboarding`.
 
@@ -66,36 +66,34 @@ CareerPilot/
 
 ## Current status
 
-CareerPilot is an authenticated local product. Signup, login, logout, and `GET /api/auth/me` exist. Private records (candidate, preferences, scores, materials, tracker rows, interview prep, form-fill attempts) are scoped to the signed-in user. Jobs and job intelligence remain shared public data.
+CareerPilot v1 is an authenticated **local/self-hostable** product. It is not a production hosted SaaS. Signup, login, logout, and `GET /api/auth/me` exist. Private records (candidate, preferences, scores, materials, tracker rows, interview prep, form-fill attempts, analytics events, saved searches, resume-version files) are scoped to the signed-in user. Jobs and job intelligence remain shared catalog data.
 
-**Completed in this repo**
+**Shipped in this repo**
 
 - Signup / login / logout / `/api/auth/me` with an HttpOnly session cookie (`careerpilot_session`)
 - CSRF origin checks for cookie-authenticated state changes
 - CORS from exact `ALLOWED_ORIGINS` plus an optional exact `EXTENSION_ORIGIN`
 - `COOKIE_SECURE` required when `APP_ENV=production`
 - Extension session header accepted only on the exact autofill route from the configured extension origin
-- `GET /api/profile` — read-only current candidate and latest preferences
+- Profile-first gates: Discover / Find Jobs / saved-search create / Career Growth / Analytics require a usable candidate profile and at least one target role
 - Grounded candidate profile, job scout/verification/intelligence, fit scoring, materials, approval, assisted apply, tracker APIs, interview prep, and immutable resume versions
-- Application materials are generated from stored evidence, not a placeholder
+- Application materials are generated from stored evidence. Provider-backed generation depends on configured Ollama/Gemini/Anthropic/OpenAI availability
 - Mock-interview answer feedback is ephemeral (not stored) and follows `LLM_PROVIDER_ORDER`
-- Tracker rows can store a user-set follow-up date; CareerPilot does not send automated notifications or reminders. Track is a primary web destination (`/track`). Follow-up dates can be exported as an `.ics` file or opened as a Google Calendar template URL.
-- Saved searches on Discover (`/api/saved-searches`) store owner-scoped in-app unseen matches. There is no email or push alert.
-- Conversion Analytics (`/analytics`) is a read-only funnel over the signed-in user's own application events.
-- Profile-first gates: Discover / Find Jobs / Career Growth require a usable candidate profile and at least one target role
+- Track (`/track`) with a user-set follow-up date. Export as `.ics` or a Google Calendar template URL. CareerPilot does not send email, SMS, or push reminders and does not OAuth into a calendar account
+- Saved searches on Discover (`/api/saved-searches`) with owner-scoped in-app unseen matches. No email or push alert
+- Conversion Analytics (`/analytics`) — read-only funnel over the signed-in user's own application events
 - Account deletion from Settings (revokes every session and owner-scoped private rows; shared job catalog remains)
-- Process-local login throttling (generic errors, no email-existence leak)
+- Process-local login throttling (generic errors on failed login; no email-existence leak on login)
 - Grounded Match Evidence with fingerprint staleness and canonical skill aliases
-- Bounded parallel Job Intelligence extraction workers
-- Read-only Career Growth / Skills Gap from stored evidence (`GET /api/career-growth`, `/growth`)
+- Unpacked Chrome extension: Greenhouse and Lever assisted Fill, truthful resume attachment, never Submit
 
-Opening Dashboard, Jobs, Job Detail, Prepare Application, Profile, Resume, Settings, or Career Growth never scores a job, extracts requirements, generates materials, approves, or creates a resume version by itself. Career Growth only reads stored evidence. Find Jobs persists a deterministic fit score (`score_job`) for each scoreable listing and does not call an LLM. Calculate Fit, Generate Materials, Prepare Interview, Approve, and Save Resume Version stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation. Assisted Apply and the extension never submit forms.
+Ordinary page loads for Overview, Discover, Job Detail, Prepare, Track, Analytics, Profile, Resume, Settings, and Career Growth do not score a job, extract requirements, generate materials, approve, scout, or create a resume version by themselves. Career Growth and Analytics only read stored evidence. Find Jobs persists a deterministic fit score (`score_job`) for each scoreable listing and does not call an LLM. Calculate Fit, Generate Materials, Prepare Interview, Approve, Save Resume Version, and extension Fill stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation.
 
-Job discovery currently supports Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, and manual posting URLs. The Jobs workspace uses a compact list plus desktop preview, internships/full-time/both title filter, and previous/next job navigation.
+Job discovery currently supports Greenhouse, Lever, Remotive, Adzuna, RemoteOK, Jobicy, Himalayas, and manual posting URLs. Assisted Fill supports **Greenhouse and Lever only**. The Jobs workspace uses a compact list plus desktop preview, internships/full-time/both title filter, and previous/next job navigation.
 
-Approved resume versions can be downloaded as PDF or DOCX from Prepare Application. The Chrome extension can download the same owned files and may attach them to a recognized Greenhouse/Lever resume file field. If the page blocks programmatic attachment, the side panel says so and asks you to attach the file yourself. CareerPilot never submits the application.
+Approved resume versions can be downloaded as PDF or DOCX from Prepare. The Chrome extension can download the same owned files and may attach them to a recognized Greenhouse/Lever resume file field. A matching filename alone is not proof of attachment. If the page blocks programmatic attachment, the side panel says so and asks you to attach the file yourself.
 
-The Chrome extension provides a side panel and approved autofill for Greenhouse/Lever. Unpacked real-Chrome visual verification on live ATS pages is a human release check and is not claimed complete from unit tests alone.
+Live Greenhouse and Lever Fill were certified on Chrome 152 (release gate A8). Unit tests still do not replace a live ATS re-check after fill or attachment code changes. The extension never submits.
 
 **Legacy local data**
 
@@ -110,14 +108,16 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 
 **Still out of scope**
 
-- Deployment / production hosting
+- Production hosting / SaaS operations
 - Password reset
 - Email verification
 - Live-provider verification in CI
-- Automatic job application submission
+- Automatic job application submission (the human always presses Submit)
 - Email alerts
 - Billing
 - Calendar account OAuth / synced calendar accounts
+- Auto-apply
+- Assisted Fill for ATS vendors other than Greenhouse and Lever
 
 
 ## Privacy and safety
@@ -130,6 +130,7 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - Page load for Jobs, Job Detail, Prepare Application, Fit Score, Resume, and Interview Prep is read-only. Calculate Fit and generation run only on an explicit user action. Find Jobs also persists a deterministic fit score for scoreable listings (no LLM).
 - Private records are user-scoped. Shared job titles may be visible to every signed-in user; scores, recommendations, packages, tracker state, approval, interview evidence, Career Growth aggregates, analytics events, and saved searches are not.
 - You can delete your account from Settings. That removes owner-scoped private data and revokes sessions. It does not delete the shared job catalog.
+- Vulnerability reports: see [`.github/SECURITY.md`](./.github/SECURITY.md).
 
 ## Setup
 
@@ -138,8 +139,10 @@ Requires **Python 3.11+** and **Node.js 20+**.
 ### Backend
 
 ```bash
-python3.11 -m venv .venv
+python -m venv .venv
 ```
+
+(`python3.11 -m venv .venv` is fine if that is how Python 3.11 is named on the machine.)
 
 macOS / Linux:
 
@@ -216,27 +219,33 @@ left unchanged. Do not set `VITE_API_BASE_URL=http://localhost:8000` in
 
 ### Browser extension
 
-The extension is not published. Load it unpacked:
+The extension is not published to the Chrome Web Store. Load it unpacked after a build:
 
-1. Start the backend (`uvicorn backend.main:app --reload`) and approve at least one Greenhouse or Lever application.
-2. Open `chrome://extensions`, enable Developer mode, and **Load unpacked** on `browser-extension/`.
-3. Open the extension side panel on a real posting (or Lever `/apply` page) and fill from approved materials.
-4. Review flagged fields yourself. The extension never submits.
+1. `cd browser-extension && npm install && npm run build`
+2. Start the backend (`python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`) and approve at least one Greenhouse or Lever application.
+3. Open `chrome://extensions`, enable Developer mode, and **Load unpacked** on the `browser-extension/` folder (the folder that contains `manifest.json`, not `dist/`).
+4. Copy the extension id into `.env` as `EXTENSION_ORIGIN=chrome-extension://<id>` and restart the API.
+5. Open the side panel on a real Greenhouse posting or Lever `/apply` page and fill from approved materials.
+6. Review flagged fields, EEO/demographic questions, and terms/privacy yourself. The extension never submits.
 
-See `browser-extension/README.md` for selector and CSP details.
+See `browser-extension/README.md` for selector, CSP, and attachment details.
 
 ## Run
+
+Use the **same hostname** for the UI and API (`127.0.0.1` with `127.0.0.1`, or `localhost` with `localhost`). Mixing them splits the `SameSite=Lax` session cookie.
 
 Terminal 1 — backend:
 
 ```bash
 source .venv/bin/activate
-uvicorn backend.main:app --reload
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-- API: http://localhost:8000
-- Docs: http://localhost:8000/docs
-- Health: http://localhost:8000/health
+Windows PowerShell/cmd: `.venv\Scripts\activate` then the same `python -m uvicorn` command.
+
+- API: http://127.0.0.1:8000
+- Docs: http://127.0.0.1:8000/docs
+- Health: http://127.0.0.1:8000/health
 
 Terminal 2 — frontend:
 
@@ -245,8 +254,7 @@ cd frontend
 npm run dev
 ```
 
-- UI: http://localhost:5173 or http://127.0.0.1:5173
-  (the frontend rewrites a local API origin to whichever hostname you used)
+- UI: http://127.0.0.1:5173 (or http://localhost:5173 if the API was bound to localhost)
 
 ## Tests
 
@@ -297,20 +305,20 @@ python scripts/live_ollama_gemini_check.py
 
 ## Two-developer Git workflow
 
-Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen; remaining work is release-gate QA and blocker fixes only.
+Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen. Certification through A9 and the Phase 6 adversarial audit is complete. Remaining public release work is tagging v1.0.0 — see `docs/V1_RELEASE_CHECKLIST.md`. Do not tag from a docs-only pass.
 
 ## Demo path
 
 A recruiter can follow the product without extra tooling:
 
 1. Sign up
-2. Complete Profile (resume + at least one target role)
+2. Complete Profile (identity + grounded evidence + at least one target role)
 3. Discover → Find Jobs
 4. Analyze a listing (Match / Evidence)
-5. Prepare materials, review, and approve
+5. Prepare materials, review eligibility, and approve
 6. Track status
 
-Optional supporting destinations: Career Growth, Interview Coach on Job Detail, Resume library, Chrome extension (never submits).
+Optional: Career Growth, Analytics, Interview Coach on Job Detail, Resume library, saved searches (in-app only), follow-up `.ics` / Google Calendar URL, Chrome extension on Greenhouse/Lever (never submits).
 
 ## Useful API routes
 
@@ -339,7 +347,10 @@ Optional supporting destinations: Career Growth, Interview Coach on Job Detail, 
 | `GET` | `/api/extension/autofill` | Browser extension field values |
 | `GET` | `/api/applications` | Tracker list (read-only) |
 | `GET`/`PATCH` | `/api/applications/{job_id}/tracking` | Explicit tracker updates, including optional follow-up date |
+| `GET` | `/api/applications/{job_id}/reminder.ics` | Owner-only follow-up calendar file (no calendar OAuth) |
 | `GET` | `/api/dashboard/summary` | Real stored metrics |
+| `GET` | `/api/analytics/summary` | Owner-only conversion funnel (read-only) |
+| `GET`/`POST` | `/api/saved-searches` | Saved searches (create requires profile readiness; no email) |
 | `GET` | `/api/career-growth` | Read-only Skills Gap / Career Growth from stored evidence |
 | `GET` | `/api/resume-versions` | Owner-scoped immutable resume version summaries |
 | `GET` | `/api/resume-versions/{version_id}` | Historical resume version detail (no hashes or raw snapshot) |

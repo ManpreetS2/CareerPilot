@@ -1,5 +1,7 @@
 # Extension side-panel v2 audit
 
+> Historical working notes from an earlier branch. Not current product truth. See `README.md`, `docs/AI_REPO_MAP.md`, `docs/V1_RELEASE_CHECKLIST.md`, and `browser-extension/README.md`.
+
 Stacked on PR #30 (`feat/jobs-workspace-v2`). This branch must not rewrite Fit V2, materials generation, or the injected `fillFormInPage` fill engine except for the EEO/no-submit safety rules.
 
 ## What already works

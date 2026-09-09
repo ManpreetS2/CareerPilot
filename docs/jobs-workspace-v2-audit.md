@@ -1,5 +1,7 @@
 # Jobs Workspace V2 audit
 
+> Historical working notes from an earlier branch. Not current product truth. See `README.md`, `docs/AI_REPO_MAP.md`, and `docs/V1_RELEASE_CHECKLIST.md`.
+
 Stacked on PR #29 (`feat/full-job-requirements-foundation` @ `23cb46037e262b3c424db6fea85c6e7d08a2ca24`).
 This is a product/UX/search branch. It must not rewrite Fit V2, requirement extraction, materials, form-fill, or the extension runtime.
 

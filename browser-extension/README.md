@@ -29,16 +29,20 @@ that with something that's actually useful to leave open while browsing.
 
 1. Click the extension's toolbar icon to open the side panel — it stays
    open beside the page as you browse and switch tabs.
-2. The panel asks CareerPilot's backend (`localhost:8000`) whether the
-   active tab's URL matches a job it's seen, and if so, its fit score and
-   materials status. Switching tabs re-checks automatically.
+2. The panel asks CareerPilot's backend (`http://127.0.0.1:8000` by default)
+   whether the active tab's URL matches a job it's seen, and if so, its
+   fit score and materials status. Switching tabs re-checks automatically.
+   Keep the API hostname aligned with the web app so the session cookie
+   stays valid (`127.0.0.1` vs `localhost`).
 3. On a real Greenhouse or Lever application page with an **approved**
-   application, click **Fill this page** to inject the fill (`chrome.scripting.executeScript`),
-   which sets each matched field's value directly — the same
-   native-setter-plus-event-dispatch technique needed for React-controlled
-   inputs to actually register the change, not just cosmetically show it.
-4. Anything it can't confidently map (resume upload, custom questions, a
-   missing candidate field) is listed in the panel instead of guessed.
+   application, click **Fill this page**. The injected fill sets matched
+   identity and contact fields. It also tries to attach the owned resume
+   version to a recognized Resume/CV file input and then verifies the
+   real page attachment. A matching filename on the page is not enough.
+   If the ATS blocks programmatic attach, the panel tells you to upload
+   the file yourself.
+4. EEO / demographic questions, terms/privacy acknowledgements, and
+   custom/unknown fields stay listed for you. CareerPilot does not fill them.
 5. Nothing is ever submitted. You review the filled form and send it
    yourself.
 
@@ -65,7 +69,10 @@ This isn't published to the Chrome Web Store — load it as an unpacked
 extension:
 
 1. Build it first (see above).
-2. Make sure the CareerPilot backend is running (`uvicorn backend.main:app --reload`).
+2. Make sure the CareerPilot backend is running
+   (`python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`).
+   Put `EXTENSION_ORIGIN=chrome-extension://<id>` in the API `.env` after
+   the first load so CORS accepts the side panel.
 3. Open `chrome://extensions` in Chrome.
 4. Turn on **Developer mode** (top-right toggle).
 5. Click **Load unpacked** and select this `browser-extension/` folder.

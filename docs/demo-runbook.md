@@ -1,25 +1,58 @@
-# CareerPilot demo runbook (preview database only)
+# CareerPilot demo runbook
 
-Use `sqlite:///./data/careerpilot-demo-preview.db`. Never run this against `data/careerpilot.db`.
+Local/self-hostable demo. Prefer an isolated SQLite URL. Never run destructive
+QA against `data/careerpilot.db`.
 
-## Fresh preview
+Canonical product path: **Profile → Discover → Analyze → Prepare → Track**.
 
-1. Confirm `.env` `DATABASE_URL` points at the preview file.
-2. Start API without `--reload` on Windows: `python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`
-3. Start frontend: `npm run dev` in `frontend/`
-4. Sign in as the preview account.
-5. Resume upload → grounded candidate profile.
-6. Find Jobs. Existing listings stay visible. Progress ends only when the API returns.
-7. List rows show **Potential Match** until a job has `score_kind=verified`.
-8. Open one software/data intern that CareerPilot verified. Confirm Verified Fit %, eligibility, and original posting text still visible.
-9. Open or fixture a final-year/recent-grad posting the candidate does not satisfy. Confirm Likely ineligible and not Strong Match.
-10. Prepare Application only after reviewing eligibility. CareerPilot never submits.
-11. Interview prep stays on Job Detail.
-12. Autofill is review-only / no-submit.
+## Start
 
-## Rollback
+1. Copy `.env.example` to `.env`. For a disposable demo, point `DATABASE_URL` at a temp/copy file (see `scripts/make_temp_qa_db.py`). Leave `COOKIE_SECURE=false` for local http.
+2. Backend (match the UI hostname; prefer `127.0.0.1`):
 
-- Do not merge stacked PRs automatically.
-- PR #28 (`feat/job-discovery-progress`) stays the Fit V2 base.
-- This branch (`feat/full-job-requirements-foundation`) can be abandoned without reverting #28.
-- Preview DB is disposable. Production `data/careerpilot.db` must not be migrated by this work.
+   ```bash
+   python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+   ```
+
+3. Frontend:
+
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
+4. Open `http://127.0.0.1:5173`. Do not mix `localhost` and `127.0.0.1`.
+
+Provider-backed materials, Job Intelligence, resume parse, and interview
+feedback need a configured model (`LLM_PROVIDER_ORDER`, typically Ollama
+and/or `GEMINI_API_KEY`). Fit scoring stays deterministic. Without a reachable
+provider, those generate/extract steps fail honestly.
+
+## Canonical demo path
+
+1. Sign up.
+2. Complete Profile: identity, at least one grounded evidence category, and at least one target role. Incomplete profiles cannot Find Jobs.
+3. Discover → Find Jobs. Existing listings stay visible while scout runs. Progress ends when the API returns.
+4. Analyze a listing (Match / Evidence). Calculate Fit and extract intelligence are explicit; opening Job Detail does not score or generate.
+5. Prepare materials only after reviewing eligibility. Approve with eligibility confirmation. Optional: save an immutable resume version (PDF/DOCX).
+6. Track status. Follow-up dates can export as `.ics` or a Google Calendar URL. CareerPilot does not send email and does not OAuth a calendar account.
+
+Supporting destinations: Interview Coach on Job Detail, Career Growth, Analytics, Resume library, Settings (delete account).
+
+## Browser extension
+
+1. `cd browser-extension && npm install && npm run build`
+2. Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → `browser-extension/` (the folder with `manifest.json`).
+3. Set `EXTENSION_ORIGIN=chrome-extension://<id>` in `.env` and restart the API.
+4. Open a Greenhouse posting or Lever posting/`/apply` page for a job CareerPilot has ingested, with an **approved** package.
+5. Use Fill this page. Review the form. **You** press Submit on the ATS. CareerPilot never submits.
+6. Do not auto-fill EEO/demographic fields or terms/privacy consent. Custom/unknown fields stay manual.
+7. Resume attach is attempted when a Resume/CV input exists. A matching filename on the page is not enough. If attach is blocked, upload the file yourself.
+
+Assisted Fill supports **Greenhouse and Lever only**. Other sources can still appear as tracked jobs.
+
+## Safety
+
+- CareerPilot never submits applications.
+- Tracker `applied` is human-recorded state, not a submission.
+- Preview/demo databases are disposable. Do not migrate or overwrite `data/careerpilot.db` for a demo.
