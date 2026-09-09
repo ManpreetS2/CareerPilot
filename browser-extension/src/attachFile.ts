@@ -366,8 +366,74 @@ export async function attachDocumentInPage(payload: AttachDocumentPayload): Prom
 }
 
 export function verifyResumeAttachmentInPage(filename: string): { attached: boolean } {
+  // Injected into the job page. Must stay self-contained — Chrome does not
+  // serialize this module's other exports with the function.
   const resumeNameRe = /(resume|curriculum vitae|\bcv\b)/i;
   const coverLetterNameRe = /cover[\s_-]*letter/i;
+
+  function isResumeHeading(text: string): boolean {
+    const t = (text || "").replace(/\s+/g, " ").trim();
+    if (!t || t === filename || t.length > 64) return false;
+    if (coverLetterNameRe.test(t)) return false;
+    return resumeNameRe.test(t);
+  }
+
+  function isCoverLetterHeading(text: string): boolean {
+    const t = (text || "").replace(/\s+/g, " ").trim();
+    if (!t || t.length > 64) return false;
+    return coverLetterNameRe.test(t) && !resumeNameRe.test(t);
+  }
+
+  function resumeGroupShowsFilename(): boolean {
+    const filenameNodes = [...document.querySelectorAll("*")].filter((el) => {
+      if (el.tagName === "SCRIPT" || el.tagName === "STYLE") return false;
+      const ownText = [...el.childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => (node.textContent || "").trim())
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (ownText === filename) return true;
+      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+      return el.children.length === 0 && text === filename;
+    });
+    for (const node of filenameNodes) {
+      let ancestor: Element | null = node;
+      for (let i = 0; i < 8 && ancestor; i += 1) {
+        const labelledBy = ancestor.getAttribute("aria-labelledby");
+        const labelled = labelledBy ? document.getElementById(labelledBy)?.textContent || "" : "";
+        const ariaLabel = ancestor.getAttribute("aria-label") || "";
+        if (isCoverLetterHeading(labelled) || isCoverLetterHeading(ariaLabel)) break;
+        if (isResumeHeading(labelled) || isResumeHeading(ariaLabel)) return true;
+        let sibling = ancestor.previousElementSibling;
+        let coverLetterSibling = false;
+        while (sibling) {
+          const siblingText = (sibling.textContent || "").replace(/\s+/g, " ").trim();
+          if (isCoverLetterHeading(siblingText)) {
+            coverLetterSibling = true;
+            break;
+          }
+          if (isResumeHeading(siblingText)) return true;
+          sibling = sibling.previousElementSibling;
+        }
+        if (coverLetterSibling) break;
+        if (ancestor.matches(".file-upload, [role='group']")) {
+          const headingEl =
+            ancestor.querySelector("label, legend, [id*='upload-label']") ||
+            [...ancestor.querySelectorAll("span, p, div")].find((el) => {
+              const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+              return Boolean(text) && text !== filename && !text.includes(filename);
+            });
+          const heading = (headingEl?.textContent || ancestor.getAttribute("aria-label") || "").trim();
+          if (isCoverLetterHeading(heading)) break;
+          if (isResumeHeading(heading)) return true;
+        }
+        ancestor = ancestor.parentElement;
+      }
+    }
+    return false;
+  }
+
   const inputs = [...document.querySelectorAll<HTMLInputElement>("input[type='file']")];
   for (const input of inputs) {
     const self = `${input.name} ${input.id} ${input.getAttribute("aria-label") || ""}`;
@@ -390,7 +456,7 @@ export function verifyResumeAttachmentInPage(filename: string): { attached: bool
   // unrelated page copy. Session ownership of the attach is enforced by
   // the caller (this attempt assigned File/DataTransfer, or this
   // side-panel session last attached this resume version).
-  return { attached: resumeGroupShowsExactFilename(filename) };
+  return { attached: resumeGroupShowsFilename() };
 }
 
 function isResumeHeadingText(text: string, filename: string): boolean {

@@ -334,6 +334,7 @@ owned ResumeVersion
 - never use previous tab/job's resume version;
 - a displayed filename that merely matches is not enough; the extension only trusts attachment state it owns/verified for that resume version/session.
 - If this attempt assigned File/DataTransfer onto a Resume/CV input and the ATS then removes that input, a Resume/CV-group filename display of that exact file is confirmation — cover-letter groups and unrelated page copy are not.
+- `attachDocumentInPage` and `verifyResumeAttachmentInPage` are injected via `chrome.scripting.executeScript` and must stay self-contained; outer module helpers are not serialized into the page.
 **Tests** `browser-extension/tests/attachFile.test.ts`, `browser-extension/tests/sidepanel.test.ts`
 ## 21. EEO / Manual-Only Safety
 **Files** `browser-extension/src/field-status.ts`, `fillForm.ts`, backend `form_fill_service.py`.

@@ -233,6 +233,13 @@ describe("resume attachment", () => {
     expect(result.reason).toMatch(/manually/i);
   });
 
+  it("verifyResumeAttachmentInPage is self-contained for chrome.scripting injection", () => {
+    const source = verifyResumeAttachmentInPage.toString();
+    expect(source).not.toMatch(/resumeGroupShowsExactFilename/);
+    expect(source).toContain("aria-labelledby");
+    expect(source).toContain("file-upload");
+  });
+
   it("verifies attachment when the ATS removed the input and shows a filename display instead", () => {
     // Confirmed live on Greenhouse: once attached, the raw file input is
     // removed from the DOM and replaced by a text display of the filename.
