@@ -1,5 +1,7 @@
 # Developer B UI handoff — Jobs and Job Detail
 
+> Historical working notes from an earlier branch. Not current product truth. See `README.md` and `docs/AI_REPO_MAP.md`.
+
 This document is the target visual integration for Developer B. Developer A’s UI overhaul did **not** rewrite job discovery, verification, ATS/form-fill, or the Chrome extension.
 
 Jobs now share the CareerPilot shell, tokens, compact-list + desktop preview layout, internships/full-time/both title filter, and previous/next job navigation. Discovery adapters, verification, and ATS/form-fill remain Developer B’s lane.

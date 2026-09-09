@@ -1,9 +1,9 @@
 # CareerPilot AI Repository Map
 > Fast navigation for Cursor/AI agents. Read this before broad code search.
 >
-> **Source snapshot:** GitHub `main` at `7a80559d88e52bc5c9fa5e004c02eabdde200520` (`#80` map/QA hardening on `#82` public/auth polish, `#84` / `#78` analytics, `#81` calendar export, and `#83` saved searches). Source code wins if this map and the repository disagree.
+> **Source snapshot:** certified product SHA `7b6c3ee100ca4fe6399ac29441bece8df71783c7` (A8 Greenhouse/Lever, A9 isolation/deletion, Phase 6 adversarial audit). This file may lag the docs-only commit that follows that SHA. Source code wins if this map and the repository disagree.
 >
-> **Open, unmerged PRs (not current-main behavior):** PR `#79` is OPEN / UNMERGED pending live Greenhouse/Lever A8 work. Do not treat that branch as shipped source.
+> A8/A9/Phase 6 are **merged and certified**. There is no open A8 ATS branch. Do not treat historical PRs (`#79`, `#80`, `#82`, …) as current blockers.
 ## 1. Fast Task → Files Index
 | Task / symptom | Start here | Primary tests |
 | --- | --- | --- |
@@ -403,7 +403,7 @@ existing save/materials/approval/tracker mutations
 - Public: `/`, `/login`, `/signup`, `/privacy`
 - Protected: `/onboarding`, `/dashboard`, `/profile`, `/jobs`, `/jobs/:jobId`, `/jobs/:jobId/prepare`, `/analyze`, `/prepare`, `/track`, `/growth`, `/analytics`, `/resume`, `/resume/:versionId`, `/settings`.
 - `/applications` aliases Track; `/applications/:jobId` redirects to Prepare.
-- Shipped `#82` public/auth owners: `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `SignalLattice.tsx`, `globe-engine.ts`, `frontend/src/index.css` (plus remaining `HeroAtmosphere.tsx`). Auth/session semantics unchanged; dark/light is intentional; reduced motion is supported; decoration never blocks clicks/forms; black/white/violet design tokens are authoritative.
+- Public/auth UI owners: `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `SignalLattice.tsx`, `globe-engine.ts`, `frontend/src/index.css` (plus remaining `HeroAtmosphere.tsx`). Auth/session semantics unchanged; dark/light is intentional; reduced motion is supported; decoration never blocks clicks/forms; black/white/violet design tokens are authoritative.
 - For meaningful UI redesigns, use approved references/prototype direction before editing production UI.
 ## 27. Theme / Responsive / Reduced Motion
 - `frontend/src/lib/theme.tsx`
@@ -423,7 +423,7 @@ existing save/materials/approval/tracker mutations
 - Security: `.github/workflows/security.yml`
 - Manual: `docs/V1_RELEASE_CHECKLIST.md`, `docs/demo-runbook.md`
 - Broad checks: `scripts/test_mvp_foundation_browser.py`, `scripts/test_fit_scoring_matrix.py`, `scripts/test_candidate_profile_matrix.py --synthetic`
-- Automated tests do not replace live browser/ATS checks. Do not tag/publish with a known A8/A9 release blocker.
+- A8 (Chrome 152 Greenhouse + Lever), A9 (isolation/account deletion), and Phase 6 (adversarial audit) have passed. Automated tests still do not replace a live ATS re-check after fill or attachment code changes. Remaining public release action is Phase 8: tag `v1.0.0` and GitHub Release.
 ## 30. Core Data Flows
 **Profile → Discover**
 

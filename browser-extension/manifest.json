@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CareerPilot",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "description": "Native Chrome side panel companion for Greenhouse and Lever job pages. Shows Potential or Verified Match, eligibility, and safe autofill preview. Never submits.",
   "action": {
     "default_title": "CareerPilot"
