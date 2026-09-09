@@ -41,7 +41,7 @@ Supporting destinations: Interview Coach on Job Detail, Career Growth, Analytics
 
 ## Browser extension
 
-1. `cd browser-extension && npm install && npm run build`
+1. `cd browser-extension && npm ci && npm run build`
 2. Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → `browser-extension/` (the folder with `manifest.json`).
 3. Set `EXTENSION_ORIGIN=chrome-extension://<id>` in `.env` and restart the API.
 4. Open a Greenhouse posting or Lever posting/`/apply` page for a job CareerPilot has ingested, with an **approved** package.

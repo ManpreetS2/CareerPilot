@@ -38,7 +38,8 @@ that with something that's actually useful to leave open while browsing.
    application, click **Fill this page**. The injected fill sets matched
    identity and contact fields. It also tries to attach the owned resume
    version to a recognized Resume/CV file input and then verifies the
-   real page attachment. A matching filename on the page is not enough.
+   real page attachment after this attempt. A matching filename alone is
+   not proof. An unrelated or Cover Letter same-named filename is not proof.
    If the ATS blocks programmatic attach, the panel tells you to upload
    the file yourself.
 4. EEO / demographic questions, terms/privacy acknowledgements, and
@@ -50,7 +51,7 @@ that with something that's actually useful to leave open while browsing.
 
 ```bash
 cd browser-extension
-npm install
+npm ci
 npm run build
 ```
 

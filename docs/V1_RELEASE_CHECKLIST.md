@@ -1,9 +1,12 @@
 # CareerPilot v1 release checklist
 
-Certification through A9 and the Phase 6 adversarial audit is complete on
-`7b6c3ee100ca4fe6399ac29441bece8df71783c7`. Remaining public release work is
-**tag `v1.0.0` and create the GitHub Release** (Phase 8). Do not tag from this
-docs snapshot until Phase 8.
+## Certification provenance
+
+- **Certified runtime/product SHA:** `7b6c3ee100ca4fe6399ac29441bece8df71783c7` — A8 (Chrome 152 Greenhouse + Lever), A9 isolation/deletion, and Phase 6 adversarial audit. Fill, attachment, no-submit, EEO/manual fields, auth/session, and account deletion were certified on this SHA.
+- **Phase 7 docs/version-metadata SHA:** `3196e18a8f1fb73795da26e5727311bca0c2cd6a` — PR #87. Sets explicit package/manifest/FastAPI versions to 1.0.0. Does not change ATS identity, fill/attachment, auth, grounding, or isolation behavior.
+- Last-mile pre-tag edits are documentation/release-truth only. Tag the `main` merge commit after this checklist is on `main` and CI/Gitleaks are green on **that** SHA. Do not attribute A8/A9 to untested runtime.
+
+Remaining public release work is **tag `v1.0.0` and create the GitHub Release** (Phase 8).
 
 Automation (pytest, frontend/extension tests, CI, Gitleaks) cannot replace
 live ATS or privacy QA. Re-run those only if fill, attachment, session, or
@@ -20,18 +23,21 @@ deletion behavior changes.
 | A5 | PASS | |
 | A6 | PASS | |
 | A7 | PASS | |
-| A8 | PASS | Chrome 152, live Greenhouse + Lever. No Submit. EEO/terms/privacy remain manual. Resume attachment is verified on the page, not by filename match. |
+| A8 | PASS | Chrome 152, live Greenhouse + Lever. No Submit. EEO/terms/privacy remain manual. Resume attachment is verified from the live Resume/CV input or Resume/CV-group widget after the current attachment attempt. A matching filename alone is not proof. An unrelated or Cover Letter same-named filename is not proof. |
 | A9 | PASS | Session isolation, IDOR fail-closed, account deletion, generic login errors. Isolated/temp SQLite only. |
-| Phase 6 adversarial audit | PASS | Cross-feature try-to-break on the SHA above. No open P0/P1. |
+| Phase 6 adversarial audit | PASS | Cross-feature try-to-break on the certified runtime SHA. No open P0/P1. |
+| Phase 7 release-truth | PASS | Docs/version metadata on `3196e18a…`. |
 
 ## Remaining release action
 
 1. Confirm this checklist and `README.md` still match shipped source.
 2. Confirm CI and Full-history Gitleaks are green on the SHA to tag.
-3. Tag `v1.0.0`.
+3. Tag `v1.0.0` on that exact `main` SHA.
 4. Create the GitHub Release.
 
 Do not tag with an open P0/P1. Do not claim a hosted SaaS. Do not claim every ATS is supported.
+
+Dependabot dependency-floor/group updates opened after the release candidate are **post-v1** unless they fix a current high/critical issue on the shipped tree.
 
 ## Release invariants
 
@@ -40,7 +46,7 @@ Do not tag with an open P0/P1. Do not claim a hosted SaaS. Do not claim every AT
 - EEO / demographic fields stay manual. Terms/privacy/consent stay manual.
 - Materials stay grounded, or are visibly marked as an explicit `grounding_override`.
 - Approval requires explicit human eligibility confirmation and does not mark tracker `applied`.
-- Resume attachment is truthful: a matching filename alone is not proof.
+- Resume attachment is truthful: verification uses the live Resume/CV input/widget after this attempt. A matching filename alone is not proof. Cover Letter or unrelated same-named text is not proof.
 - Greenhouse/Lever identity uses ATS posting identity, never fuzzy title/company matching.
 - User-scoped rows (including analytics events, saved searches, and resume-version files) never leak across users.
 - Account deletion removes owner-scoped private data and sessions; shared `JobRecord` remains.
