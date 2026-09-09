@@ -14,6 +14,28 @@ function workLabel(job: Job): string | null {
   return chipLabel(job.work_mode);
 }
 
+function normalizeMetaValue(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** Join visible job metadata, dropping adjacent duplicates such as Remote · Remote. */
+export function formatJobCardMeta(parts: Array<string | null | undefined>): string {
+  const visible: string[] = [];
+  for (const part of parts) {
+    if (!part) continue;
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const previous = visible[visible.length - 1];
+    if (previous && normalizeMetaValue(previous) === normalizeMetaValue(trimmed)) continue;
+    visible.push(trimmed);
+  }
+  return visible.join(" · ");
+}
+
+export function selectJobCardLabel(title: string, company: string): string {
+  return `Select ${title} at ${company}`;
+}
+
 export function JobCard({
   job,
   match,
@@ -43,7 +65,13 @@ export function JobCard({
       )}
     >
       <div className="flex items-start gap-3">
-        <button type="button" className="flex min-w-0 flex-1 items-start gap-3 text-left" onClick={onSelect} aria-pressed={selected}>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-start gap-3 text-left"
+          onClick={onSelect}
+          aria-pressed={selected}
+          aria-label={selectJobCardLabel(job.title, job.company)}
+        >
           <div
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-semibold text-primary"
             aria-hidden
@@ -54,7 +82,7 @@ export function JobCard({
             <p className="wrap-anywhere font-semibold">{job.title}</p>
             <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {[job.location || null, workLabel(job), employment, job.salary || null].filter(Boolean).join(" · ")}
+              {formatJobCardMeta([job.location || null, workLabel(job), employment, job.salary || null])}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <SourceBadge source={job.source} />
