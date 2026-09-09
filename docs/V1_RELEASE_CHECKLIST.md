@@ -4,9 +4,9 @@
 
 - **Certified runtime/product SHA:** `7b6c3ee100ca4fe6399ac29441bece8df71783c7` — A8 (Chrome 152 Greenhouse + Lever), A9 isolation/deletion, and Phase 6 adversarial audit. Fill, attachment, no-submit, EEO/manual fields, auth/session, and account deletion were certified on this SHA.
 - **Phase 7 docs/version-metadata SHA:** `3196e18a8f1fb73795da26e5727311bca0c2cd6a` — PR #87. Sets explicit package/manifest/FastAPI versions to 1.0.0. Does not change ATS identity, fill/attachment, auth, grounding, or isolation behavior.
-- Last-mile pre-tag edits are documentation/release-truth only. Tag the `main` merge commit after this checklist is on `main` and CI/Gitleaks are green on **that** SHA. Do not attribute A8/A9 to untested runtime.
+- Last-mile pre-tag edits were documentation/release-truth only. The annotated `v1.0.0` tag is `b73a983ed3605d498aa90070c3b5f786a73bc525`. Do not attribute A8/A9 to untested runtime. Do not move the tag.
 
-Remaining public release work is **tag `v1.0.0` and create the GitHub Release** (Phase 8).
+**Phase 8 complete.** Annotated tag `v1.0.0` points at `b73a983ed3605d498aa90070c3b5f786a73bc525`. GitHub Release: https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0. Do not move that tag. Showcase assets live in `docs/showcase/` and do not recertify runtime.
 
 Automation (pytest, frontend/extension tests, CI, Gitleaks) cannot replace
 live ATS or privacy QA. Re-run those only if fill, attachment, session, or
@@ -30,12 +30,9 @@ deletion behavior changes.
 
 ## Remaining release action
 
-1. Confirm this checklist and `README.md` still match shipped source.
-2. Confirm CI and Full-history Gitleaks are green on the SHA to tag.
-3. Tag `v1.0.0` on that exact `main` SHA.
-4. Create the GitHub Release.
+Phase 8 tagging is done. Do not recreate or move `v1.0.0`.
 
-Do not tag with an open P0/P1. Do not claim a hosted SaaS. Do not claim every ATS is supported.
+Post-tag work is documentation/showcase and separately triaged maintenance (`docs/showcase/post-v1-maintenance-triage.md`). Do not claim a hosted SaaS. Do not claim every ATS is supported.
 
 Dependabot dependency-floor/group updates opened after the release candidate are **post-v1** unless they fix a current high/critical issue on the shipped tree.
 

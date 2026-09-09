@@ -43,6 +43,7 @@
 | CORS/CSRF/security headers | `backend/main.py`, `core/csrf.py`, `core/security_headers.py`, `core/config.py` | security + CORS browser checks |
 | CI/release gate | `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `docs/V1_RELEASE_CHECKLIST.md`, `docs/CI_SUPPLY_CHAIN.md` | CI + Gitleaks + manual checklist |
 | Python dependency policy | `docs/PYTHON_DEPENDENCY_REPRODUCIBILITY.md` | n/a |
+| Showcase screenshots / demo seed | `docs/showcase/README.md`, `scripts/seed_showcase_demo.py` | `tests/test_seed_showcase_demo.py` |
 ## 2. Top-Level Architecture
 
 ```text
