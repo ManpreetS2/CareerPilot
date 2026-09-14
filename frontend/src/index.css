@@ -731,6 +731,11 @@ body {
     color: var(--foreground);
     font-style: normal;
   }
+  .jobs-search-input:focus-visible,
+  .job-card-select:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
   .label {
     @apply mb-1.5 block text-sm font-medium text-[var(--foreground)];
   }

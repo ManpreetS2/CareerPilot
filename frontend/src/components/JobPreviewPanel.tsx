@@ -5,6 +5,7 @@ import { scoutedTimeAgo, SourceBadge } from "./SourceBadge";
 import { StatusBadge } from "./StatusBadge";
 import { Glass } from "./ui/glass";
 import { ScoreOrb } from "./signature/ScoreOrb";
+import { formatJobCardMeta } from "./JobCard";
 import { chipLabel } from "../lib/search-intent";
 import { cn } from "../lib/cn";
 import type { Job, MatchScore } from "../lib/types";
@@ -42,7 +43,7 @@ export function JobPreviewPanel({
           <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
           <h2 className="wrap-anywhere font-display text-2xl font-semibold">{job.title}</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            {[job.location || "Location not stated", work, employment].filter(Boolean).join(" · ")}
+            {formatJobCardMeta([job.location || "Location not stated", work, employment])}
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusBadge status={job.status} />
