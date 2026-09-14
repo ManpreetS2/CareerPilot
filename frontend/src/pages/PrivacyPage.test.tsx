@@ -28,5 +28,7 @@ describe("PrivacyPage", () => {
     expect(screen.getByText(/Career Growth \/ Skills Gap insights are computed/i)).toBeInTheDocument();
     expect(screen.getByText(/does not claim end-to-end encryption, SOC 2, HIPAA/i)).toBeInTheDocument();
     expect(screen.queryByText(/we are SOC 2 certified/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/zero-knowledge/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/server cannot decrypt/i)).not.toBeInTheDocument();
   });
 });

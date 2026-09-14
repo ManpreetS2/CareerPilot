@@ -4,12 +4,12 @@ import { useReducedMotion } from "motion/react";
 const ENCRYPTION_TEXT = [
   "iVBORw0KGgoAAAANSUhEUgAABjkAAAQqCAYAAACqkC9hAAAACXBIWXMAABYlAAAWJQFJU",
   "2VyaWFsaXplZCBkYXRhOiBwcm9maWxlLCBleHBlcmllbmNlLCBza2lsbHMsIGxvY2F0aW9u",
-  "AES-256-GCM encrypted profile data stored locally with end-to-end encryption",
+  "Local SQLite stores account and application data on the machine running the API",
   "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI",
   "UmVzdW1lIG1ldGFkYXRhOiBlZHVjYXRpb24sIGNlcnRpZmljYXRpb25zLCBwcm9qZWN0cw",
-  "TLS 1.3 transport layer security for all API communications and data transfer",
+  "Self-hostable copilot: private records stay in your CareerPilot deployment",
   "dXNlcl9pZDogYWJjZGVmMTIzNDU2LCByb2xlX3R5cGU6ICJlbmdpbmVlciIsIGxvY2F0aW9u",
-  "Zero-knowledge architecture: server cannot decrypt user profile or resume data",
+  "You review the ATS form and press Submit; CareerPilot never auto-submits",
 ];
 
 export function EncryptionSection() {
@@ -64,9 +64,9 @@ export function EncryptionSection() {
           Your resume stays protected
         </h2>
         <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
-          Grounded insights. Private by design. Your documents and profile data stay secure with
-          end-to-end encryption. We never share your information with employers until you choose to
-          apply.
+          Grounded insights. Private by design. CareerPilot is local and self-hostable: your
+          documents and profile stay in the deployment you run. CareerPilot never submits an
+          application — you review the ATS form and press Submit.
         </p>
       </div>
     </section>
