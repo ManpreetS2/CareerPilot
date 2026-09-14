@@ -119,11 +119,71 @@ describe("auth pages", () => {
     expect(document.querySelector(".pointer-halo")).toBeNull();
   });
 
-  it("shows the dotted globe beside the login card", async () => {
+  it("keeps login free of globe and lattice decoration", async () => {
     renderApp("/login");
     expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
-    expect(screen.getAllByTestId("dotted-globe").length).toBeGreaterThan(0);
-    expect(screen.getAllByTestId("signal-lattice").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("dotted-globe")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("signal-lattice")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Grounded job search. Human-approved applications.").length).toBeGreaterThan(0);
+  });
+
+  it("lets a visitor move between login and signup", async () => {
+    renderApp("/login");
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "Sign up" }));
+    expect(await screen.findByRole("heading", { name: "Create your account" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "Log in" }));
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
+  });
+
+  it("disables login submit while the request is in flight", async () => {
+    let finish: (value: typeof testUser) => void = () => undefined;
+    vi.mocked(api.login).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderApp("/login");
+    await userEvent.type(screen.getByLabelText("Email"), testUser.email);
+    await userEvent.type(screen.getByLabelText("Password"), SECRET_PASSWORD);
+    await userEvent.click(screen.getByRole("button", { name: "Log in" }));
+    const pending = await screen.findByRole("button", { name: "Logging in…" });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute("aria-busy", "true");
+    finish(testUser);
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
+  }, 15_000);
+
+  it("sends a signed-in visitor away from login to the dashboard", async () => {
+    vi.mocked(api.me).mockResolvedValue(testUser);
+    renderApp("/login");
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Log in" })).not.toBeInTheDocument();
+  });
+
+  it("shows the backend-unreachable login error without leaking the password", async () => {
+    vi.mocked(api.login).mockRejectedValue(
+      new ApiClientError(0, "Cannot reach backend at http://127.0.0.1:8000. Start it with: uvicorn backend.main:app --reload"),
+    );
+    renderApp("/login");
+    await userEvent.type(screen.getByLabelText("Email"), testUser.email);
+    await userEvent.type(screen.getByLabelText("Password"), SECRET_PASSWORD);
+    await userEvent.click(screen.getByRole("button", { name: "Log in" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't sign in");
+    expect(alert).toHaveTextContent("Cannot reach backend");
+    expect(alert).not.toHaveTextContent(SECRET_PASSWORD);
+    expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
+  }, 15_000);
+
+  it("blocks signup when the password is shorter than eight characters", async () => {
+    renderApp("/signup");
+    await userEvent.type(screen.getByLabelText("Email"), testUser.email);
+    await userEvent.type(screen.getByLabelText("Password"), "short");
+    await userEvent.click(screen.getByRole("button", { name: "Sign up" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Password must be at least 8 characters.");
+    expect(api.signup).not.toHaveBeenCalled();
   });
 
   it("keeps invalid credentials on /login with the sanitized backend message", async () => {

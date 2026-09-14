@@ -1,11 +1,9 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "motion/react";
 import { ArrowRight, CheckCircle2, Lock, Sparkles } from "lucide-react";
 import { HeroAtmosphere } from "../components/HeroAtmosphere";
 import { EncryptionSection } from "../components/EncryptionSection";
-import { DottedGlobe } from "../components/DottedGlobe";
-import { SignalLattice } from "../components/SignalLattice";
+import { PublicStage } from "../components/PublicStage";
 import { Glass } from "../components/ui/glass";
 import { APP_NAME } from "../lib/config";
 import { useTheme } from "../lib/theme";
@@ -35,50 +33,42 @@ const capabilities = [
 
 export function LandingPage() {
   const { reducedMotion: reduce } = useTheme();
-  const [desktop, setDesktop] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches,
-  );
-
-  useEffect(() => {
-    const media = window.matchMedia("(min-width: 1024px)");
-    const sync = () => setDesktop(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
 
   return (
-    <div className="cp-atmosphere relative min-h-screen overflow-x-clip bg-background">
+    <div className="cp-atmosphere public-shell relative min-h-screen overflow-x-clip bg-background">
+      <a href="#main" className="skip-link">
+        Skip to content
+      </a>
       <section className="relative overflow-x-clip">
         <header className="safe-pad relative z-20 mx-auto flex max-w-7xl items-center justify-between gap-2 py-5 sm:px-6 md:gap-4 lg:px-8">
           <div className="flex min-w-0 items-center gap-2">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
               <span className="text-sm font-bold text-primary-foreground">CP</span>
             </div>
-            <span className="font-display text-lg font-semibold tracking-tight text-foreground">
+            <span className="truncate font-display text-lg font-semibold tracking-tight text-foreground">
               {APP_NAME}
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1.5 md:gap-3">
             <Link
               to="/login"
-              className="whitespace-nowrap rounded-xl px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground md:px-4"
+              className="public-focus whitespace-nowrap rounded-xl px-2.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground md:px-4"
             >
               Sign In
             </Link>
             <Link
               to="/signup"
-              className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-r from-primary to-accent px-3 py-2 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-shadow hover:shadow-xl hover:shadow-primary/30 md:gap-2 md:px-5"
+              className="public-focus inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-r from-primary to-accent px-3 py-2 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-shadow hover:shadow-xl hover:shadow-primary/30 md:gap-2 md:px-5"
             >
               Get Started
-              <ArrowRight className="h-4 w-4 shrink-0" />
+              <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
             </Link>
           </div>
         </header>
 
         <HeroAtmosphere />
 
-        <div className="safe-pad relative z-10 mx-auto grid max-w-7xl items-center gap-4 px-4 pb-6 pt-2 sm:px-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(380px,0.95fr)] lg:gap-8 lg:px-8 lg:pb-8 lg:pt-2">
+        <div className="safe-pad relative z-10 mx-auto grid max-w-7xl items-center gap-8 px-4 pb-10 pt-2 sm:px-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(20rem,0.95fr)] lg:gap-10 lg:px-8 lg:pb-12 lg:pt-4">
           <div className="max-w-xl text-left">
             <motion.div
               initial={reduce ? false : { opacity: 0, y: 16 }}
@@ -86,18 +76,18 @@ export function LandingPage() {
               transition={{ duration: 0.45 }}
               className="mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-foreground/5 px-4 py-2"
             >
-              <Sparkles className="h-4 w-4 text-accent" />
+              <Sparkles className="h-4 w-4 text-accent" aria-hidden />
               <span className="text-sm font-medium text-foreground/90">Grounded career navigation</span>
             </motion.div>
 
             <motion.h1
-              className="hero-fluid max-w-[16ch] font-bold leading-[1.05] tracking-tight text-foreground"
+              className="hero-fluid max-w-[18ch] font-bold leading-[1.05] tracking-tight text-foreground wrap-anywhere"
               initial={reduce ? false : { opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: reduce ? 0 : 0.08 }}
             >
               Find better roles with{" "}
-              <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
+              <span className="whitespace-nowrap bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent">
                 CareerPilot
               </span>
             </motion.h1>
@@ -120,28 +110,25 @@ export function LandingPage() {
             >
               <Link
                 to="/signup"
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-7 py-3.5 text-base font-semibold text-primary-foreground shadow-2xl shadow-primary/30 transition-shadow hover:shadow-primary/45"
+                className="public-focus inline-flex min-h-11 items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-7 py-3.5 text-base font-semibold text-primary-foreground shadow-2xl shadow-primary/30 transition-shadow hover:shadow-primary/45"
               >
                 Get Started Free
-                <ArrowRight className="h-5 w-5" />
+                <ArrowRight className="h-5 w-5" aria-hidden />
               </Link>
               <Link
                 to="/login"
-                className="inline-flex items-center gap-2 rounded-xl border border-border bg-background/70 px-7 py-3.5 text-base font-semibold text-foreground transition-colors hover:bg-foreground/5"
+                className="public-focus inline-flex min-h-11 items-center gap-2 rounded-xl border border-border bg-background/70 px-7 py-3.5 text-base font-semibold text-foreground transition-colors hover:bg-foreground/5"
               >
                 Sign In
               </Link>
             </motion.div>
           </div>
 
-          <div className="hero-globe-frame">
-            <DottedGlobe compact={!desktop} />
-            <SignalLattice className="absolute bottom-[22%] left-[4%]" />
-          </div>
+          <PublicStage />
         </div>
       </section>
 
-      <main className="relative z-10">
+      <main id="main" className="relative z-10" tabIndex={-1}>
         <div className="safe-pad mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <section className="pb-10 pt-2 sm:pb-14">
             <h2 className="mb-4 text-center text-sm font-medium text-muted-foreground sm:text-base">
@@ -151,21 +138,21 @@ export function LandingPage() {
               <div className="grid gap-6 sm:grid-cols-3">
                 <div className="text-center">
                   <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-                    <CheckCircle2 className="h-7 w-7 text-primary" />
+                    <CheckCircle2 className="h-7 w-7 text-primary" aria-hidden />
                   </div>
                   <h3 className="font-semibold text-foreground">Real Data Only</h3>
                   <p className="mt-2 text-sm text-muted-foreground">Parse resume experience that actually exists</p>
                 </div>
                 <div className="text-center">
                   <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-                    <Sparkles className="h-7 w-7 text-primary" />
+                    <Sparkles className="h-7 w-7 text-primary" aria-hidden />
                   </div>
                   <h3 className="font-semibold text-foreground">Smart Matching</h3>
                   <p className="mt-2 text-sm text-muted-foreground">Explainable fit scores you can review</p>
                 </div>
                 <div className="text-center">
                   <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-                    <Lock className="h-7 w-7 text-primary" />
+                    <Lock className="h-7 w-7 text-primary" aria-hidden />
                   </div>
                   <h3 className="font-semibold text-foreground">You're in Control</h3>
                   <p className="mt-2 text-sm text-muted-foreground">Review and approve before anything is sent</p>
@@ -197,8 +184,8 @@ export function LandingPage() {
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent font-semibold text-primary-foreground">
                         {index + 1}
                       </div>
-                      <div>
-                        <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-semibold text-foreground wrap-anywhere">{item.title}</h3>
                         <p className="mt-2 leading-relaxed text-muted-foreground">{item.body}</p>
                       </div>
                     </div>
@@ -209,9 +196,9 @@ export function LandingPage() {
           </section>
 
           <section className="pb-16 sm:pb-20">
-            <Glass variant="floating" className="rounded-3xl p-12 text-center">
+            <Glass variant="floating" className="rounded-3xl p-8 text-center sm:p-12">
               <div className="mx-auto max-w-2xl">
-                <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+                <h2 className="text-3xl font-bold tracking-tight text-foreground wrap-anywhere sm:text-4xl">
                   Ready to navigate your next role?
                 </h2>
                 <p className="mt-4 text-lg text-muted-foreground">
@@ -219,10 +206,10 @@ export function LandingPage() {
                 </p>
                 <Link
                   to="/signup"
-                  className="mt-8 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-10 py-5 text-lg font-semibold text-primary-foreground shadow-2xl shadow-primary/30 transition-shadow hover:shadow-primary/45"
+                  className="public-focus mt-8 inline-flex min-h-11 items-center gap-2 rounded-xl bg-gradient-to-r from-primary to-accent px-10 py-5 text-lg font-semibold text-primary-foreground shadow-2xl shadow-primary/30 transition-shadow hover:shadow-primary/45"
                 >
                   Get Started Free
-                  <ArrowRight className="h-5 w-5" />
+                  <ArrowRight className="h-5 w-5" aria-hidden />
                 </Link>
               </div>
             </Glass>
@@ -234,7 +221,7 @@ export function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 text-center text-sm text-muted-foreground sm:px-6 lg:px-8">
           <p>
             &copy; {new Date().getFullYear()} {APP_NAME}. All rights reserved.{" "}
-            <Link to="/privacy" className="font-medium text-foreground underline-offset-4 hover:underline">
+            <Link to="/privacy" className="public-focus font-medium text-foreground underline-offset-4 hover:underline">
               Privacy
             </Link>
           </p>
