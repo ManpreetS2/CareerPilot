@@ -10,7 +10,14 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
-from backend.db.models import ApplicationPackageRecord, Candidate, JobRecord, User
+from backend.db.models import (
+    ApplicationEventRecord,
+    ApplicationPackageRecord,
+    ApplicationTrackerRecord,
+    Candidate,
+    JobRecord,
+    User,
+)
 from backend.schemas.schemas import ApprovalRequest
 from backend.services.application_service import apply_approval, get_or_generate_application_package, get_stored_application_package
 from tests.mvp_helpers import fake_grounded_generator, insert_grounded_package, seed_materials_prerequisites
@@ -299,6 +306,28 @@ def test_approve_with_eligibility_confirmation_succeeds(isolated_session) -> Non
     assert package.approval_status == "approved"
     assert package.eligibility_confirmed is True
     assert package.eligibility_notes == "all good"
+
+
+def test_approve_message_does_not_treat_form_fill_as_future_work(isolated_session) -> None:
+    job = _job(isolated_session)
+    candidate = _candidate(isolated_session)
+    insert_grounded_package(isolated_session, job, candidate=candidate)
+    result = apply_approval(
+        isolated_session,
+        "manual-abc123",
+        TEST_USER_ID,
+        ApprovalRequest(decision="approved", eligibility_confirmed=True),
+    )
+    message = result.message.lower()
+    assert "once form fill lands" not in message
+    assert "lands" not in message
+    assert "submit" in message
+    assert "auto-submit" not in message
+    assert "automatically" not in message
+    assert isolated_session.query(ApplicationTrackerRecord).filter_by(user_id=TEST_USER_ID).count() == 0
+    events = isolated_session.query(ApplicationEventRecord).filter_by(user_id=TEST_USER_ID).all()
+    assert [event.event_type for event in events] == ["materials_approved"]
+    assert "applied" not in {event.event_type for event in events}
 
 
 def test_reject_does_not_require_eligibility_confirmation(isolated_session) -> None:
@@ -704,6 +733,8 @@ def test_approve_route_with_eligibility_confirmed_returns_200(isolated_client) -
     assert response.status_code == 200
     body = response.json()
     assert body["approval_status"] == "approved"
+    assert "lands" not in body["message"].lower()
+    assert "you still submit" in body["message"].lower()
 
 
 def test_approve_route_rejects_invalid_decision_value(isolated_client) -> None:

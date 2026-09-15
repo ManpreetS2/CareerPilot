@@ -49,7 +49,7 @@ from backend.services.llm_client import (
 logger = logging.getLogger(__name__)
 
 _APPROVAL_MESSAGES = {
-    "approved": "Application package approved. Ready for the next step once Form Fill lands.",
+    "approved": "Application package approved. Materials are ready for your next reviewed step, including assisted Greenhouse or Lever fill. You still submit on the ATS.",
     "edit_requested": "Edit requested. Package remains in review.",
     "rejected": "Application package rejected.",
 }
