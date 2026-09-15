@@ -6,6 +6,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { api } from "../lib/api";
 import { queryKeys } from "../lib/query-keys";
 import { chipLabel } from "../lib/search-intent";
+import { formatJobCardMeta } from "../lib/job-meta";
 import type { SavedSearchItem } from "../lib/types";
 
 export type SavedSearchDraft = {
@@ -33,7 +34,7 @@ function describeCriteria(search: SavedSearchItem): string {
   bits.push(...search.employment_type.map(chipLabel));
   bits.push(...search.work_mode.map(chipLabel));
   if (search.location) bits.push(search.location);
-  return bits.length ? bits.join(" · ") : "All new postings for this search";
+  return formatJobCardMeta(bits) || "All new postings for this search";
 }
 
 export function SavedSearchesPanel({

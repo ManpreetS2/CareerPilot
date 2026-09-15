@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { formatJobCardMeta, JobCard, selectJobCardLabel } from "./JobCard";
+import { JobCard, selectJobCardLabel } from "./JobCard";
 import type { Job } from "../lib/types";
 
 function job(overrides: Partial<Job> = {}): Job {
@@ -19,22 +19,6 @@ function job(overrides: Partial<Job> = {}): Job {
     ...overrides,
   };
 }
-
-describe("formatJobCardMeta", () => {
-  it("deduplicates adjacent equivalent values such as Remote + Remote", () => {
-    expect(formatJobCardMeta(["Remote", "Remote", "Internship"])).toBe("Remote · Internship");
-    expect(formatJobCardMeta([" remote ", "Remote", "Internship"])).toBe("remote · Internship");
-  });
-
-  it("keeps location and a different work mode", () => {
-    expect(formatJobCardMeta(["San Francisco, CA", "Hybrid"])).toBe("San Francisco, CA · Hybrid");
-    expect(formatJobCardMeta(["New York", "On-site"])).toBe("New York · On-site");
-  });
-
-  it("skips unknown and missing values without inventing labels", () => {
-    expect(formatJobCardMeta([null, undefined, "", "Internship"])).toBe("Internship");
-  });
-});
 
 describe("JobCard", () => {
   it("shows Remote once when location and work mode are both Remote", () => {

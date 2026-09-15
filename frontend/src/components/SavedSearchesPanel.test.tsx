@@ -118,6 +118,23 @@ describe("SavedSearchesPanel", () => {
     expect(screen.getByTestId("unseen-count-1")).toHaveTextContent("2 new");
   });
 
+  it("shows Remote once when location and work mode are both Remote", async () => {
+    vi.mocked(api.listSavedSearches).mockResolvedValue([
+      { ...savedSearch, employment_type: [], work_mode: ["remote"], location: "Remote" },
+    ]);
+    renderPanel();
+    expect(await screen.findByText("Internships · Remote")).toBeInTheDocument();
+    expect(screen.queryByText("Internships · Remote · Remote")).not.toBeInTheDocument();
+  });
+
+  it("keeps a city location next to Hybrid", async () => {
+    vi.mocked(api.listSavedSearches).mockResolvedValue([
+      { ...savedSearch, employment_type: [], work_mode: ["hybrid"], location: "San Francisco, CA" },
+    ]);
+    renderPanel();
+    expect(await screen.findByText("Internships · Hybrid · San Francisco, CA")).toBeInTheDocument();
+  });
+
   it("loads matches and marks them seen when expanded", async () => {
     vi.mocked(api.listSavedSearches).mockResolvedValue(oneSearch);
     vi.mocked(api.listSavedSearchMatches).mockResolvedValue(oneMatch);

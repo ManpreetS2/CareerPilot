@@ -15,6 +15,7 @@ import {
   VerifiedFitPanel,
   WorkLocationPanel,
 } from "../components/job-analysis-panels";
+import { formatJobCardMeta } from "../lib/job-meta";
 import { LoadingState } from "../components/LoadingState";
 import { MatchBadge } from "../components/MatchBadge";
 import { scoutedTimeAgo, SourceBadge } from "../components/SourceBadge";
@@ -376,16 +377,16 @@ export function JobDetailPage() {
             <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
             <h1 className="wrap-anywhere font-display text-4xl font-semibold">{job.title}</h1>
             <p className="mt-2 text-muted-foreground">
-              {[
+              {formatJobCardMeta([
                 job.location || "Location n/a",
-                job.salary,
-                profile?.work_mode ? chipLabel(profile.work_mode) : null,
+                profile?.work_mode && profile.work_mode !== "unknown"
+                  ? chipLabel(profile.work_mode)
+                  : null,
                 profile?.employment_type && profile.employment_type !== "unknown"
                   ? chipLabel(profile.employment_type)
                   : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
+                job.salary,
+              ])}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <StatusBadge status={job.status} />

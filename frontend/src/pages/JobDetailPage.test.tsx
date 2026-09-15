@@ -9,6 +9,7 @@ import { bindSessionUser } from "../lib/session";
 import { saveJobsNavIds } from "../lib/jobs-workspace";
 import { ThemeProvider } from "../lib/theme";
 import { createTestQueryClient } from "../test/render";
+import type { Job, JobRequirementProfile } from "../lib/types";
 import "../index.css";
 
 vi.mock("../lib/api", async (importOriginal) => {
@@ -34,6 +35,34 @@ vi.mock("../lib/api", async (importOriginal) => {
     },
   };
 });
+
+function requirementProfile(overrides: Partial<JobRequirementProfile> = {}): JobRequirementProfile {
+  return {
+    required_skills: [],
+    preferred_skills: [],
+    primary_responsibilities: [],
+    requirements: [],
+    requirement_groups: [],
+    locations: [],
+    travel_requirements: [],
+    relocation_requirements: [],
+    source_fingerprint: "fp",
+    ...overrides,
+  };
+}
+
+function mockJob(overrides: Partial<Job> = {}) {
+  vi.mocked(api.getJob).mockResolvedValue({
+    id: "job-1",
+    title: "Software Engineer Intern",
+    company: "Harborline Analytics",
+    url: "https://example.com/showcase/harborline-intern",
+    description: "DEMO",
+    source: "manual",
+    status: "verified",
+    ...overrides,
+  });
+}
 
 function renderJob() {
   return render(
@@ -166,5 +195,58 @@ describe("JobDetailPage", () => {
     expect(await screen.findByText("Why CareerPilot gave this match")).toBeInTheDocument();
     expect(api.getMatchEvidence).toHaveBeenCalled();
     expect(api.scoreJob).not.toHaveBeenCalled();
+  });
+
+  it("shows Remote once when location and work mode are both Remote", async () => {
+    mockJob({ location: "Remote" });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(
+      requirementProfile({ work_mode: "remote", employment_type: "internship" }),
+    );
+    renderJob();
+    expect(await screen.findByText("Remote · Internship")).toBeInTheDocument();
+    expect(screen.queryByText("Remote · Remote · Internship")).not.toBeInTheDocument();
+  });
+
+  it("keeps a city location next to Hybrid", async () => {
+    mockJob({ location: "San Francisco, CA" });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(requirementProfile({ work_mode: "hybrid" }));
+    renderJob();
+    expect(await screen.findByText("San Francisco, CA · Hybrid")).toBeInTheDocument();
+  });
+
+  it("keeps a city location next to On-site", async () => {
+    mockJob({ location: "New York, NY" });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(requirementProfile({ work_mode: "onsite" }));
+    renderJob();
+    expect(await screen.findByText("New York, NY · On-site")).toBeInTheDocument();
+  });
+
+  it("keeps salary after location, work mode, and employment type", async () => {
+    mockJob({ location: "Remote", salary: "$120k–$150k" });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(
+      requirementProfile({ work_mode: "remote", employment_type: "internship" }),
+    );
+    renderJob();
+    expect(await screen.findByText("Remote · Internship · $120k–$150k")).toBeInTheDocument();
+  });
+
+  it("does not leak an unknown work mode into the header", async () => {
+    mockJob({ location: "Austin, TX" });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(
+      requirementProfile({ work_mode: "unknown", employment_type: "internship" }),
+    );
+    renderJob();
+    expect(await screen.findByText("Austin, TX · Internship")).toBeInTheDocument();
+    expect(screen.queryByText(/unknown/i)).not.toBeInTheDocument();
+  });
+
+  it("does not leak an unknown employment type into the header", async () => {
+    mockJob({ location: "Austin, TX", salary: "$120k–$150k" });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(
+      requirementProfile({ work_mode: "hybrid", employment_type: "unknown" }),
+    );
+    renderJob();
+    expect(await screen.findByText("Austin, TX · Hybrid · $120k–$150k")).toBeInTheDocument();
+    expect(screen.queryByText(/unknown/i)).not.toBeInTheDocument();
   });
 });

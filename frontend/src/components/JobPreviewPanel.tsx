@@ -5,7 +5,7 @@ import { scoutedTimeAgo, SourceBadge } from "./SourceBadge";
 import { StatusBadge } from "./StatusBadge";
 import { Glass } from "./ui/glass";
 import { ScoreOrb } from "./signature/ScoreOrb";
-import { formatJobCardMeta } from "./JobCard";
+import { formatJobCardMeta } from "../lib/job-meta";
 import { chipLabel } from "../lib/search-intent";
 import { cn } from "../lib/cn";
 import type { Job, MatchScore } from "../lib/types";
