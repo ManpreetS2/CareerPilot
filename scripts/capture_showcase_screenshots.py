@@ -212,6 +212,10 @@ def main() -> int:
         page.screenshot(path=str(out / "02-profile-readiness.png"), full_page=False)
 
         page.goto(f"{base}/jobs", wait_until="networkidle")
+        page.get_by_role(
+            "button",
+            name="Select Software Engineer Intern at Harborline Analytics",
+        ).click()
         page.wait_for_timeout(400)
         page.screenshot(path=str(out / "03-discover.png"), full_page=False)
 

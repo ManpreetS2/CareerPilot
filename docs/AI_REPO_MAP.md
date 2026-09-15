@@ -425,7 +425,7 @@ existing save/materials/approval/tracker mutations
 - Security: `.github/workflows/security.yml`
 - Manual: `docs/V1_RELEASE_CHECKLIST.md`, `docs/demo-runbook.md`
 - Broad checks: `scripts/test_mvp_foundation_browser.py`, `scripts/test_fit_scoring_matrix.py`, `scripts/test_candidate_profile_matrix.py --synthetic`
-- A8 (Chrome 152 Greenhouse + Lever), A9 (isolation/account deletion), and Phase 6 (adversarial audit) have passed. Automated tests still do not replace a live ATS re-check after fill or attachment code changes. Remaining public release action is Phase 8: tag `v1.0.0` and GitHub Release.
+- A8 (Chrome 152 Greenhouse + Lever), A9 (isolation/account deletion), and Phase 6 (adversarial audit) have passed. Automated tests still do not replace a live ATS re-check after fill or attachment code changes. Tag `v1.0.0` already shipped at `b73a983ed3605d498aa90070c3b5f786a73bc525` (GitHub Release exists). Remaining work is showcase/docs polish, not a new tag.
 ## 30. Core Data Flows
 **Profile → Discover**
 

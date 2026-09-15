@@ -34,38 +34,47 @@ REASON: Default Overview is reasonable for posting context; do not change analys
 ---
 
 SCREEN: Career Growth
-ISSUE: Empty state when jobs exist but Match Evidence has not been aggregated.
-SEVERITY: P3 (honest empty, not a defect)
-EVIDENCE: `07-career-growth.png` — “no current Match Evidence to aggregate.”
-FIXED / DEFERRED: DEFERRED
-REASON: Inventing growth insights would violate grounding. Caption the screenshot as refusal-to-invent.
+ISSUE: Recapture on the current tree shows two analyzed jobs and “No repeated skill gaps,” not the older empty-evidence copy.
+SEVERITY: P3 (honest empty-of-gaps, not a defect)
+EVIDENCE: `07-career-growth.png` — zeros for invented focus areas; copy still refuses to fabricate skills.
+FIXED / DEFERRED: n/a
+REASON: Caption the screenshot as refusal-to-invent, not as “no jobs analyzed.”
+
+---
+
+SCREEN: Analyze job header meta
+ISSUE: Job Detail header still joins location and work mode as `Remote · Remote · Internship`. Discover card and preview do not.
+SEVERITY: P3
+EVIDENCE: Recaptured `04-match-evidence.png` vs `03-discover.png`. `formatJobCardMeta` is used by `JobCard` / `JobPreviewPanel` only.
+FIXED / DEFERRED: DEFERRED (product). Not this showcase PR.
+REASON: Do not fold a Job Detail presentation fix into docs/screenshots. Discover is the committed Remote · Internship story.
 
 ---
 
 SCREEN: Discover job meta line
-ISSUE: Harborline intern shows `Remote · Remote · Internship` when location and work mode are both Remote.
-SEVERITY: P3
-EVIDENCE: `03-discover.png` and 390 probe. `JobCard` joins `location`, `workLabel(job)`, employment.
-FIXED / DEFERRED: DEFERRED
-REASON: Literal join of two real fields. Deduping could hide work mode on other jobs. Seed could use a non-duplicative location later; no runtime change in this PR.
+ISSUE: Harborline intern previously showed `Remote · Remote · Internship` when location and work mode were both Remote.
+SEVERITY: was P3
+EVIDENCE: Recaptured `03-discover.png` on the post-#102/#103 tree. `formatJobCardMeta` drops adjacent duplicate labels. Card and preview both show `Remote · Internship`. Cedar remains a distinct city/work-mode pair (`Hybrid — Portland, OR`).
+FIXED / DEFERRED: FIXED on current main (not this showcase PR). Recapture documents the shipped UI.
+REASON: Showcase assets must match the final product. Do not treat duplicate Remote as a future/separate PR.
 
 ---
 
 SCREEN: Discover job cards (accessibility)
-ISSUE: The select-job control’s accessible name concatenates title, company, location, and badges (Playwright listed the whole card as a button name).
-SEVERITY: P3
-EVIDENCE: 390 probe `getByRole('button')` names.
-FIXED / DEFERRED: DEFERRED
-REASON: Pre-existing JobCard pattern. Changing it is an a11y code fix, not docs. Separate from showcase assets.
+ISSUE: The select-job control’s accessible name used to concatenate title, company, location, and badges.
+SEVERITY: was P3
+EVIDENCE: Current `selectJobCardLabel(title, company)` → `Select Software Engineer Intern at Harborline Analytics`.
+FIXED / DEFERRED: FIXED on current main (not this showcase PR).
+REASON: Capture script can target that concise name. No product change in this docs/screenshot PR.
 
 ---
 
-SCREEN: Landing / Login / Signup animation
-ISSUE: None blocking. Dotted globe and assembling lattice sit in `pointer-events: none` frames (`.hero-globe-frame`, `AuthFrame`). Reduced-motion capture used `emulate_media(reduced_motion=reduce)`. Dark login globe remains visible, not a black hole.
-SEVERITY: P3 (watch)
-EVIDENCE: `frontend/src/index.css` `.hero-globe-frame { pointer-events: none }`; dark login QA screenshot (not committed). CTA hit-test on `/` after an authenticated session is not applicable (landing is public; authenticated capture continued from cookie).
-FIXED / DEFERRED: DEFERRED
-REASON: No presentation defect requiring a behavior change. Native 200% browser zoom remains a human spot-check (CSS zoom probe showed no horizontal overflow).
+SCREEN: Landing / Login / Signup decoration
+ISSUE: Public/auth no longer uses a dotted globe or assembling-block lattice.
+SEVERITY: none
+EVIDENCE: `LandingPage.tsx` / `AuthFrame.tsx` render `PublicStage`. No `.hero-globe-frame`. Dashboard retains the dotted globe via `DashboardAtmosphere`. Reduced-motion capture used `emulate_media(reduced_motion=reduce)`.
+FIXED / DEFERRED: FIXED on current main (#103). Recapture `01-landing.png` to match PublicStage.
+REASON: Showcase must not show the retired globe/lattice. Native 200% browser zoom remains a human spot-check.
 
 ---
 
@@ -103,4 +112,4 @@ EVIDENCE: Dark login probe.
 FIXED / DEFERRED: DEFERRED for committed set
 REASON: One theme in the public screenshot strip. Dark is supported.
 
-No P0 or P1 visual defects. Track Kanban overflow, Prepare below-fold approval, default Overview tab, and Growth empty state stay by design. JobCard “Remote · Remote” and concatenated accessible names are a separate post-v1 presentation PR, not this showcase package.
+No P0 or P1 visual defects. Track Kanban overflow, Prepare below-fold approval, and default Overview tab stay by design. Discover card and preview show `Remote · Internship`. Public landing/auth use PublicStage; the dotted globe remains on Dashboard only. Career Growth recapture still refuses to invent skill gaps.

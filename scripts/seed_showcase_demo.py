@@ -64,6 +64,30 @@ def refuse_database_path(path: Path) -> Path:
     return resolved
 
 
+def _add_listing_profile(session, job, **fields) -> None:
+    """Current requirement snapshot so Discover labels stay deterministic."""
+    from backend.db.models import JobRequirementProfileRecord
+    from backend.schemas.job_requirements import EXTRACTION_VERSION
+    from backend.services.job_content import source_fingerprint
+
+    fingerprint = source_fingerprint(job.title, job.description)
+    job.content_hash = fingerprint
+    session.add(
+        JobRequirementProfileRecord(
+            job_id=job.id,
+            source_fingerprint=fingerprint,
+            extraction_version=EXTRACTION_VERSION,
+            content_status="full",
+            profile_json={
+                "source_fingerprint": fingerprint,
+                "extraction_version": EXTRACTION_VERSION,
+                **fields,
+            },
+        )
+    )
+    session.commit()
+
+
 def _seed(session) -> dict[str, str]:
     from backend.core.security import hash_password
     from backend.db.models import (
@@ -114,7 +138,8 @@ def _seed(session) -> dict[str, str]:
         salary=None,
         url="https://example.com/showcase/harborline-intern",
         description=(
-            "DEMO / SYNTHETIC posting. Required: Python and SQL. Preferred: Docker. "
+            "DEMO / SYNTHETIC posting. Summer internship. This is a remote internship. "
+            "Required: Python and SQL. Preferred: Docker. "
             "Build internal APIs and tests. Not a real employer endorsement."
         ),
         source="manual",
@@ -129,14 +154,16 @@ def _seed(session) -> dict[str, str]:
         salary=None,
         url="https://example.com/showcase/cedar-backend",
         description=(
-            "DEMO / SYNTHETIC posting. Required: Python. Preferred: SQL. "
-            "Not a real employer endorsement."
+            "DEMO / SYNTHETIC posting. Summer internship. Hybrid work in Portland, OR. "
+            "Required: Python. Preferred: SQL. Not a real employer endorsement."
         ),
         source="manual",
         status="verified",
     )
     session.add_all([intern, long_title])
     session.commit()
+    _add_listing_profile(session, intern, work_mode="remote", employment_type="internship")
+    _add_listing_profile(session, long_title, work_mode="hybrid", employment_type="internship")
     insert_intelligence(session, intern)
     insert_intelligence(session, long_title)
 

@@ -358,7 +358,7 @@ python scripts/live_ollama_gemini_check.py
 
 ## Git and release workflow
 
-Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen. A8/A9/Phase 6 certified runtime SHA `7b6c3ee100ca4fe6399ac29441bece8df71783c7`. Annotated tag `v1.0.0` points at `b73a983ed3605d498aa90070c3b5f786a73bc525`: https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
+Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen. A8/A9/Phase 6 certified runtime SHA `7b6c3ee100ca4fe6399ac29441bece8df71783c7`. Tag `v1.0.0` already shipped and points at `b73a983ed3605d498aa90070c3b5f786a73bc525` (GitHub Release exists). Remaining work is showcase/docs polish, not a new tag: https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
 
 ## Demo path
 
