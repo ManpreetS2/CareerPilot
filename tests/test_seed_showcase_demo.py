@@ -13,6 +13,7 @@ from scripts.seed_showcase_demo import (
     SHOWCASE_COMPANY_PRIMARY,
     SHOWCASE_COMPANY_SECOND,
     SHOWCASE_EMAIL,
+    SHOWCASE_SECOND_JOB,
     refuse_database_path,
 )
 
@@ -144,7 +145,7 @@ def test_seed_creates_synthetic_user_on_brand_new_path(tmp_path: Path, monkeypat
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from backend.db.models import JobRecord, User
+    from backend.db.models import JobRecord, JobRequirementProfileRecord, User
 
     engine = create_engine(f"sqlite:///{dest.as_posix()}", future=True)
     SessionLocal = sessionmaker(bind=engine, future=True)
@@ -155,6 +156,13 @@ def test_seed_creates_synthetic_user_on_brand_new_path(tmp_path: Path, monkeypat
         jobs = session.query(JobRecord).all()
         assert {job.company for job in jobs} == {SHOWCASE_COMPANY_PRIMARY, SHOWCASE_COMPANY_SECOND}
         assert all("DEMO" in (job.description or "") or "example.com/showcase" in job.url for job in jobs)
+        cedar = session.query(JobRecord).filter(JobRecord.public_id == SHOWCASE_SECOND_JOB).one()
+        assert cedar.location == "Portland, OR"
+        profile = (
+            session.query(JobRequirementProfileRecord).filter(JobRequirementProfileRecord.job_id == cedar.id).one()
+        )
+        assert profile.profile_json.get("work_mode") == "hybrid"
+        assert profile.profile_json.get("employment_type") == "internship"
     finally:
         session.close()
         engine.dispose()

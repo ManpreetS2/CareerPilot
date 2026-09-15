@@ -43,20 +43,20 @@ REASON: Caption the screenshot as refusal-to-invent, not as “no jobs analyzed.
 ---
 
 SCREEN: Analyze job header meta
-ISSUE: Job Detail header still joins location and work mode as `Remote · Remote · Internship`. Discover card and preview do not.
-SEVERITY: P3
-EVIDENCE: Recaptured `04-match-evidence.png` vs `03-discover.png`. `formatJobCardMeta` is used by `JobCard` / `JobPreviewPanel` only.
-FIXED / DEFERRED: DEFERRED (product). Not this showcase PR.
-REASON: Do not fold a Job Detail presentation fix into docs/screenshots. Discover is the committed Remote · Internship story.
+ISSUE: Job Detail header previously joined location and work mode as `Remote · Remote · Internship`.
+SEVERITY: was P3
+EVIDENCE: Recaptured `04-match-evidence.png` after the Job Detail metadata contract matched Discover (`location`, work mode, employment type, salary). Harborline Analyze now shows `Remote · Internship`.
+FIXED / DEFERRED: FIXED on current main (#104). Recapture documents the shipped UI.
+REASON: Showcase assets must match the final product. Adjacent equivalent labels collapse; salary stays last when present.
 
 ---
 
 SCREEN: Discover job meta line
-ISSUE: Harborline intern previously showed `Remote · Remote · Internship` when location and work mode were both Remote.
+ISSUE: Harborline intern previously showed `Remote · Remote · Internship` when location and work mode were both Remote. Cedar seed previously stored `Hybrid — Portland, OR`, which duplicated Hybrid in the card line.
 SEVERITY: was P3
-EVIDENCE: Recaptured `03-discover.png` on the post-#102/#103 tree. `formatJobCardMeta` drops adjacent duplicate labels. Card and preview both show `Remote · Internship`. Cedar remains a distinct city/work-mode pair (`Hybrid — Portland, OR`).
-FIXED / DEFERRED: FIXED on current main (not this showcase PR). Recapture documents the shipped UI.
-REASON: Showcase assets must match the final product. Do not treat duplicate Remote as a future/separate PR.
+EVIDENCE: Recaptured `03-discover.png`. Harborline card and preview show `Remote · Internship`. Cedar stores `Portland, OR` with `work_mode=hybrid` and renders `Portland, OR · Hybrid · Internship`.
+FIXED / DEFERRED: FIXED on current main (#104) plus synthetic Cedar location cleanup in this showcase refresh.
+REASON: Showcase assets must match the final product. Do not treat duplicate Remote as a current defect. Cedar location is a city, not a work-mode prefix.
 
 ---
 
@@ -112,4 +112,4 @@ EVIDENCE: Dark login probe.
 FIXED / DEFERRED: DEFERRED for committed set
 REASON: One theme in the public screenshot strip. Dark is supported.
 
-No P0 or P1 visual defects. Track Kanban overflow, Prepare below-fold approval, and default Overview tab stay by design. Discover card and preview show `Remote · Internship`. Public landing/auth use PublicStage; the dotted globe remains on Dashboard only. Career Growth recapture still refuses to invent skill gaps.
+No P0 or P1 visual defects. Track Kanban overflow, Prepare below-fold approval, and default Overview tab stay by design. Discover and Analyze both show Harborline as `Remote · Internship`. Cedar Discover shows `Portland, OR · Hybrid · Internship`. Public landing/auth use PublicStage; the dotted globe remains on Dashboard only. Career Growth recapture still refuses to invent skill gaps.

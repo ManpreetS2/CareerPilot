@@ -29,7 +29,7 @@ These files describe the **shipped v1.0.0 product**. They do not change runtime 
 | Certified runtime (A8 / A9 / Phase 6) | `7b6c3ee100ca4fe6399ac29441bece8df71783c7` |
 | Release | https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0 |
 
-The showcase branch may add documentation, screenshots, and an isolated demo seeder. It does not move the `v1.0.0` tag. Landing/Discover screenshots were recaptured on the post-#103 tree (PublicStage; Discover `Remote · Internship`) so they match current product, not the older tagged landing globe.
+The showcase branch may add documentation, screenshots, and an isolated demo seeder. It does not move the `v1.0.0` tag. Landing remains the post-#103 PublicStage capture. Discover and Analyze (`03`/`04`) were recaptured after #104 so Harborline shows `Remote · Internship` and Cedar shows `Portland, OR · Hybrid · Internship`.
 
 ## How screenshots were generated
 

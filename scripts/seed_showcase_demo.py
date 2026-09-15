@@ -150,7 +150,7 @@ def _seed(session) -> dict[str, str]:
         public_id=SHOWCASE_SECOND_JOB,
         title="Backend Software Engineering Intern, Platform Reliability",
         company=SHOWCASE_COMPANY_SECOND,
-        location="Hybrid — Portland, OR",
+        location="Portland, OR",
         salary=None,
         url="https://example.com/showcase/cedar-backend",
         description=(
