@@ -67,7 +67,7 @@ export function JobCard({
       <div className="flex items-start gap-3">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-start gap-3 text-left"
+          className="job-card-select flex min-w-0 flex-1 items-start gap-3 text-left"
           onClick={onSelect}
           aria-pressed={selected}
           aria-label={selectJobCardLabel(job.title, job.company)}

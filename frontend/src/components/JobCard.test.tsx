@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -51,6 +53,7 @@ describe("JobCard", () => {
     );
     const name = selectJobCardLabel("Software Engineer Intern", "Harborline Analytics");
     const control = screen.getByRole("button", { name });
+    expect(control).toHaveClass("job-card-select");
     expect(control).toHaveAccessibleName("Select Software Engineer Intern at Harborline Analytics");
     expect(screen.getByText("Software Engineer Intern")).toBeInTheDocument();
     expect(screen.getByText("Harborline Analytics")).toBeInTheDocument();
@@ -58,5 +61,12 @@ describe("JobCard", () => {
     expect(screen.queryByRole("button", { name: /Potential Match/i })).not.toBeInTheDocument();
     await userEvent.click(control);
     expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses CareerPilot's purple focus-visible ring on the select control", () => {
+    const css = readFileSync(resolve(__dirname, "../index.css"), "utf8");
+    expect(css).toMatch(
+      /\.job-card-select:focus-visible[\s\S]*?outline:\s*2px solid var\(--ring\);[\s\S]*?outline-offset:\s*2px;/,
+    );
   });
 });
