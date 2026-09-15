@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { LoadingState } from "./components/LoadingState";
@@ -33,6 +34,13 @@ function HomeRoute() {
   return <LandingPage />;
 }
 
+function GuestRoute({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return children;
+  if (user) return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
 function LegacyPrepareRedirect() {
   const { jobId } = useParams();
   return <Navigate to={`/jobs/${jobId}/prepare`} replace />;
@@ -42,8 +50,22 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<HomeRoute />} />
-      <Route path="login" element={<LoginPage />} />
-      <Route path="signup" element={<SignupPage />} />
+      <Route
+        path="login"
+        element={
+          <GuestRoute>
+            <LoginPage />
+          </GuestRoute>
+        }
+      />
+      <Route
+        path="signup"
+        element={
+          <GuestRoute>
+            <SignupPage />
+          </GuestRoute>
+        }
+      />
       <Route path="privacy" element={<PrivacyPage />} />
       <Route element={<ProtectedRoute />}>
         <Route path="onboarding" element={<OnboardingPage />} />

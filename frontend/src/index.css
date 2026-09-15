@@ -764,91 +764,30 @@ body {
   }
 }
 
-@keyframes rotate-slow {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.public-focus:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
-.signal-lattice {
-  width: 5.5rem;
-  height: 5.75rem;
-  overflow: visible;
+.public-shell .input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
-.signal-cluster {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  animation: signal-cluster-float 9s ease-in-out infinite;
-}
-
-.signal-cell {
-  position: absolute;
-  width: 13px;
-  height: 13px;
-  border-radius: 4px;
-  border: 1px solid color-mix(in srgb, var(--accent) 70%, var(--foreground));
-  background: color-mix(in srgb, var(--accent) 42%, var(--background));
-  box-shadow: 0 0 10px color-mix(in srgb, var(--halo) 50%, transparent);
-  animation: signal-cell-assemble 5.5s ease-in-out infinite;
-}
-
-.hero-globe-frame,
-.auth-globe-frame {
-  position: relative;
-  width: min(100%, 17.5rem);
-  height: 17.5rem;
-  margin-inline: auto;
-  overflow: hidden;
+.public-stage-grid {
   pointer-events: none;
+  position: absolute;
+  inset: -12%;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse at center, black 42%, transparent 78%);
+  opacity: 0.4;
 }
 
-@media (min-width: 1024px) {
-  .hero-globe-frame {
-    width: 26.5rem;
-    height: 26.5rem;
-    margin-inline: auto 0;
-  }
-
-  .auth-globe-frame {
-    width: 26.5rem;
-    height: 26.5rem;
-  }
-}
-
-@keyframes signal-cluster-float {
-  0%, 100% {
-    transform: translate3d(0, 0, 0);
-  }
-  50% {
-    transform: translate3d(0, -6px, 0);
-  }
-}
-
-@keyframes signal-cell-assemble {
-  0%, 100% {
-    opacity: 0.38;
-    transform: translate3d(0, 7px, 0) scale(0.92);
-  }
-  42%, 62% {
-    opacity: 0.95;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-.reduce-motion .hero-atmosphere-orb,
-.reduce-motion .signal-cluster,
-.reduce-motion .signal-cell {
+.reduce-motion .hero-atmosphere-orb {
   animation: none !important;
-}
-
-.reduce-motion .signal-cell {
-  opacity: 0.7;
-  transform: none;
 }
 
 @keyframes ripple-drift {
@@ -879,9 +818,7 @@ body {
     transition-duration: 0.01ms !important;
   }
 
-  .hero-atmosphere-orb,
-  .signal-cluster,
-  .signal-cell {
+  .hero-atmosphere-orb {
     animation: none !important;
   }
 }

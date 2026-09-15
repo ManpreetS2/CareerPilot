@@ -33,10 +33,10 @@
 | Tracker/follow-up | `backend/api/routes/tracker.py`, `application_tracker_service.py`, `ApplicationsPage.tsx` | `test_application_tracker.py`, `ApplicationsPage.test.tsx` |
 | Calendar follow-up export | `calendar_export_service.py`, `safe_filename.py`, `frontend/src/lib/calendar.ts` | `test_calendar_export.py`, `test_safe_filename.py`, `calendar.test.ts` |
 | Saved searches / in-app alerts | `saved_searches.py`, `saved_search_service.py`, `scheduler.py`, `SavedSearchesPanel.tsx` | `test_saved_search_service.py`, `test_scheduler.py`, `SavedSearchesPanel.test.tsx` |
-| Dashboard counts | `application_tracker_service.py`, `DashboardPage.tsx` | dashboard/tracker tests |
+| Dashboard counts | `application_tracker_service.py`, `DashboardPage.tsx`, `DashboardAtmosphere.tsx` | dashboard/tracker tests |
 | Career Growth | `career_growth_service.py`, `GrowthPage.tsx` | `test_career_growth.py`, `GrowthPage.test.tsx` |
 | Conversion Analytics | `analytics_service.py`, `AnalyticsPage.tsx` | `test_analytics.py`, `AnalyticsPage.test.tsx` |
-| Public landing / auth visuals | `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `SignalLattice.tsx`, `globe-engine.ts`, `frontend/src/index.css` | `AuthPages.test.tsx`, `DottedGlobe.test.tsx`, `SignalLattice.test.tsx`, `globe-engine.test.ts` |
+| Public landing / auth visuals | `LandingPage.tsx`, `AuthFrame.tsx`, `PublicStage.tsx`, `HeroAtmosphere.tsx`, `frontend/src/index.css` | `AuthPages.test.tsx`, `PublicStage.test.tsx`, `LandingPage.test.tsx` |
 | Theme/reduced motion | `frontend/src/lib/theme.tsx`, `frontend/src/index.css`, `SettingsPage.tsx` | frontend + human visual QA |
 | Frontend routes | `frontend/src/App.tsx`, `AppShell.tsx` | affected page tests |
 | Frontend API/types | `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts` | affected page/component tests + typecheck |
@@ -404,7 +404,7 @@ existing save/materials/approval/tracker mutations
 - Public: `/`, `/login`, `/signup`, `/privacy`
 - Protected: `/onboarding`, `/dashboard`, `/profile`, `/jobs`, `/jobs/:jobId`, `/jobs/:jobId/prepare`, `/analyze`, `/prepare`, `/track`, `/growth`, `/analytics`, `/resume`, `/resume/:versionId`, `/settings`.
 - `/applications` aliases Track; `/applications/:jobId` redirects to Prepare.
-- Public/auth UI owners: `LandingPage.tsx`, `AuthFrame.tsx`, `DottedGlobe.tsx`, `SignalLattice.tsx`, `globe-engine.ts`, `frontend/src/index.css` (plus remaining `HeroAtmosphere.tsx`). Auth/session semantics unchanged; dark/light is intentional; reduced motion is supported; decoration never blocks clicks/forms; black/white/violet design tokens are authoritative.
+- Public/auth UI owners: `LandingPage.tsx`, `AuthFrame.tsx`, `PublicStage.tsx`, `HeroAtmosphere.tsx`, `frontend/src/index.css`. Public/auth no longer uses the dotted globe or assembling-block lattice. The dotted globe remains on authenticated Dashboard via `DashboardAtmosphere.tsx` + `globe-engine.ts`. Auth/session semantics unchanged; dark/light is intentional; reduced motion is supported; decoration never blocks clicks/forms; black/white/violet design tokens are authoritative.
 - For meaningful UI redesigns, use approved references/prototype direction before editing production UI.
 ## 27. Theme / Responsive / Reduced Motion
 - `frontend/src/lib/theme.tsx`
