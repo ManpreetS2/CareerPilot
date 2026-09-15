@@ -34,6 +34,12 @@ describe("formatJobCardMeta", () => {
   it("skips unknown and missing values without inventing labels", () => {
     expect(formatJobCardMeta([null, undefined, "", "Internship"])).toBe("Internship");
   });
+
+  it("keeps a repeated value when a distinct salary sits between the duplicates", () => {
+    expect(formatJobCardMeta(["Remote", "$120k–$150k", "Remote", "Internship"])).toBe(
+      "Remote · $120k–$150k · Remote · Internship",
+    );
+  });
 });
 
 describe("JobCard", () => {
