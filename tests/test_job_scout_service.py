@@ -246,18 +246,53 @@ def test_ingest_job_url_rejects_a_redirect_into_a_private_address(monkeypatch) -
 
 def test_ingest_job_url_succeeds_for_a_safe_lever_https_url(monkeypatch) -> None:
     monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+    long_description = "Great role building backend services for our platform team. " * 2
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            text='<html><head><title>Backend Intern</title>'
-            '<meta name="description" content="Great role."></head></html>',
+            text=f'<html><head><title>Backend Intern</title>'
+            f'<meta name="description" content="{long_description}"></head></html>',
         )
 
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
     result = ingest_job_url("https://jobs.lever.co/acme/abc-123")
     assert result["title"] == "Backend Intern"
-    assert result["description"] == "Great role."
+    assert result["description"] == long_description.strip()
+
+
+def test_ingest_job_url_rejects_a_lever_page_with_a_too_short_description(monkeypatch) -> None:
+    """A real posting has more than a one-line meta description. A page that
+    returns 200 with only a short description — a bot-block/interstitial
+    page (Cloudflare's "Just a moment...", a cookie-consent wall) is the
+    realistic cause — must not be silently stored as if it were the job."""
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text='<html><head><title>Just a moment...</title>'
+            '<meta name="description" content="Enable JavaScript to continue."></head></html>',
+        )
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
+    with pytest.raises(JobScoutError):
+        ingest_job_url("https://jobs.lever.co/acme/abc-123")
+
+
+def test_ingest_job_url_accepts_a_lever_page_with_no_meta_description(monkeypatch) -> None:
+    """No <meta name="description"> at all is the deliberate "couldn't
+    auto-extract, the user will fill it in" placeholder path — distinct from
+    a short, actually-present description, and must still succeed."""
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html><head><title>Backend Intern</title></head></html>")
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: _RealClient(transport=httpx.MockTransport(handler)))
+    result = ingest_job_url("https://jobs.lever.co/acme/abc-123")
+    assert result["title"] == "Backend Intern"
+    assert "Description not auto-extracted" in result["description"]
 
 
 def test_ingest_job_url_wraps_a_real_http_error_as_job_scout_error(monkeypatch) -> None:

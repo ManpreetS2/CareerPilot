@@ -612,16 +612,17 @@ def test_ingest_lever_ignores_hosted_url_for_a_different_posting(mock_fetch) -> 
 
 def test_ingest_lever_non_uuid_url_still_fetches_html(mock_fetch) -> None:
     html_url = "https://jobs.lever.co/acme/abc-123"
+    long_description = "Great role building backend services for our platform team. " * 2
     mock_fetch["by_url"][html_url] = lambda url, **_: httpx.Response(
         200,
-        text='<html><head><title>Backend Intern</title>'
-        '<meta name="description" content="Great role."></head></html>',
+        text=f'<html><head><title>Backend Intern</title>'
+        f'<meta name="description" content="{long_description}"></head></html>',
         request=httpx.Request("GET", url),
     )
     raw = ingest_job_url(html_url)
     assert mock_fetch["calls"] == [html_url]
     assert raw["title"] == "Backend Intern"
-    assert raw["description"] == "Great role."
+    assert raw["description"] == long_description.strip()
 
 
 @pytest.mark.parametrize("status_code", [404, 500, 503])
