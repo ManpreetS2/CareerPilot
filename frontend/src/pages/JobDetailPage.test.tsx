@@ -221,12 +221,32 @@ describe("JobDetailPage", () => {
     expect(await screen.findByText("New York, NY · On-site")).toBeInTheDocument();
   });
 
-  it("keeps salary between location and work mode, including a non-adjacent Remote repeat", async () => {
+  it("keeps salary after location, work mode, and employment type", async () => {
     mockJob({ location: "Remote", salary: "$120k–$150k" });
     vi.mocked(api.getRequirementProfile).mockResolvedValue(
       requirementProfile({ work_mode: "remote", employment_type: "internship" }),
     );
     renderJob();
-    expect(await screen.findByText("Remote · $120k–$150k · Remote · Internship")).toBeInTheDocument();
+    expect(await screen.findByText("Remote · Internship · $120k–$150k")).toBeInTheDocument();
+  });
+
+  it("does not leak an unknown work mode into the header", async () => {
+    mockJob({ location: "Austin, TX" });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(
+      requirementProfile({ work_mode: "unknown", employment_type: "internship" }),
+    );
+    renderJob();
+    expect(await screen.findByText("Austin, TX · Internship")).toBeInTheDocument();
+    expect(screen.queryByText(/unknown/i)).not.toBeInTheDocument();
+  });
+
+  it("does not leak an unknown employment type into the header", async () => {
+    mockJob({ location: "Austin, TX", salary: "$120k–$150k" });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(
+      requirementProfile({ work_mode: "hybrid", employment_type: "unknown" }),
+    );
+    renderJob();
+    expect(await screen.findByText("Austin, TX · Hybrid · $120k–$150k")).toBeInTheDocument();
+    expect(screen.queryByText(/unknown/i)).not.toBeInTheDocument();
   });
 });

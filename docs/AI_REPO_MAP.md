@@ -39,7 +39,7 @@
 | Public landing / auth visuals | `LandingPage.tsx`, `AuthFrame.tsx`, `PublicStage.tsx`, `HeroAtmosphere.tsx`, `frontend/src/index.css` | `AuthPages.test.tsx`, `PublicStage.test.tsx`, `LandingPage.test.tsx` |
 | Theme/reduced motion | `frontend/src/lib/theme.tsx`, `frontend/src/index.css`, `SettingsPage.tsx` | frontend + human visual QA |
 | Frontend routes | `frontend/src/App.tsx`, `AppShell.tsx` | affected page tests |
-| Frontend API/types | `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts` | affected page/component tests + typecheck |
+| Frontend API/types | `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts`, `frontend/src/lib/job-meta.ts` | affected page/component tests + typecheck |
 | CORS/CSRF/security headers | `backend/main.py`, `core/csrf.py`, `core/security_headers.py`, `core/config.py` | security + CORS browser checks |
 | CI/release gate | `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `docs/V1_RELEASE_CHECKLIST.md`, `docs/CI_SUPPLY_CHAIN.md` | CI + Gitleaks + manual checklist |
 | Python dependency policy | `docs/PYTHON_DEPENDENCY_REPRODUCIBILITY.md` | n/a |
