@@ -526,6 +526,14 @@ def _ingest_lever_url(url: str) -> dict:
         if description_match
         else MANUAL_INGEST_PLACEHOLDER_DESCRIPTION
     )
+    # A bot-block/interstitial page (Cloudflare's "Just a moment...", a
+    # cookie-consent wall, etc.) still returns 200 with its own short
+    # <meta name="description">, which would otherwise sail through as if it
+    # were real job content. The placeholder path above is exempt: that is
+    # the deliberate "no description tag at all" case the user is expected
+    # to fill in themselves, not a claim about the page's real content.
+    if description != MANUAL_INGEST_PLACEHOLDER_DESCRIPTION and len(description) < _MIN_INGEST_DESCRIPTION_LENGTH:
+        raise JobScoutError("Lever posting did not include enough description text.")
 
     final_url = str(response.request.url)
     return {
