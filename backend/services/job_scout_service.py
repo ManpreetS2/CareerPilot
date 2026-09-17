@@ -1086,6 +1086,23 @@ def _coerce_salary_number(value: object) -> float | None:
     return None
 
 
+HIMALAYAS_JOB_URL_BASE = "https://himalayas.app/jobs"
+
+
+def _himalayas_source_url(raw: dict) -> str | None:
+    """Himalayas' own listing page, when the raw payload's `guid` is safe to
+    splice into a URL. `guid` is untrusted third-party data that ends up
+    rendered as a clickable link — validated against the same slug
+    allowlist _BOARD_TOKEN_RE already uses for exactly this situation
+    elsewhere in this file, rather than trusted outright. Anything that
+    doesn't match yields None: no source_url, not a malformed or unsafe one.
+    """
+    guid = raw.get("guid")
+    if not isinstance(guid, str) or not _BOARD_TOKEN_RE.fullmatch(guid):
+        return None
+    return f"{HIMALAYAS_JOB_URL_BASE}/{guid}"
+
+
 def _himalayas_location(raw: dict) -> str:
     restrictions = raw.get("locationRestrictions") or []
     names: list[str] = []
@@ -1237,6 +1254,7 @@ def normalize_job(raw: dict, source: str) -> Job:
                 _coerce_salary_number(raw.get("maxSalary")),
             ),
             url=raw.get("applicationLink") or "",
+            source_url=_himalayas_source_url(raw),
             description=_clean_description(raw.get("description") or raw.get("excerpt")),
             source="himalayas",
             date_posted=_parse_epoch_millis(raw.get("pubDate")),
@@ -1340,6 +1358,7 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                 existing.description = _merge_description(existing.description, job.description)
                 if job.url:
                     existing.url = job.url
+                existing.source_url = job.source_url or existing.source_url
                 if job.date_posted:
                     existing.date_posted = job.date_posted.isoformat()
                 existing.date_scraped = job.date_scraped
@@ -1368,6 +1387,7 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                     location=job.location,
                     salary=job.salary,
                     url=job.url,
+                    source_url=job.source_url,
                     description=job.description,
                     source=job.source,
                     date_posted=job.date_posted.isoformat() if job.date_posted else None,

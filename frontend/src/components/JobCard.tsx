@@ -69,8 +69,11 @@ export function JobCard({
             <p className="mt-1 text-xs text-muted-foreground">
               {formatJobCardMeta([job.location || null, workLabel(job), employment, job.salary || null])}
             </p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <SourceBadge source={job.source} />
+            {/* SourceBadge can render as a link (aggregator sources) nested inside this
+                selection button — stop the click here so opening the source link doesn't
+                also toggle the card's selected state. */}
+            <div className="mt-2 flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
+              <SourceBadge source={job.source} url={job.url} sourceUrl={job.source_url} />
               {seenAgo ? <span className="text-xs text-muted-foreground">{seenAgo}</span> : null}
               <MatchBadge
                 score={match?.overall_score}
