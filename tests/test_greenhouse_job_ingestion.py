@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import httpx
@@ -267,7 +267,11 @@ def test_missing_first_published_leaves_date_posted_none(mock_fetch) -> None:
 
 def test_old_updated_at_does_not_make_posting_stale(mock_fetch) -> None:
     payload = dict(INSTEAD_API)
-    payload["first_published"] = "2026-08-01T08:00:00Z"
+    # Relative to "now", not a fixed calendar date — a hardcoded date
+    # eventually drifts past DEFAULT_STALE_AFTER_DAYS as real time passes,
+    # failing this test for a reason that has nothing to do with staleness.
+    recent = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload["first_published"] = recent
     payload["updated_at"] = "2020-01-15T10:00:00Z"
     mock_fetch["handler"] = lambda url, **_: _json_response(url, payload)
     raw = ingest_job_url(INSTEAD_URL)
