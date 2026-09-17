@@ -137,7 +137,7 @@ Human reviews and manually presses Submit
 **Services**
 - `job_scout_service.py` — Adzuna, RemoteOK, Greenhouse, Lever, Remotive, Jobicy, Himalayas, manual URLs, normalization/dedupe/persistence.
 - `job_service.py` — record/schema/listing helpers.
-- `job_verification_service.py` — verification/freshness.
+- `job_verification_service.py` — verification/freshness. `revalidate_unseen_candidates` real-checks (never merely infers) staleness for a job unseen in a scout run for a while — absence from one query is not proof a posting closed, since Discover/Saved Searches no longer all search the same terms.
 - `job_content.py` — content status/fingerprint.
 - `url_safety.py` — outbound/SSRF safety.
 - `saved_job_service.py` — user bookmark state.
@@ -147,7 +147,8 @@ Human reviews and manually presses Submit
 - readiness before scouting/provider work;
 - Find Jobs avoids LLM-per-listing behavior;
 - one dead provider does not kill entire scout;
-- shared JobRecord is not private application state.
+- shared JobRecord is not private application state;
+- a job absent from one scout query is not evidence it closed — only a real per-job liveness check (`revalidate_unseen_candidates`) marks something stale.
 ## 8. Greenhouse Identity / Ingestion
 **Files**
 - `backend/services/job_scout_service.py`: `parse_greenhouse_posting_url`, `canonical_greenhouse_posting_url`, API fetch/ingest/dedupe.
@@ -165,7 +166,7 @@ Human reviews and manually presses Submit
 ## 9b. Saved searches / in-app alerts
 **Route** `backend/api/routes/saved_searches.py` — `/api/saved-searches`, matches, mark-seen.
 **Service** `backend/services/saved_search_service.py`
-**Scheduler** `backend/services/scheduler.py` (FastAPI lifespan; 15-minute tick; `run_due_saved_searches`).
+**Scheduler** `backend/services/scheduler.py` (FastAPI lifespan; one 15-minute tick running two independently-gated tasks: `run_due_saved_searches` every tick, and `job_verification_service.revalidate_unseen_candidates` on its own 24-hour cadence via `SchedulerStateRecord`).
 **Models** `SavedSearchRecord`, `SavedSearchMatchRecord`
 **Frontend** `frontend/src/components/SavedSearchesPanel.tsx` (Discover)
 **Invariants**

@@ -1429,9 +1429,12 @@ def run_scout_with_stats(
         count=len(stored),
     )
 
-    from backend.services.job_verification_service import mark_stale_if_unseen
-
-    mark_stale_if_unseen()
+    # Absence-based staleness sweeping used to run inline here after every
+    # scout. It's not: a job absent from one scout's results isn't evidence
+    # it closed (see job_verification_service.revalidate_unseen_candidates,
+    # which now owns this via a real per-job liveness check instead, on its
+    # own scheduler cadence rather than inline with every live/scheduled
+    # scout call).
 
     sources_ok = tuple(name for name in _SCOUT_SOURCE_NAMES if source_success[name])
     sources_failed = tuple(name for name in _SCOUT_SOURCE_NAMES if not source_success[name])
