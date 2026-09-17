@@ -504,3 +504,15 @@ class SavedSearchMatchRecord(Base):
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
     seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class SchedulerStateRecord(Base):
+    """Generic keyed "when did scheduled task X last run" marker — for a
+    periodic task on its own cadence, distinct from the 15-minute saved-
+    search tick it shares a loop with. Keyed rather than single-purpose so
+    a future scheduled task reuses this table instead of adding its own."""
+
+    __tablename__ = "scheduler_state"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_run_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

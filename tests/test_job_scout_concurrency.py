@@ -29,9 +29,6 @@ def counted_sources(monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(job_scout_service, f"scout_{name}", _record(name))
     monkeypatch.setattr(job_scout_service, "scout_adzuna", _record("adzuna"))
     monkeypatch.setattr(job_scout_service, "persist_jobs", lambda jobs: list(jobs))
-    monkeypatch.setattr(
-        "backend.services.job_verification_service.mark_stale_if_unseen", lambda *a, **k: 0
-    )
     return calls
 
 

@@ -5,6 +5,7 @@ test_greenhouse_job_ingestion.py does for the existing manual-ingest path.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date, datetime, timedelta, timezone
 
@@ -31,7 +32,8 @@ from backend.services.job_scout_service import (
 from backend.services.url_safety import UnsafeURLError
 from backend.services.job_verification_service import (
     DEFAULT_ABSENCE_STALE_AFTER_DAYS,
-    mark_stale_if_unseen,
+    MAX_REVALIDATE_PER_TICK,
+    revalidate_unseen_candidates,
 )
 
 SECRET_BODY = '{"internal":"sk-secret-token","host":"10.0.0.5"}'
@@ -397,12 +399,17 @@ def _seed_job(
     return record
 
 
-def test_mark_stale_if_unseen_marks_old_discovered_jobs(isolated_db) -> None:
+def test_revalidate_unseen_candidates_checks_old_discovered_jobs(isolated_db, monkeypatch) -> None:
     with isolated_db() as db:
         old = datetime.now(timezone.utc) - timedelta(days=DEFAULT_ABSENCE_STALE_AFTER_DAYS + 1)
         _seed_job(db, public_id="old-1", date_scraped=old)
 
-    count = mark_stale_if_unseen()
+    monkeypatch.setattr(
+        job_verification_service,
+        "verify_job",
+        lambda job: ("stale", "Posting URL returned HTTP 404 (not found/gone)."),
+    )
+    count = asyncio.run(revalidate_unseen_candidates())
     assert count == 1
     with isolated_db() as db:
         record = db.query(JobRecord).filter(JobRecord.public_id == "old-1").one()
@@ -410,31 +417,90 @@ def test_mark_stale_if_unseen_marks_old_discovered_jobs(isolated_db) -> None:
         assert record.verification_notes is not None
 
 
-def test_mark_stale_if_unseen_excludes_recent_jobs(isolated_db) -> None:
+def test_revalidate_unseen_candidates_excludes_recent_jobs(isolated_db, monkeypatch) -> None:
     with isolated_db() as db:
         recent = datetime.now(timezone.utc) - timedelta(days=1)
         _seed_job(db, public_id="recent-1", date_scraped=recent)
 
-    assert mark_stale_if_unseen() == 0
+    called = {"n": 0}
+
+    def fake_verify(job):
+        called["n"] += 1
+        return ("verified", "ok")
+
+    monkeypatch.setattr(job_verification_service, "verify_job", fake_verify)
+    assert asyncio.run(revalidate_unseen_candidates()) == 0
+    assert called["n"] == 0
 
 
-def test_mark_stale_if_unseen_excludes_manual_source(isolated_db) -> None:
+def test_revalidate_unseen_candidates_excludes_manual_source(isolated_db, monkeypatch) -> None:
     with isolated_db() as db:
         old = datetime.now(timezone.utc) - timedelta(days=DEFAULT_ABSENCE_STALE_AFTER_DAYS + 1)
         _seed_job(db, public_id="manual-1", source="manual", date_scraped=old)
 
-    assert mark_stale_if_unseen() == 0
+    called = {"n": 0}
+
+    def fake_verify(job):
+        called["n"] += 1
+        return ("verified", "ok")
+
+    monkeypatch.setattr(job_verification_service, "verify_job", fake_verify)
+    assert asyncio.run(revalidate_unseen_candidates()) == 0
+    assert called["n"] == 0
 
 
-def test_mark_stale_if_unseen_excludes_already_flagged(isolated_db) -> None:
+def test_revalidate_unseen_candidates_excludes_already_flagged(isolated_db, monkeypatch) -> None:
     with isolated_db() as db:
         old = datetime.now(timezone.utc) - timedelta(days=DEFAULT_ABSENCE_STALE_AFTER_DAYS + 1)
         _seed_job(db, public_id="flagged-1", status="flagged", date_scraped=old)
 
-    assert mark_stale_if_unseen() == 0
+    monkeypatch.setattr(job_verification_service, "verify_job", lambda job: ("stale", "x"))
+    assert asyncio.run(revalidate_unseen_candidates()) == 0
     with isolated_db() as db:
         record = db.query(JobRecord).filter(JobRecord.public_id == "flagged-1").one()
         assert record.status == "flagged"
+
+
+def test_revalidate_unseen_candidates_confirms_a_still_open_job_instead_of_staling_it(
+    isolated_db, monkeypatch
+) -> None:
+    """The exact regression this redesign closes: a job absent from an
+    unrelated scout query for over the absence window is not proof it
+    closed — only a real per-job check (verify_job) decides, so a
+    confirmed-open job ends up "verified", never "stale", purely from
+    being unseen by queries that were never searching for it."""
+    with isolated_db() as db:
+        old = datetime.now(timezone.utc) - timedelta(days=DEFAULT_ABSENCE_STALE_AFTER_DAYS + 1)
+        _seed_job(db, public_id="still-open-1", date_scraped=old)
+
+    monkeypatch.setattr(
+        job_verification_service,
+        "verify_job",
+        lambda job: ("verified", "Posting URL responded normally with no closed-posting language detected."),
+    )
+    count = asyncio.run(revalidate_unseen_candidates())
+    assert count == 1
+    with isolated_db() as db:
+        record = db.query(JobRecord).filter(JobRecord.public_id == "still-open-1").one()
+        assert record.status == "verified"
+
+
+def test_revalidate_unseen_candidates_caps_and_orders_oldest_first(isolated_db, monkeypatch) -> None:
+    with isolated_db() as db:
+        base = datetime.now(timezone.utc) - timedelta(days=DEFAULT_ABSENCE_STALE_AFTER_DAYS + 10)
+        for i in range(MAX_REVALIDATE_PER_TICK + 2):
+            _seed_job(db, public_id=f"old-{i}", date_scraped=base + timedelta(minutes=i))
+
+    checked_ids: list[str] = []
+
+    def fake_verify(job):
+        checked_ids.append(job.id)
+        return ("verified", "ok")
+
+    monkeypatch.setattr(job_verification_service, "verify_job", fake_verify)
+    count = asyncio.run(revalidate_unseen_candidates())
+    assert count == MAX_REVALIDATE_PER_TICK
+    assert checked_ids == [f"old-{i}" for i in range(MAX_REVALIDATE_PER_TICK)]
 
 
 def test_reappearing_stale_job_resets_to_discovered(isolated_db) -> None:
