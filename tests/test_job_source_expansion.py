@@ -225,6 +225,55 @@ def test_scout_greenhouse_fetches_configured_board_and_filters_by_title(
     assert mock_fetch["calls"] == ["https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true"]
 
 
+def test_scout_greenhouse_two_different_queries_share_one_raw_fetch_but_filter_independently(
+    monkeypatch: pytest.MonkeyPatch, mock_fetch
+) -> None:
+    """The regression that proves the provider cache sits under the title
+    filter, not over it: two saved searches with different query terms
+    hitting the same board within the cache window must each see their
+    own correctly-filtered results, never one search's filtered output
+    reused as if it were the other's."""
+    monkeypatch.setattr(job_scout_service.settings, "greenhouse_board_tokens", "stripe")
+    mock_fetch["by_url"]["https://boards-api.greenhouse.io/v1/boards/stripe/jobs"] = (
+        lambda url, **_: _json_response(
+            url,
+            _greenhouse_board_payload(
+                {"id": 1, "title": "Software Engineer Intern", "content": "Build things."},
+                {"id": 2, "title": "Sales Development Rep", "content": "Sell things."},
+            ),
+        )
+    )
+
+    engineering = scout_greenhouse(["software engineer intern"])
+    sales = scout_greenhouse(["sales development"])
+
+    assert [item["id"] for item in engineering] == [1]
+    assert [item["id"] for item in sales] == [2]
+    # Exactly one real HTTP fetch for both calls — this is what the cache
+    # is for — but the two calls' filtered outputs are still independent.
+    assert mock_fetch["calls"] == ["https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true"]
+
+
+def test_scout_lever_two_different_queries_share_one_raw_fetch_but_filter_independently(
+    monkeypatch: pytest.MonkeyPatch, mock_fetch
+) -> None:
+    monkeypatch.setattr(job_scout_service.settings, "lever_company_slugs", "acme")
+    mock_fetch["by_url"]["https://api.lever.co/v0/postings/acme"] = lambda url, **_: _json_response(
+        url,
+        _lever_company_payload(
+            {"id": "a1", "text": "Backend Engineer"},
+            {"id": "a2", "text": "Recruiter"},
+        ),
+    )
+
+    engineering = scout_lever(["backend engineer"])
+    recruiting = scout_lever(["recruiter"])
+
+    assert [item["id"] for item in engineering] == ["a1"]
+    assert [item["id"] for item in recruiting] == ["a2"]
+    assert mock_fetch["calls"] == ["https://api.lever.co/v0/postings/acme?mode=json"]
+
+
 def test_scout_greenhouse_isolates_one_dead_board_from_others(
     monkeypatch: pytest.MonkeyPatch, mock_fetch
 ) -> None:
