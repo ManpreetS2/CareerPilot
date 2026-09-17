@@ -390,7 +390,7 @@ export function JobDetailPage() {
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <StatusBadge status={job.status} />
-              <SourceBadge source={job.source} />
+              <SourceBadge source={job.source} url={job.url} sourceUrl={job.source_url} />
               {job.content_status ? (
                 <span className="text-xs text-muted-foreground">Posting: {job.content_status}</span>
               ) : null}

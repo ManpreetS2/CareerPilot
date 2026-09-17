@@ -124,6 +124,11 @@ class JobRecord(Base):
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     salary: Mapped[str | None] = mapped_column(String(128), nullable=True)
     url: Mapped[str] = mapped_column(Text, nullable=False)
+    # The Fill/apply/verify/dedupe URL — never repointed for attribution
+    # purposes. source_url below is additive: an aggregator's own listing
+    # page, when that differs from url (e.g. Himalayas' applicationLink
+    # goes straight to the employer, bypassing himalayas.app entirely).
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(64), nullable=False)
     date_posted: Mapped[str | None] = mapped_column(String(32), nullable=True)

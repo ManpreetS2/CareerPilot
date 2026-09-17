@@ -121,6 +121,7 @@ class Job(BaseModel):
     location: str | None = None
     salary: str | None = None
     url: str
+    source_url: str | None = None
     description: str
     source: str
     date_posted: date | None = None

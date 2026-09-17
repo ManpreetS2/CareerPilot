@@ -47,7 +47,7 @@ export function JobPreviewPanel({
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusBadge status={job.status} />
-            <SourceBadge source={job.source} />
+            <SourceBadge source={job.source} url={job.url} sourceUrl={job.source_url} />
             {scoutedTimeAgo(job.date_scraped) ? (
               <span className="text-xs text-muted-foreground">{scoutedTimeAgo(job.date_scraped)}</span>
             ) : null}

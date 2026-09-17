@@ -95,6 +95,7 @@ export type Job = {
   location?: string | null;
   salary?: string | null;
   url: string;
+  source_url?: string | null;
   description: string;
   source: string;
   date_posted?: string | null;
