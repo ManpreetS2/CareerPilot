@@ -228,11 +228,19 @@ def main() -> int:
         page.get_by_test_id("match-evidence").wait_for()
         # Show the *actual supporting résumé text*, not merely the "Satisfied"
         # summary. Keep Docker's separate "Not enough evidence" row in frame.
-        python_factor = page.get_by_test_id("factor_skill_python")
+        # Verified Fit factors use hashed, importance-qualified IDs, not
+        # factor_skill_python (that stable ID exists only in mocked tests).
+        python_factor = (
+            page.get_by_test_id("evidence-section-required_skills")
+            .locator('[data-testid^="factor-factor_skill_required_"]')
+            .filter(has_text="Python")
+            .first
+        )
         python_factor.get_by_role("button", name="View evidence").click()
         drawer = page.get_by_test_id("evidence-drawer")
         drawer.get_by_text("Candidate evidence").wait_for()
-        python_factor.evaluate("el => el.scrollIntoView({ block: 'center', inline: 'nearest' })")
+        if drawer.get_by_text("No supporting candidate evidence found.").count():
+            raise SystemExit("Showcase Python evidence drawer has no candidate citation.")
         page.wait_for_timeout(400)
         page.screenshot(path=str(out / "04-match-evidence.png"), full_page=False)
 
