@@ -16,7 +16,7 @@ These files support a **portfolio showcase of the current mainline product**. Th
 | [screenshot-inventory.md](./screenshot-inventory.md) | What each image shows, capture revision, and how it was captured. |
 | [visual-qa.md](./visual-qa.md) | Visual/accessibility notes from screenshot capture, including three grounded Career Growth focus areas. |
 | [post-v1-maintenance-triage.md](./post-v1-maintenance-triage.md) | Informational post-v1 items. Not part of this showcase’s runtime. |
-| [screenshots/](./screenshots/) | Desktop PNG captures (1440×900). |
+| [screenshots/](./screenshots/) | Desktop PNG captures (1440×900); Evidence, Track, and Analytics images predate the final PR #113 fixes and must be recaptured before publishing. |
 | [fixtures/generic-ats-form.html](./fixtures/generic-ats-form.html) | Illustrative ATS form + side-panel mock for the Fill-boundary image. Not the extension runtime. |
 
 ## Released product vs this showcase revision
