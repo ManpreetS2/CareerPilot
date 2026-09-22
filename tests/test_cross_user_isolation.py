@@ -140,14 +140,9 @@ def test_user_without_candidate_cannot_read_another_users_score_or_interview(iso
 
     apps = client.get("/api/applications")
     assert apps.status_code == 200
-    shared = next(item for item in apps.json() if item["job_id"] == job_id)
-    assert shared["title"] == job_title
-    assert shared["match_score"] is None
-    assert shared["recommendation"] is None
-    assert shared["approval_status"] is None
-    assert shared["tracker_status"] is None
-    assert UNIQUE_MATCHED_SKILL not in json.dumps(shared)
-    assert UNIQUE_MISSING_SKILL not in json.dumps(shared)
+    assert all(item["job_id"] != job_id for item in apps.json())
+    assert UNIQUE_MATCHED_SKILL not in json.dumps(apps.json())
+    assert UNIQUE_MISSING_SKILL not in json.dumps(apps.json())
 
     dashboard = client.get("/api/dashboard/summary")
     assert dashboard.status_code == 200
