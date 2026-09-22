@@ -4,6 +4,6 @@ const SHOWCASE_COMPANIES: Record<string, string> = {
   "showcase-cedar-backend": "Cedar & Pine Robotics",
 };
 
-export function isSyntheticShowcasePosting(jobId: string, company: string): boolean {
-  return SHOWCASE_COMPANIES[jobId] === company;
+export function isSyntheticShowcasePosting(jobId: string | null | undefined, company: string): boolean {
+  return Boolean(jobId && SHOWCASE_COMPANIES[jobId] === company);
 }
