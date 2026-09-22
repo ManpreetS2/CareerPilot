@@ -69,6 +69,9 @@ jobs:
             exit 0
           fi
           git -c user.name='CareerPilot showcase capture' -c user.email='showcase-capture@users.noreply.github.com' commit -m 'docs: recapture synthetic showcase after tracker and evidence fixes [skip ci]'
+          # Discard only unstaged recaptures: the four approved images are already
+          # in HEAD, other generated PNGs must not block a clean rebase.
+          git reset --hard HEAD
           # Other regression fixes may have landed while Chromium captured;
           # replay this image-only commit onto the latest PR head.
           git fetch origin fix/tracker-scope-stale-scores-showcase
