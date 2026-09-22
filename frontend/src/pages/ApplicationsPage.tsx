@@ -311,7 +311,7 @@ export function ApplicationsPage() {
       ) : items.length === 0 ? (
         <EmptyState
           title="No applications yet"
-          description="Discovered jobs will appear here. Open a job to review materials, then set a tracking status when you are ready."
+          description="Save a job in Discover, prepare application materials, or start tracking a role to see it here."
           action={
             <Link to="/jobs" className="btn-primary">
               Browse jobs
