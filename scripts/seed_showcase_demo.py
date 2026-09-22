@@ -8,8 +8,8 @@ it is “safe.” Prints DEMO credentials for local screenshot capture.
 
 This script does not run on startup, does not delete files, and must not be
 pointed at a real user's database. Fit scores are calculated by the production
-scoring engine. Live resume parse / materials generation is attempted only when
-a provider is configured and the process is not under pytest.
+scoring engine. Live resume parse / materials generation is opt-in via
+CAREERPILOT_SHOWCASE_LIVE=1, requires a configured provider, and is disabled under pytest.
 """
 
 from __future__ import annotations
@@ -296,7 +296,7 @@ def _under_pytest() -> bool:
 def _should_try_live_providers() -> bool:
     if _under_pytest():
         return False
-    if os.environ.get("CAREERPILOT_SHOWCASE_LIVE", "").strip() == "0":
+    if os.environ.get("CAREERPILOT_SHOWCASE_LIVE", "").strip() != "1":
         return False
     from backend.services.llm_provider_sequence import (
         configured_provider_names,
@@ -335,7 +335,9 @@ def _parse_showcase_resume(session, user_id: int):
         try:
             build_candidate_profile_from_upload(**kwargs)
             parse_source = "live_provider"
-        except (ProfileExtractionError, LLMConfigurationError, LLMProviderError, Exception):
+        except (ProfileExtractionError, LLMConfigurationError, LLMProviderError) as exc:
+            print(f"Showcase live resume parse unavailable ({type(exc).__name__}); using faithful synthetic extraction.", file=sys.stderr)
+            session.rollback()
             build_candidate_profile_from_upload(**kwargs, generate_fn=_faithful_profile_generate)
             parse_source = "injected_faithful_extract"
     else:
@@ -449,8 +451,9 @@ def _seed_materials(session, intern, user_id: int, candidate) -> tuple[object, s
             MissingJobIntelligenceError,
             LLMConfigurationError,
             LLMProviderError,
-            Exception,
-        ):
+        ) as exc:
+            print(f"Showcase live materials generation unavailable ({type(exc).__name__}); using illustrative seed.", file=sys.stderr)
+            session.rollback()
             materials_source = "seeded_illustrative"
 
     if materials_source != "live_generation":
