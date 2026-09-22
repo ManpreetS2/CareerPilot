@@ -75,6 +75,36 @@ describe("ApplicationsPage", () => {
     expect(screen.getByText(/Extra Long Title/i)).toHaveClass("wrap-anywhere");
   });
 
+  it("shows verified Fit metadata on Track and keeps preliminary scores as Potential Match", async () => {
+    vi.mocked(api.listApplications).mockResolvedValue([
+      {
+        job_id: "verified-job",
+        title: "Verified intern",
+        company: "Harborline",
+        tracker_status: "ready_to_apply",
+        match_score: 96.3,
+        recommendation: "apply",
+        score_kind: "verified",
+        match_tier: "strong_match",
+        apply_recommendation: "apply",
+        confidence_level: "medium",
+      },
+      {
+        job_id: "preliminary-job",
+        title: "Preliminary intern",
+        company: "Cedar",
+        tracker_status: "saved",
+        match_score: 61.8,
+        recommendation: "consider",
+        score_kind: "preliminary",
+      },
+    ]);
+    renderTracker();
+    expect(await screen.findByText(/96% Strong Match/)).toBeInTheDocument();
+    expect(screen.getByText(/Potential Match/)).toBeInTheDocument();
+    expect(screen.queryByText(/62%/)).not.toBeInTheDocument();
+  });
+
   it("does not show follow-up calendar actions when no reminder date is set", async () => {
     renderTracker();
     await screen.findByText(/Extra Long Title/i);
