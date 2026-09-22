@@ -1,6 +1,6 @@
 # Visual QA — Phase 9 showcase capture
 
-Screens inspected while capturing the v1.0.0 showcase package. Light theme desktop PNGs are committed; dark, 390, 768, and 1280 were probed and not all committed.
+Screens inspected while capturing the current showcase package (newer than tagged v1.0.0). Light theme desktop PNGs are committed; dark, 390, 768, and 1280 were probed and not all committed.
 
 Format: SCREEN / ISSUE / SEVERITY / EVIDENCE / FIXED or DEFERRED / REASON.
 
@@ -18,9 +18,9 @@ REASON: Existing layout contract, not a regression to “fix” by changing trac
 SCREEN: Prepare at 1440×900
 ISSUE: Approval rail, eligibility checkbox, and resume versions sit below the fold under the match-summary card.
 SEVERITY: P2
-EVIDENCE: Unscrolled Prepare capture showed Fit summary only; approval is the human-gate story.
-FIXED / DEFERRED: FIXED for screenshots — capture script scrolls `[data-testid=approval-rail]`. Product layout unchanged.
-REASON: Scrolling is expected; changing Prepare persistence or approval flow would be a runtime change.
+EVIDENCE: Unscrolled Prepare capture showed Fit summary only; approval is the human-gate story. Weak seeded copy (“I am applying using stored Python…”) was replaced with role-specific illustrative seeded materials.
+FIXED / DEFERRED: FIXED for screenshots — capture script scrolls the Cover letter heading so letter and recruiter copy are readable; approval controls stay on the same page. Product layout unchanged.
+REASON: Scrolling is expected; changing Prepare persistence or approval flow would be a runtime change. Seeded materials are labeled in docs and source-traceability notes.
 
 ---
 
@@ -78,6 +78,15 @@ REASON: Showcase must not show the retired globe/lattice. Native 200% browser zo
 
 ---
 
+SCREEN: Discover job cards (selection / link semantics)
+ISSUE: The badge row used `stopPropagation`, so Potential Match, timestamps, and non-link source badges did not select the job. Aggregator source links were nested inside the card’s selection button.
+SEVERITY: was P2
+EVIDENCE: Current `JobCard` keeps title/company/meta in the select button; badges sit outside it. Article click selects unless the target is a source `<a>` or the save control. Chromium 390/1440: nested `a`/`button` inside `.job-card-select` is 0. Potential Match and Manual badges select Harborline/Cedar. Keyboard focus remains on `.job-card-select`.
+FIXED / DEFERRED: FIXED in this pass.
+REASON: Valid interactive nesting; source links stay independently clickable.
+
+---
+
 SCREEN: 390 Discover
 ISSUE: Long Cedar title wraps; second card company is below the fold, not overflowing the viewport.
 SEVERITY: P3
@@ -102,6 +111,15 @@ SEVERITY: n/a
 EVIDENCE: `08-assisted-fill-boundary-mock.png` + `fixtures/generic-ats-form.html`. Filename and alt text say mock; not the shipped extension runtime.
 FIXED / DEFERRED: FIXED (intentional)
 REASON: Illustrative mock, not the shipped extension. Live A8 remains the Fill certification. Submit is visible and was not clicked. EEO field left blank.
+
+---
+
+SCREEN: Discover Fit scores
+ISSUE: Previous seed used identical intelligence on both jobs, so Harborline and Cedar could not demonstrate a real strong vs partial Fit.
+SEVERITY: n/a (showcase data)
+EVIDENCE: Recaptured `03-discover.png` — Harborline 96% Strong Match, Cedar 62% Possible Match from production Fit V2 on the parsed synthetic résumé. Docker is preferred on Harborline and required on Cedar.
+FIXED / DEFERRED: FIXED in this showcase seed pass.
+REASON: Scores are calculated, not hardcoded. Percentage is qualification/preference alignment, not a hire or ATS probability.
 
 ---
 

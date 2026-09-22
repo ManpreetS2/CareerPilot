@@ -21,6 +21,14 @@ export function selectJobCardLabel(title: string, company: string): string {
   return `Select ${title} at ${company}`;
 }
 
+function clickIsOnOtherControl(event: { target: EventTarget | null }): boolean {
+  const target = event.target;
+  if (!(target instanceof Element)) return false;
+  if (target.closest("a[href]")) return true;
+  const button = target.closest("button");
+  return Boolean(button && !button.classList.contains("job-card-select"));
+}
+
 export function JobCard({
   job,
   match,
@@ -48,47 +56,53 @@ export function JobCard({
           ? "job-card-selected border-primary/45 bg-primary/[0.1] shadow-[0_0_24px_-12px_color-mix(in_srgb,var(--primary)_55%,transparent)]"
           : "hover:border-primary/30",
       )}
+      onClick={(event) => {
+        if (clickIsOnOtherControl(event)) return;
+        onSelect?.();
+      }}
     >
       <div className="flex items-start gap-3">
-        <button
-          type="button"
-          className="job-card-select flex min-w-0 flex-1 items-start gap-3 text-left"
-          onClick={onSelect}
-          aria-pressed={selected}
-          aria-label={selectJobCardLabel(job.title, job.company)}
-        >
-          <div
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-semibold text-primary"
-            aria-hidden
+        <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            className="job-card-select flex w-full items-start gap-3 text-left"
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect?.();
+            }}
+            aria-pressed={selected}
+            aria-label={selectJobCardLabel(job.title, job.company)}
           >
-            {companyInitial(job.company)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="wrap-anywhere font-semibold">{job.title}</p>
-            <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {formatJobCardMeta([job.location || null, workLabel(job), employment, job.salary || null])}
-            </p>
-            {/* SourceBadge can render as a link (aggregator sources) nested inside this
-                selection button — stop the click here so opening the source link doesn't
-                also toggle the card's selected state. */}
-            <div className="mt-2 flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
-              <SourceBadge source={job.source} url={job.url} sourceUrl={job.source_url} />
-              {seenAgo ? <span className="text-xs text-muted-foreground">{seenAgo}</span> : null}
-              <MatchBadge
-                score={match?.overall_score}
-                recommendation={match?.recommendation}
-                matchTier={match?.match_tier}
-                confidenceLevel={match?.confidence_level}
-                scoreKind={match?.score_kind}
-                compact
-              />
-              {match?.eligibility_status === "likely_ineligible" ? (
-                <span className="text-xs text-danger">Likely ineligible</span>
-              ) : null}
+            <div
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-semibold text-primary"
+              aria-hidden
+            >
+              {companyInitial(job.company)}
             </div>
+            <div className="min-w-0 flex-1">
+              <p className="wrap-anywhere font-semibold">{job.title}</p>
+              <p className="wrap-anywhere text-sm text-muted-foreground">{job.company}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formatJobCardMeta([job.location || null, workLabel(job), employment, job.salary || null])}
+              </p>
+            </div>
+          </button>
+          <div className="mt-2 flex flex-wrap items-center gap-2 pl-12">
+            <SourceBadge source={job.source} url={job.url} sourceUrl={job.source_url} />
+            {seenAgo ? <span className="text-xs text-muted-foreground">{seenAgo}</span> : null}
+            <MatchBadge
+              score={match?.overall_score}
+              recommendation={match?.recommendation}
+              matchTier={match?.match_tier}
+              confidenceLevel={match?.confidence_level}
+              scoreKind={match?.score_kind}
+              compact
+            />
+            {match?.eligibility_status === "likely_ineligible" ? (
+              <span className="text-xs text-danger">Likely ineligible</span>
+            ) : null}
           </div>
-        </button>
+        </div>
         {onToggleSave && job.id ? (
           <button
             type="button"

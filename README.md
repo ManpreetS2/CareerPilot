@@ -12,7 +12,7 @@ CareerPilot is a local/self-hostable workspace that turns a real resume into a g
 
 **Release:** [v1.0.0](https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0) · tagged `b73a983ed3605d498aa90070c3b5f786a73bc525` · certified runtime `7b6c3ee100ca4fe6399ac29441bece8df71783c7`
 
-There is no hosted demo and no Chrome Web Store listing. Run it locally.
+There is no hosted demo and no Chrome Web Store listing. This repository is **source-visible** for inspection; it is not open source. The screenshots below are a later showcase recapture of current mainline UI — they are not the tagged v1.0.0 tree and they do not recertify A8/A9/Phase 6. LICENSE does not grant permission to run, copy, or deploy CareerPilot without prior written permission from the applicable copyright holder(s). See [License and source use](#license-and-source-use).
 
 ![Discover workspace with two synthetic internships and a Potential Match preview](docs/showcase/screenshots/03-discover.png)
 
@@ -36,7 +36,7 @@ Profile → Discover → Analyze → Prepare → Track
 
 ![Job analysis Evidence tab citing Python and SQL, with Docker marked not enough evidence](docs/showcase/screenshots/04-match-evidence.png)
 
-![Prepare page with approved materials, eligibility confirmation, and an immutable resume version](docs/showcase/screenshots/05-prepare.png)
+![Prepare page with illustrative seeded Harborline materials and human approval on the same page](docs/showcase/screenshots/05-prepare.png)
 
 ![Illustrative compatibility mock — not the extension runtime. Assisted fields filled, EEO left manual, Submit not clicked. Live Greenhouse/Lever Fill was separately certified on Chrome 152.](docs/showcase/screenshots/08-assisted-fill-boundary-mock.png)
 
@@ -182,10 +182,14 @@ Writing the production file `data/careerpilot.db` also requires `--confirm-produ
 - Assisted apply and the browser extension **never click submit**. The human reviews and submits.
 - Page load for Jobs, Job Detail, Prepare Application, Fit Score, Resume, and Interview Prep is read-only. Calculate Fit and generation run only on an explicit user action. Find Jobs also persists a deterministic fit score for scoreable listings (no LLM).
 - Private records are user-scoped. Shared job titles may be visible to every signed-in user; scores, recommendations, packages, tracker state, approval, interview evidence, Career Growth aggregates, analytics events, and saved searches are not.
+- Application records and uploaded files are stored in the deployment running CareerPilot (local SQLite by default). Configured AI providers and endpoints can receive resume text, candidate evidence, or job content for requested AI operations. A local-first `LLM_PROVIDER_ORDER` does not guarantee local-only processing if a cloud fallback is configured. Ollama can also point at a remote host.
+- Fit scoring is deterministic and does not call an AI provider. Human approval is still required before materials are treated as approved.
 - You can delete your account from Settings. That removes owner-scoped private data and revokes sessions. It does not delete the shared job catalog.
 - Vulnerability reports: see [`.github/SECURITY.md`](./.github/SECURITY.md).
 
 ## Setup
+
+These steps are for people who already have **prior written permission** to run CareerPilot. Public viewing of this repository is not a license to install, copy, or deploy it. If you want evaluation access, request permission from the applicable repository maintainer or copyright holder as described in [LICENSE](./LICENSE).
 
 Requires **Python 3.11+**. **Node.js 22.12+** is recommended (CI uses Node 22). **Node.js 20.19+** is supported. The committed frontend lockfile graph includes packages that declare `^20.19.0 || ^22.12.0 || >=24.0.0`; do not assume Node 20.0 works.
 
@@ -285,7 +289,7 @@ See `browser-extension/README.md` for selector, CSP, and attachment details.
 
 ## Run
 
-Use the **same hostname** for the UI and API (`127.0.0.1` with `127.0.0.1`, or `localhost` with `localhost`). Mixing them splits the `SameSite=Lax` session cookie.
+For authorized operators only. Use the **same hostname** for the UI and API (`127.0.0.1` with `127.0.0.1`, or `localhost` with `localhost`). Mixing them splits the `SameSite=Lax` session cookie.
 
 Terminal 1 — backend:
 
@@ -358,13 +362,13 @@ python scripts/live_ollama_gemini_check.py
 
 ## Git and release workflow
 
-Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen. A8/A9/Phase 6 certified runtime SHA `7b6c3ee100ca4fe6399ac29441bece8df71783c7`. Tag `v1.0.0` already shipped and points at `b73a983ed3605d498aa90070c3b5f786a73bc525` (GitHub Release exists). Remaining work is showcase/docs polish, not a new tag: https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
+Do **not** commit directly to `main`. Work on feature branches and merge through pull requests. v1 feature development is frozen. A8/A9/Phase 6 certified runtime SHA `7b6c3ee100ca4fe6399ac29441bece8df71783c7` is a historical certification of that revision only. Tag `v1.0.0` already shipped and points at `b73a983ed3605d498aa90070c3b5f786a73bc525` (GitHub Release exists). Later mainline and showcase screenshot recaptures do not inherit that certification and are not a new tagged release: https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
 
 ## Demo path
 
-A recruiter can follow the product without extra tooling.
+Authorized operators can follow the product on an isolated database. Visitors without permission should not treat this as an invitation to run or deploy the software.
 
-Spoken script and screenshot recapture: [`docs/showcase/demo-script.md`](docs/showcase/demo-script.md). Operator boot: [`docs/demo-runbook.md`](docs/demo-runbook.md). Isolated synthetic data: `python scripts/seed_showcase_demo.py --database <temp.sqlite>` (refuses `data/careerpilot.db`).
+Spoken script and screenshot recapture: [`docs/showcase/demo-script.md`](docs/showcase/demo-script.md). Operator boot (authorized use): [`docs/demo-runbook.md`](docs/demo-runbook.md). Isolated synthetic data: `python scripts/seed_showcase_demo.py --database <temp.sqlite>` (refuses `data/careerpilot.db`).
 
 Canonical clicks:
 
@@ -418,9 +422,11 @@ Optional: Career Growth, Analytics, Interview Coach on Job Detail, Resume librar
 
 ## License and source use
 
-CareerPilot is source-visible for portfolio, evaluation, and collaboration purposes, but it is not an open-source project.
+CareerPilot is **source-visible** for portfolio inspection, evaluation discussion, and collaboration. It is **not** an open-source project, and public GitHub viewing is not permission to run or deploy it.
 
-Unless a file explicitly states otherwise, original CareerPilot source is protected by copyright and no permission is granted to copy, modify, redistribute, sublicense, sell, deploy, or create derivative works without prior written permission from the applicable copyright holder(s).
+Unless a file explicitly states otherwise, original CareerPilot source is protected by copyright. No permission is granted to use, copy, modify, redistribute, sublicense, sell, host, or deploy CareerPilot, or to create derivative works, without prior written permission from the applicable copyright holder(s).
+
+Setup and Run instructions above are for authorized operators. If you want evaluation access, contact the applicable CareerPilot repository maintainer or copyright holder as described in [LICENSE](./LICENSE).
 
 Third-party dependencies remain subject to their own licenses.
 

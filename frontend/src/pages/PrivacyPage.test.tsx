@@ -23,8 +23,10 @@ describe("PrivacyPage", () => {
     );
     expect(screen.getByRole("heading", { name: "Privacy" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Log in" })).toHaveAttribute("href", "/login");
-    expect(screen.getByText(/local SQLite database/i)).toBeInTheDocument();
+    expect(screen.getByText(/application records and uploaded files/i)).toBeInTheDocument();
     expect(screen.getByText(/Fit scoring is deterministic/i)).toBeInTheDocument();
+    expect(screen.getByText(/on this machine or a remote endpoint/i)).toBeInTheDocument();
+    expect(screen.getByText(/local-first provider order still reaches a cloud fallback/i)).toBeInTheDocument();
     expect(screen.getByText(/Career Growth \/ Skills Gap insights are computed/i)).toBeInTheDocument();
     expect(screen.getByText(/does not claim end-to-end encryption, SOC 2, HIPAA/i)).toBeInTheDocument();
     expect(screen.queryByText(/we are SOC 2 certified/i)).not.toBeInTheDocument();

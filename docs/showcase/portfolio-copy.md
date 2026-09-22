@@ -1,10 +1,11 @@
 # Portfolio, LinkedIn, and interview copy
 
-Facts below are tied to the public v1.0.0 release. Do not add user counts, placement rates, or “used by recruiters.”
+Facts below are tied to the public **v1.0.0** release unless a sentence explicitly says it describes a later showcase recapture. Do not add user counts, placement rates, or “used by recruiters.” Do not claim later mainline screenshots inherited A8/A9 certification.
 
 **Release:** https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
 **Tagged commit:** `b73a983ed3605d498aa90070c3b5f786a73bc525`
 **Certified runtime (A8/A9/Phase 6):** `7b6c3ee100ca4fe6399ac29441bece8df71783c7`
+**Showcase screenshots:** newer mainline recapture after `7038b76`, not the tagged tree. Source is visible, not open source; running it still needs prior written permission.
 
 ## A. Portfolio description
 
@@ -28,7 +29,7 @@ The hard parts were the unglamorous ones: user isolation, stale-data invalidatio
 
 Source and release notes: https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
 
-Local/self-hostable. No hosted demo, no Chrome Web Store listing, no claim that it applies for you.
+Source-visible on GitHub, not open source. No hosted demo, no Chrome Web Store listing, no claim that it applies for you. Running or deploying it still needs prior written permission.
 
 ## D. Interview talking points
 
@@ -37,7 +38,7 @@ Local/self-hostable. No hosted demo, no Chrome Web Store listing, no claim that 
 3. **Human boundary.** Approval, EEO, terms, and Submit are human. Tracker `applied` is not proof that CareerPilot submitted anything.
 4. **Identity.** Greenhouse/Lever matching uses ATS posting identity, not “similar title at similar company.”
 5. **Privacy.** Private rows are owner-scoped, including analytics and saved searches. Deletion revokes sessions. Tests never touch `data/careerpilot.db`.
-6. **Release engineering.** Runtime was certified on `7b6c3ee…` (A8/A9/Phase 6). The annotated tag is `b73a983…`. Those SHAs are different on purpose: last-mile docs after certification.
+6. **Release engineering.** Runtime was certified on `7b6c3ee…` (A8/A9/Phase 6). The annotated tag is `b73a983…`. Those SHAs are different on purpose: last-mile docs after certification. Later showcase screenshots are a newer recapture and do not recertify Fill.
 
 ## E. Hardest engineering problems
 
