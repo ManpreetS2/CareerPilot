@@ -4,7 +4,7 @@ Primary viewport: **1440×900**, light theme, `prefers-reduced-motion: reduce`, 
 
 **Tagged release:** v1.0.0 at `b73a983ed3605d498aa90070c3b5f786a73bc525`. **Certified runtime** for Fill/isolation remains `7b6c3ee100ca4fe6399ac29441bece8df71783c7` and applies only to that revision.
 
-**Showcase capture revision:** recaptured from current mainline after `7038b76` with résumé-to-job Fit demo data (parsed synthetic Jordan Avery résumé, Harborline 96% vs Cedar 62%). This is a newer screenshot revision, not a recertification and not a moved tag.
+**Showcase capture revision:** the committed PNGs were recaptured from mainline after `7038b76` with résumé-to-job Fit demo data (parsed synthetic Jordan Avery résumé, Harborline 96% vs Cedar 62%). **Important: 04-match-evidence.png, 06-track.png, and 06b-analytics.png predate the verification-label, Track-badge, and Analytics-notice fixes in PR #113. They are historical images, not accurate screenshots of the newest code. Recapture all three before using them in LinkedIn or a current-product walkthrough.** This is not a recertification or a moved tag.
 
 Data: isolated SQLite from `scripts/seed_showcase_demo.py`. Not `data/careerpilot.db`. Fit scores are production Fit V2 results for the synthetic Jordan Avery résumé. Provider calls are disabled by default; explicitly set `CAREERPILOT_SHOWCASE_LIVE=1` for configured live extraction/generation. Prepare copy is **illustrative seeded materials** unless the seeder reported live generation.
 
