@@ -84,6 +84,7 @@ def test_tracker_list_includes_verified_fit_metadata_without_leaking_other_users
         )
     )
     isolated_session.commit()
+    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
     owned = list_applications(isolated_session, TEST_USER_ID)[0]
     assert owned.score_kind == "verified"
     assert owned.match_score == pytest.approx(96.3)
