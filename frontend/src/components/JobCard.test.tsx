@@ -65,6 +65,13 @@ describe("JobCard", () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
+  it("marks only the reserved fictional showcase postings as synthetic", () => {
+    const { rerender } = render(<JobCard job={job({ id: "showcase-harborline-intern" })} />);
+    expect(screen.getByText(/Synthetic demo · not a real posting/)).toBeInTheDocument();
+    rerender(<JobCard job={job({ id: "real-harborline-job" })} />);
+    expect(screen.queryByText(/Synthetic demo · not a real posting/)).not.toBeInTheDocument();
+  });
+
   it("marks the select control as pressed when the card is selected", () => {
     render(
       <JobCard
