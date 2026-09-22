@@ -14,7 +14,7 @@ CareerPilot is a local/self-hostable workspace that turns a real resume into a g
 
 There is no hosted demo and no Chrome Web Store listing. This repository is **source-visible** for inspection; it is not open source. The screenshots below are a later showcase recapture of current mainline UI — they are not the tagged v1.0.0 tree and they do not recertify A8/A9/Phase 6. LICENSE does not grant permission to run, copy, or deploy CareerPilot without prior written permission from the applicable copyright holder(s). See [License and source use](#license-and-source-use).
 
-![Discover workspace with two synthetic internships and a Potential Match preview](docs/showcase/screenshots/03-discover.png)
+![Discover workspace showing two fictional internships with distinct verified Fit scores](docs/showcase/screenshots/03-discover.png)
 
 ## Why CareerPilot is different
 
