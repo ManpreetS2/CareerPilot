@@ -16,7 +16,20 @@ const LABELS: Record<string, string> = {
 const ATS_SOURCES = new Set(["greenhouse", "lever"]);
 const AGGREGATOR_SOURCES = new Set(["adzuna", "remoteok", "remotive", "jobicy", "himalayas"]);
 
-export function SourceBadge({ source }: { source: string }) {
+export function SourceBadge({
+  source,
+  url,
+  sourceUrl,
+}: {
+  source: string;
+  /** The job's own url — for most aggregators this already points at
+   * their own site, so it's the fallback attribution link. */
+  url?: string | null;
+  /** An aggregator's own listing page, when that differs from `url`
+   * (Himalayas' url is a direct employer application link that bypasses
+   * himalayas.app entirely). Takes priority over `url` when present. */
+  sourceUrl?: string | null;
+}) {
   const normalized = source.toLowerCase();
   const label = LABELS[normalized] ?? source;
 
@@ -28,12 +41,32 @@ export function SourceBadge({ source }: { source: string }) {
 
   const Icon = ATS_SOURCES.has(normalized) ? Building2 : AGGREGATOR_SOURCES.has(normalized) ? Globe2 : Link2;
 
-  return (
-    <span className={`status-pill ${tone}`}>
+  const content = (
+    <>
       <Icon className="h-3.5 w-3.5" aria-hidden />
       {label}
-    </span>
+    </>
   );
+
+  // Attribution link only for aggregators — an ATS badge (Greenhouse/Lever)
+  // or "Manual" linking to itself would be redundant with the existing
+  // "Open posting" action, which already points at the real posting.
+  const href = AGGREGATOR_SOURCES.has(normalized) ? sourceUrl || url || null : null;
+  if (href) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className={`status-pill ${tone} hover:opacity-80`}
+        aria-label={`${label} — open original listing`}
+      >
+        {content}
+      </a>
+    );
+  }
+
+  return <span className={`status-pill ${tone}`}>{content}</span>;
 }
 
 /** date_scraped arrives as a naive UTC timestamp (SQLite drops tzinfo), and
