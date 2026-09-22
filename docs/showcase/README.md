@@ -35,7 +35,7 @@ Public source is **source-visible**, not open source. Setup instructions in the 
 
 ## How screenshots were generated
 
-1. Seed a **brand-new** isolated SQLite file with `scripts/seed_showcase_demo.py` (refuses `data/careerpilot.db`, production-looking names, and any path that already exists).
+1. Seed a **brand-new** isolated SQLite file with `scripts/seed_showcase_demo.py` (refuses `data/careerpilot.db`, production-looking names, and any path that already exists). Provider calls are disabled by default; `CAREERPILOT_SHOWCASE_LIVE=1` explicitly opts in when providers are configured. Automated tests never call live providers.
 2. Run backend and frontend against that database only (authorized local use).
 3. Capture 1440×900 PNGs with `scripts/capture_showcase_screenshots.py` (loopback-only, synthetic showcase identity, Playwright, reduced motion, no Submit, no EEO fill).
 4. The Fill image uses `fixtures/generic-ats-form.html` — an **illustrative compatibility mock**, not the shipped extension runtime, not a live employer page, and not an endorsement. Live Greenhouse/Lever Fill was certified on Chrome 152 (A8) at `7b6c3ee`.
