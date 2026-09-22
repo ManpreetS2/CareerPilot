@@ -116,7 +116,14 @@ function TrackerCard({
           <p className="wrap-anywhere text-sm text-muted-foreground">{item.company}</p>
           <p className="mt-1 text-xs text-muted-foreground">Updated {formatUpdated(item.updated_at)}</p>
         </div>
-        <MatchBadge score={item.match_score} recommendation={item.recommendation} />
+        <MatchBadge
+          score={item.match_score}
+          recommendation={item.recommendation}
+          scoreKind={item.score_kind}
+          matchTier={item.match_tier}
+          applyRecommendation={item.apply_recommendation}
+          confidenceLevel={item.confidence_level}
+        />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {item.approval_status ? (
