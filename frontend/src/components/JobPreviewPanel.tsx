@@ -7,6 +7,7 @@ import { Glass } from "./ui/glass";
 import { ScoreOrb } from "./signature/ScoreOrb";
 import { formatJobCardMeta } from "../lib/job-meta";
 import { chipLabel } from "../lib/search-intent";
+import { isSyntheticShowcasePosting } from "../lib/showcase";
 import { cn } from "../lib/cn";
 import type { Job, MatchScore } from "../lib/types";
 
@@ -47,6 +48,9 @@ export function JobPreviewPanel({
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusBadge status={job.status} />
+            {isSyntheticShowcasePosting(job.id, job.company) ? (
+              <span className="status-pill border border-warning/40 bg-warning/10 text-warning">Synthetic demo · not a real posting</span>
+            ) : null}
             <SourceBadge source={job.source} url={job.url} sourceUrl={job.source_url} />
             {scoutedTimeAgo(job.date_scraped) ? (
               <span className="text-xs text-muted-foreground">{scoutedTimeAgo(job.date_scraped)}</span>
