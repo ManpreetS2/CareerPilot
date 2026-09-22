@@ -32,6 +32,7 @@ from backend.db.models import (
     JobRecord,
     MatchScoreRecord,
 )
+from backend.services.analysis_service import _stored_score_is_stale
 from backend.schemas.analytics import (
     FUNNEL_STAGE_LABELS,
     ApplicationAnalyticsSummary,
@@ -175,17 +176,23 @@ def build_conversion_analytics(db: Session, user_id: int) -> ApplicationAnalytic
     if saved_population and candidate is not None:
         jobs_by_band: dict[str, set[int]] = defaultdict(set)
         scores = (
-            db.query(MatchScoreRecord.job_id, MatchScoreRecord.overall_score)
+            db.query(MatchScoreRecord, JobRecord)
+            .join(JobRecord, MatchScoreRecord.job_id == JobRecord.id)
             .filter(
                 MatchScoreRecord.job_id.in_(saved_population),
                 MatchScoreRecord.candidate_id == candidate.id,
             )
             .all()
         )
-        for job_id, overall_score in scores:
-            band = _score_band_label(overall_score)
+        for match, job in scores:
+            # Mirror the canonical stored-Fit API: changing the résumé,
+            # preferences, or requirements must not leave a historical score
+            # presented as the user's current match band.
+            if _stored_score_is_stale(db, match, job, candidate, user_id):
+                continue
+            band = _score_band_label(match.overall_score)
             if band is not None:
-                jobs_by_band[band].add(job_id)
+                jobs_by_band[band].add(job.id)
         for label, _lower, _upper in _SCORE_BANDS:
             if label in jobs_by_band:
                 by_match_score_band.append(_bucket(label, applied_jobs, jobs_by_band[label]))
