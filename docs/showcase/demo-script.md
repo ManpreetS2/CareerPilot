@@ -121,6 +121,6 @@ If you are on a cold database, click Find Jobs and wait for the API to return. D
 
 **Say, Analytics:** Funnel is this account’s events. Applied, interview, and offer stay zero until you record them. No fake success metrics.
 
-**Say, Growth:** If there is no stored Match Evidence to aggregate, the page says so. It will not invent a skills-gap story.
+**Say, Growth:** The seeded profile has three focus areas across two analyzed fictional jobs, including Docker and AWS evidence gaps. It does not invent candidate experience or promise a hiring outcome.
 
 Stop. Do not open Settings unless asked about deletion.
