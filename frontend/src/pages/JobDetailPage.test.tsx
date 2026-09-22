@@ -200,7 +200,7 @@ describe("JobDetailPage", () => {
   it("distinguishes a catalog Verified status from a recorded live posting check", async () => {
     mockJob({ status: "verified", verified_at: null, verification_notes: null });
     renderJob();
-    expect(await screen.findByText(/Catalog status:/)).toHaveTextContent("Catalog status: Verified");
+    expect(await screen.findByText(/Catalog status:/)).toHaveTextContent("Catalog status: verified");
     expect(screen.getByText(/No live posting check has been recorded/)).toBeInTheDocument();
     expect(screen.queryByText(/Not verified yet/)).not.toBeInTheDocument();
   });
@@ -212,7 +212,7 @@ describe("JobDetailPage", () => {
       verification_notes: "Posting was checked against employer evidence.",
     });
     renderJob();
-    expect(await screen.findByText(/Catalog status:/)).toHaveTextContent("Catalog status: Verified");
+    expect(await screen.findByText(/Catalog status:/)).toHaveTextContent("Catalog status: verified");
     expect(screen.getByText("Posting was checked against employer evidence.")).toBeInTheDocument();
     expect(screen.getByText(/Last checked/)).toBeInTheDocument();
     expect(screen.queryByText(/No live posting check has been recorded/)).not.toBeInTheDocument();
