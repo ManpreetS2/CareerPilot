@@ -226,9 +226,13 @@ def main() -> int:
         page.goto(f"{base}/jobs/{job_id}", wait_until="networkidle")
         page.get_by_role("tab", name="Evidence").click()
         page.get_by_test_id("match-evidence").wait_for()
-        docker = page.get_by_test_id("match-evidence").get_by_text("Docker")
-        if docker.count():
-            docker.first.evaluate("el => el.scrollIntoView({ block: 'center', inline: 'nearest' })")
+        # Show the *actual supporting résumé text*, not merely the "Satisfied"
+        # summary. Keep Docker's separate "Not enough evidence" row in frame.
+        python_factor = page.get_by_test_id("factor_skill_python")
+        python_factor.get_by_role("button", name="View evidence").click()
+        drawer = page.get_by_test_id("evidence-drawer")
+        drawer.get_by_text("Candidate evidence").wait_for()
+        python_factor.evaluate("el => el.scrollIntoView({ block: 'center', inline: 'nearest' })")
         page.wait_for_timeout(400)
         page.screenshot(path=str(out / "04-match-evidence.png"), full_page=False)
 
