@@ -93,9 +93,8 @@ def test_tracker_list_includes_verified_fit_metadata_without_leaking_other_users
     assert owned.confidence_level == "medium"
 
     ensure_user(isolated_session, TEST_USER_ID + 1)
-    other = list_applications(isolated_session, TEST_USER_ID + 1)[0]
-    assert other.match_score is None
-    assert other.score_kind is None
+    other = list_applications(isolated_session, TEST_USER_ID + 1)
+    assert other == []  # Neither another user's job nor their match is in Track.
 
 
 def test_tracker_missing_job_404(isolated_session) -> None:
