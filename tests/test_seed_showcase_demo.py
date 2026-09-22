@@ -247,6 +247,18 @@ def test_seed_creates_synthetic_user_on_brand_new_path(tmp_path: Path, monkeypat
         engine.dispose()
 
 
+def test_showcase_live_provider_calls_are_explicit_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import seed_showcase_demo
+
+    monkeypatch.delenv("CAREERPILOT_SHOWCASE_LIVE", raising=False)
+    assert seed_showcase_demo._should_try_live_providers() is False
+    monkeypatch.setenv("CAREERPILOT_SHOWCASE_LIVE", "0")
+    assert seed_showcase_demo._should_try_live_providers() is False
+    monkeypatch.setenv("CAREERPILOT_SHOWCASE_LIVE", "1")
+    # pytest is a hard guard: even explicit opt-in cannot make test runs call providers.
+    assert seed_showcase_demo._should_try_live_providers() is False
+
+
 def test_refuse_message_is_operator_actionable() -> None:
     assert "already exists" in EXISTING_DESTINATION_MESSAGE
     assert "delete" in EXISTING_DESTINATION_MESSAGE.lower()
