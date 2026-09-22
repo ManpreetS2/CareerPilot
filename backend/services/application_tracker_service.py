@@ -20,6 +20,7 @@ from backend.db.models import (
     Candidate,
     JobRecord,
     MatchScoreRecord,
+    SavedJobRecord,
     TargetPreference,
 )
 from backend.schemas.schemas import (
@@ -30,6 +31,7 @@ from backend.schemas.schemas import (
     TrackerStatus,
 )
 from backend.services.analytics_service import record_event
+from backend.services.analysis_service import _stored_score_is_stale
 
 logger = logging.getLogger(__name__)
 
@@ -247,31 +249,46 @@ def get_reminder_export_details(db: Session, job_id: str, user_id: int) -> Remin
 
 
 def list_applications(db: Session, user_id: int) -> list[ApplicationListItem]:
-    """Read-only list of stored jobs with optional tracker/package/score fields."""
+    """Read-only owner-scoped pipeline, not the global Discover catalog.
 
-    jobs = db.query(JobRecord).order_by(JobRecord.id.desc()).all()
+    A user's saved bookmark, tracker row, or materials package qualifies a
+    shared job for Track. A score alone does not mean the user saved or applied.
+    """
+
+    saved = db.query(SavedJobRecord).filter(SavedJobRecord.user_id == user_id).all()
+    trackers = db.query(ApplicationTrackerRecord).filter(ApplicationTrackerRecord.user_id == user_id).all()
+    packages = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.user_id == user_id).all()
+    saved_by_job = {row.job_id: row for row in saved}
+    tracker_by_job = {row.job_id: row for row in trackers}
+    package_by_job = {row.job_id: row for row in packages}
+    owned_job_ids = set(saved_by_job) | set(tracker_by_job) | set(package_by_job)
+    if not owned_job_ids:
+        return []
+
+    jobs = (
+        db.query(JobRecord)
+        .filter(JobRecord.id.in_(owned_job_ids))
+        .order_by(JobRecord.id.desc())
+        .all()
+    )
     candidate = _latest_candidate(db, user_id)
     candidate_id = candidate.id if candidate else None
     items: list[ApplicationListItem] = []
     for job in jobs:
-        tracker = (
-            db.query(ApplicationTrackerRecord)
-            .filter(ApplicationTrackerRecord.job_id == job.id, ApplicationTrackerRecord.user_id == user_id)
-            .first()
-        )
-        package = (
-            db.query(ApplicationPackageRecord)
-            .filter(ApplicationPackageRecord.job_id == job.id, ApplicationPackageRecord.user_id == user_id)
-            .first()
-        )
+        tracker = tracker_by_job.get(job.id)
+        package = package_by_job.get(job.id)
         match = _latest_match_for_job(db, job.id, candidate_id)
+        if match is not None and candidate is not None and _stored_score_is_stale(
+            db, match, job, candidate, user_id
+        ):
+            match = None
         updated_at = None
         if tracker is not None:
             updated_at = tracker.updated_at
         elif package is not None:
             updated_at = package.created_at
-        elif job.date_scraped is not None:
-            updated_at = job.date_scraped
+        elif job.id in saved_by_job:
+            updated_at = saved_by_job[job.id].created_at
         items.append(
             ApplicationListItem(
                 job_id=job.public_id,
@@ -416,7 +433,12 @@ def get_dashboard_summary(db: Session, user_id: int) -> DashboardSummary:
     candidate_id = candidate.id if candidate else None
     for job in jobs:
         match = _latest_match_for_job(db, job.id, candidate_id)
-        if match is not None and match.recommendation == "apply":
+        if (
+            match is not None
+            and candidate is not None
+            and match.recommendation == "apply"
+            and not _stored_score_is_stale(db, match, job, candidate, user_id)
+        ):
             high_matches += 1
 
     applications_saved = 0
