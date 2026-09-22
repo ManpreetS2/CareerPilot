@@ -33,7 +33,7 @@ Stop. Do not open Settings. Do not click Submit.
 
 ### Fallback if a provider is down
 
-Fit still works. Skip Generate Materials / Job Intelligence / interview feedback. Say: “Those steps need a configured model. Fit does not.” This showcase seed parsed the synthetic résumé with a live provider when one answered; materials generation returned 503 and kept **illustrative seeded materials**. Do not call that Prepare text live-generated.
+Fit still works. Skip Generate Materials / Job Intelligence / interview feedback. Say: “Those steps need a configured model. Fit does not.” The committed showcase capture used a live résumé parse and illustrative seeded materials after materials generation returned 503. A fresh seed run defaults to faithful synthetic extraction and illustrative seeded materials; live provider calls require `CAREERPILOT_SHOWCASE_LIVE=1`. Do not imply a new default run made live calls. Do not call that Prepare text live-generated.
 
 ### Fallback if you cannot show a live ATS
 
