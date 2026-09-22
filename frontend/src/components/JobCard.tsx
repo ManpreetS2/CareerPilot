@@ -4,6 +4,7 @@ import { scoutedTimeAgo, SourceBadge } from "./SourceBadge";
 import { cn } from "../lib/cn";
 import { formatJobCardMeta } from "../lib/job-meta";
 import { chipLabel } from "../lib/search-intent";
+import { isSyntheticShowcasePosting } from "../lib/showcase";
 import type { Job, MatchScore } from "../lib/types";
 
 export { formatJobCardMeta } from "../lib/job-meta";
@@ -89,6 +90,9 @@ export function JobCard({
           </button>
           <div className="mt-2 flex flex-wrap items-center gap-2 pl-12">
             <SourceBadge source={job.source} url={job.url} sourceUrl={job.source_url} />
+            {isSyntheticShowcasePosting(job.id, job.company) ? (
+              <span className="status-pill border border-warning/40 bg-warning/10 text-warning">Synthetic demo · not a real posting</span>
+            ) : null}
             {seenAgo ? <span className="text-xs text-muted-foreground">{seenAgo}</span> : null}
             <MatchBadge
               score={match?.overall_score}
