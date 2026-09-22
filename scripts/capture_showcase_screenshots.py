@@ -238,7 +238,7 @@ def main() -> int:
         )
         python_factor.get_by_role("button", name="View evidence").click()
         drawer = page.get_by_test_id("evidence-drawer")
-        drawer.get_by_text("Candidate evidence").wait_for()
+        drawer.get_by_text("Candidate evidence", exact=True).wait_for()
         if drawer.get_by_text("No supporting candidate evidence found.").count():
             raise SystemExit("Showcase Python evidence drawer has no candidate citation.")
         page.wait_for_timeout(400)
