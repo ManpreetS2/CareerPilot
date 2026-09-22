@@ -130,4 +130,4 @@ EVIDENCE: Dark login probe.
 FIXED / DEFERRED: DEFERRED for committed set
 REASON: One theme in the public screenshot strip. Dark is supported.
 
-No P0 or P1 visual defects. Track Kanban overflow, Prepare below-fold approval, and default Overview tab stay by design. Discover and Analyze both show Harborline as `Remote · Internship`. Cedar Discover shows `Portland, OR · Hybrid · Internship`. Public landing/auth use PublicStage; the dotted globe remains on Dashboard only. Career Growth recapture still refuses to invent skill gaps.
+No P0 or P1 visual defects. Track Kanban overflow, Prepare below-fold approval, and default Overview tab stay by design. Discover and Analyze both show Harborline as `Remote · Internship`. Cedar Discover shows `Portland, OR · Hybrid · Internship`. Public landing/auth use PublicStage; the dotted globe remains on Dashboard only. Career Growth identifies Docker/AWS evidence gaps without fabricating candidate skills.
