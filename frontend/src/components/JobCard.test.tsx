@@ -53,4 +53,17 @@ describe("JobCard", () => {
       /\.job-card-select:focus-visible[\s\S]*?outline:\s*2px solid var\(--ring\);[\s\S]*?outline-offset:\s*2px;/,
     );
   });
+
+  it("opens an aggregator source's link without also selecting the card", async () => {
+    const onSelect = vi.fn();
+    render(
+      <JobCard
+        job={job({ source: "remoteok", url: "https://remoteok.com/remote-jobs/123" })}
+        onSelect={onSelect}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /RemoteOK — open original listing/i });
+    await userEvent.click(link);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });

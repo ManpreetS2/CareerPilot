@@ -49,6 +49,7 @@ def record_to_job(
         location=record.location,
         salary=record.salary,
         url=record.url,
+        source_url=getattr(record, "source_url", None),
         description=record.description,
         source=record.source,
         date_posted=posted_date_for_display(record.date_posted),
