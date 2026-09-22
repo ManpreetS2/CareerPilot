@@ -14,7 +14,7 @@ These files support a **portfolio showcase of the current mainline product**. Th
 | [portfolio-copy.md](./portfolio-copy.md) | Portfolio, resume, LinkedIn, and interview language. |
 | [architecture.md](./architecture.md) | Compact architecture diagram (one local app, not microservices). |
 | [screenshot-inventory.md](./screenshot-inventory.md) | What each image shows, capture revision, and how it was captured. |
-| [visual-qa.md](./visual-qa.md) | Visual/accessibility notes from screenshot capture. |
+| [visual-qa.md](./visual-qa.md) | Visual/accessibility notes from screenshot capture, including three grounded Career Growth focus areas. |
 | [post-v1-maintenance-triage.md](./post-v1-maintenance-triage.md) | Informational post-v1 items. Not part of this showcase’s runtime. |
 | [screenshots/](./screenshots/) | Desktop PNG captures (1440×900). |
 | [fixtures/generic-ats-form.html](./fixtures/generic-ats-form.html) | Illustrative ATS form + side-panel mock for the Fill-boundary image. Not the extension runtime. |
