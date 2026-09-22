@@ -60,10 +60,10 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:8000/health > /dev/null
           python scripts/capture_showcase_screenshots.py --base-url http://127.0.0.1:5173 --out docs/showcase/screenshots
-      - name: Commit only the four corrected synthetic screenshots
+      - name: Commit only the five corrected synthetic screenshots
         run: |
           set -euo pipefail
-          git add -- docs/showcase/screenshots/03-discover.png docs/showcase/screenshots/04-match-evidence.png docs/showcase/screenshots/06-track.png docs/showcase/screenshots/06b-analytics.png
+          git add -- docs/showcase/screenshots/03-discover.png docs/showcase/screenshots/04-match-evidence.png docs/showcase/screenshots/04b-match-gap.png docs/showcase/screenshots/06-track.png docs/showcase/screenshots/06b-analytics.png
           if git diff --cached --quiet; then
             echo "Synthetic screenshots unchanged."
             exit 0
