@@ -34,11 +34,11 @@ REASON: Default Overview is reasonable for posting context; do not change analys
 ---
 
 SCREEN: Career Growth
-ISSUE: Recapture on the current tree shows two analyzed jobs and “No repeated skill gaps,” not the older empty-evidence copy.
-SEVERITY: P3 (honest empty-of-gaps, not a defect)
-EVIDENCE: `07-career-growth.png` — zeros for invented focus areas; copy still refuses to fabricate skills.
-FIXED / DEFERRED: n/a
-REASON: Caption the screenshot as refusal-to-invent, not as “no jobs analyzed.”
+ISSUE: Prior QA notes incorrectly said there were no repeated skill gaps.
+SEVERITY: P3 (incorrect showcase documentation, not a product defect)
+EVIDENCE: `07-career-growth.png` shows 2 analyzed jobs, 3 focus areas, including Docker (required in one job and preferred in the other) and AWS (required in one job).
+FIXED / DEFERRED: FIXED documentation to match the committed image.
+REASON: A job requirement can identify an evidence gap without inventing candidate experience. The screenshot shows real gaps, not an empty-of-gaps state.
 
 ---
 
