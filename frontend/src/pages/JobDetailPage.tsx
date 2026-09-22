@@ -26,6 +26,7 @@ import { api, ApiClientError } from "../lib/api";
 import { getJobsNavIds, jobsListPath } from "../lib/jobs-workspace";
 import { topMatchPercentileLabel } from "../lib/match-percentile";
 import { chipLabel } from "../lib/search-intent";
+import { isSyntheticShowcasePosting } from "../lib/showcase";
 import { saveSelectedJobId } from "../lib/session";
 import type { InterviewPrep, Job, JobIntelligence, JobRequirementProfile, MatchEvidence, MatchScore } from "../lib/types";
 
@@ -390,6 +391,9 @@ export function JobDetailPage() {
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <StatusBadge status={job.status} />
+              {isSyntheticShowcasePosting(job.id, job.company) ? (
+                <span className="status-pill border border-warning/40 bg-warning/10 text-warning">Synthetic demo · not a real posting</span>
+              ) : null}
               <SourceBadge source={job.source} url={job.url} sourceUrl={job.source_url} />
               {job.content_status ? (
                 <span className="text-xs text-muted-foreground">Posting: {job.content_status}</span>
