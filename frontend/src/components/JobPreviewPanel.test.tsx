@@ -33,6 +33,17 @@ describe("JobPreviewPanel metadata", () => {
     expect(screen.queryByText("Remote · Remote · Internship")).not.toBeInTheDocument();
   });
 
+  it("discloses the synthetic demo without labeling a real job from the same company", () => {
+    const { rerender } = renderPreview({ id: "showcase-harborline-intern" });
+    expect(screen.getByText(/Synthetic demo · not a real posting/)).toBeInTheDocument();
+    rerender(
+      <MemoryRouter>
+        <JobPreviewPanel job={job({ id: "real-job" })} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/Synthetic demo · not a real posting/)).not.toBeInTheDocument();
+  });
+
   it("keeps a city location next to a different work mode", () => {
     renderPreview({ location: "San Francisco, CA", work_mode: "hybrid" });
     expect(screen.getByText("San Francisco, CA · Hybrid")).toBeInTheDocument();

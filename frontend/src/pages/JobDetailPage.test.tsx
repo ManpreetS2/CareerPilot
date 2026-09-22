@@ -218,6 +218,12 @@ describe("JobDetailPage", () => {
     expect(screen.queryByText(/No live posting check has been recorded/)).not.toBeInTheDocument();
   });
 
+  it("discloses the fictional showcase posting in Analyze", async () => {
+    mockJob({ id: "showcase-harborline-intern" });
+    renderJob();
+    expect(await screen.findByText(/Synthetic demo · not a real posting/)).toBeInTheDocument();
+  });
+
   it("shows Remote once when location and work mode are both Remote", async () => {
     mockJob({ location: "Remote" });
     vi.mocked(api.getRequirementProfile).mockResolvedValue(

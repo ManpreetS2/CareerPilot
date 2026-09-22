@@ -11,6 +11,7 @@ import { api, ApiClientError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { googleCalendarUrl } from "../lib/calendar";
 import { cn } from "../lib/cn";
+import { isSyntheticShowcasePosting } from "../lib/showcase";
 import { readTrackerView, saveTrackerView, type TrackerView } from "../lib/tracker-view";
 import type { ApplicationListItem, TrackerStatus } from "../lib/types";
 
@@ -114,6 +115,9 @@ function TrackerCard({
         <div className="min-w-0">
           <h2 className="wrap-anywhere font-display text-base font-semibold leading-snug">{item.title}</h2>
           <p className="wrap-anywhere text-sm text-muted-foreground">{item.company}</p>
+          {isSyntheticShowcasePosting(item.job_id, item.company) ? (
+            <span className="mt-1 inline-block text-xs font-semibold text-warning">Synthetic demo · not a real posting</span>
+          ) : null}
           <p className="mt-1 text-xs text-muted-foreground">Updated {formatUpdated(item.updated_at)}</p>
         </div>
         <MatchBadge
@@ -311,7 +315,7 @@ export function ApplicationsPage() {
       ) : items.length === 0 ? (
         <EmptyState
           title="No applications yet"
-          description="Discovered jobs will appear here. Open a job to review materials, then set a tracking status when you are ready."
+          description="Save a job in Discover, prepare application materials, or start tracking a role to see it here."
           action={
             <Link to="/jobs" className="btn-primary">
               Browse jobs

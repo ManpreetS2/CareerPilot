@@ -238,11 +238,26 @@ def main() -> int:
         )
         python_factor.get_by_role("button", name="View evidence").click()
         drawer = page.get_by_test_id("evidence-drawer")
-        drawer.get_by_text("Candidate evidence").wait_for()
+        drawer.get_by_text("Candidate evidence", exact=True).wait_for()
         if drawer.get_by_text("No supporting candidate evidence found.").count():
             raise SystemExit("Showcase Python evidence drawer has no candidate citation.")
         page.wait_for_timeout(400)
         page.screenshot(path=str(out / "04-match-evidence.png"), full_page=False)
+
+        # An open Radix dialog blurs the rest of the page: capture the genuine
+        # Docker gap separately rather than claiming both are visible in one PNG.
+        page.get_by_role("button", name="Close menu").click()
+        page.get_by_test_id("evidence-drawer").wait_for(state="hidden")
+        docker_factor = (
+            page.get_by_test_id("evidence-section-preferred_skills")
+            .locator('[data-testid^="factor-factor_skill_preferred_"]')
+            .filter(has_text="Docker")
+            .first
+        )
+        docker_factor.get_by_text("Not enough evidence", exact=False).wait_for()
+        docker_factor.scroll_into_view_if_needed()
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(out / "04b-match-gap.png"), full_page=False)
 
         page.goto(f"{base}/jobs/{job_id}/prepare", wait_until="networkidle")
         page.wait_for_timeout(400)

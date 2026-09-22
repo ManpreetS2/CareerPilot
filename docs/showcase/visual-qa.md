@@ -33,6 +33,15 @@ REASON: Default Overview is reasonable for posting context; do not change analys
 
 ---
 
+SCREEN: Python citation and preferred Docker evidence gap
+ISSUE: An open evidence drawer intentionally blurs background factor rows, so one static image cannot legibly display the résumé citation and Docker's missing evidence at once.
+SEVERITY: none
+EVIDENCE: `04-match-evidence.png` shows the exact stored synthetic project excerpt for Python; `04b-match-gap.png` shows the unblurred satisfied Python/SQL/FastAPI requirements and Docker marked Not enough evidence.
+FIXED / DEFERRED: FIXED with two separate, fresh synthetic screenshots and explicit synthetic-demo labels on Discover and Track.
+REASON: Both sides of the evidence claim remain readable without altering modal accessibility or inventing candidate Docker experience.
+
+---
+
 SCREEN: Career Growth
 ISSUE: Prior QA notes incorrectly said there were no repeated skill gaps.
 SEVERITY: P3 (incorrect showcase documentation, not a product defect)
@@ -45,8 +54,8 @@ REASON: A job requirement can identify an evidence gap without inventing candida
 SCREEN: Analyze job header meta
 ISSUE: Job Detail header previously joined location and work mode as `Remote · Remote · Internship`.
 SEVERITY: was P3
-EVIDENCE: Recaptured `04-match-evidence.png` after the Job Detail metadata contract matched Discover (`location`, work mode, employment type, salary). Harborline Analyze now shows `Remote · Internship`.
-FIXED / DEFERRED: FIXED on current main (#104). Recapture documents the shipped UI.
+EVIDENCE: The Job Detail metadata contract is regression-tested (`location`, work mode, employment type, salary); Harborline Analyze renders `Remote · Internship`. The refreshed 04/04b screenshots scroll to factor rows and do not show the job header.
+FIXED / DEFERRED: FIXED on main (#104). The current screenshot pair demonstrates evidence, not header metadata.
 REASON: Showcase assets must match the final product. Adjacent equivalent labels collapse; salary stays last when present.
 
 ---

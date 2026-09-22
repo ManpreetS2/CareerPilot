@@ -34,7 +34,9 @@ Profile → Discover → Analyze → Prepare → Track
 
 ![Profile readiness with identity, grounded evidence, and target role marked Ready](docs/showcase/screenshots/02-profile-readiness.png)
 
-<!-- Updated Evidence capture is pending: the older image did not open the supporting résumé citation and shows pre-fix verification copy. Do not use it as a current-product screenshot. -->
+![Synthetic Harborline Evidence drawer citing Python from the fictional résumé](docs/showcase/screenshots/04-match-evidence.png)
+
+![Synthetic Harborline requirements: Python, SQL and FastAPI supported; preferred Docker has insufficient candidate evidence](docs/showcase/screenshots/04b-match-gap.png)
 
 ![Prepare page with illustrative seeded Harborline materials and human approval on the same page](docs/showcase/screenshots/05-prepare.png)
 

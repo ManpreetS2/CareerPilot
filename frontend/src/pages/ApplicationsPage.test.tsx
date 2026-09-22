@@ -105,6 +105,16 @@ describe("ApplicationsPage", () => {
     expect(screen.queryByText(/62%/)).not.toBeInTheDocument();
   });
 
+  it("discloses synthetic roles in Track without labeling ordinary saved jobs", async () => {
+    vi.mocked(api.listApplications).mockResolvedValue([
+      { job_id: "showcase-harborline-intern", title: "Demo intern", company: "Harborline Analytics", tracker_status: "saved" },
+      { job_id: "normal-job", title: "Real intern", company: "Harborline Analytics", tracker_status: "saved" },
+    ]);
+    renderTracker();
+    expect(await screen.findByText("Demo intern")).toBeInTheDocument();
+    expect(screen.getAllByText(/Synthetic demo · not a real posting/)).toHaveLength(1);
+  });
+
   it("does not show follow-up calendar actions when no reminder date is set", async () => {
     renderTracker();
     await screen.findByText(/Extra Long Title/i);

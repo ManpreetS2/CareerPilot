@@ -309,6 +309,31 @@ def test_new_seeded_application_activity_does_not_trigger_historical_notice(isol
     assert [step.jobs_count for step in summary.funnel][:3] == [1, 1, 1]
 
 
+def test_analytics_match_band_rejects_stale_scores_but_preserves_event_counts(isolated_session) -> None:
+    from backend.services.candidate_provenance import fingerprint_for_candidate
+
+    candidate, _prefs = insert_ready_profile(isolated_session)
+    job = insert_job(isolated_session, public_id="analytics-stale-fit")
+    timestamp = datetime.now(timezone.utc)
+    _seed_event(isolated_session, job=job, user_id=TEST_USER_ID, event_type="saved", occurred_at=timestamp)
+    _seed_event(isolated_session, job=job, user_id=TEST_USER_ID, event_type="applied", occurred_at=timestamp)
+    match = insert_score(isolated_session, job, candidate, overall_score=90)
+    match.candidate_fingerprint = "stale-profile"
+    isolated_session.commit()
+
+    stale = build_conversion_analytics(isolated_session, TEST_USER_ID)
+    assert stale.by_match_score_band == []
+    assert stale.funnel[0].jobs_count == 1
+    assert stale.funnel[3].jobs_count == 1
+
+    match.candidate_fingerprint = fingerprint_for_candidate(isolated_session, candidate, TEST_USER_ID)
+    isolated_session.commit()
+    current = build_conversion_analytics(isolated_session, TEST_USER_ID)
+    assert len(current.by_match_score_band) == 1
+    assert current.by_match_score_band[0].label == "85+"
+    assert current.by_match_score_band[0].applied_count == 1
+
+
 def test_notice_flags_activity_older_than_earliest_recorded_event(isolated_session) -> None:
     ensure_user(isolated_session, TEST_USER_ID)
     insert_ready_profile(isolated_session)

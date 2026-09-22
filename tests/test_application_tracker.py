@@ -13,6 +13,7 @@ from backend.db.models import (
     JobIntelligenceRecord,
     JobRecord,
     MatchScoreRecord,
+    SavedJobRecord,
     TargetPreference,
 )
 from backend.schemas.schemas import ApplicationTrackerUpdate
@@ -59,7 +60,7 @@ def test_tracker_get_is_read_only(isolated_session) -> None:
     assert item.status is None
     assert isolated_session.query(ApplicationTrackerRecord).count() == 0
     listed = list_applications(isolated_session, TEST_USER_ID)
-    assert listed[0].tracker_status is None
+    assert listed == []  # An unsaved global catalog job is not an application.
     assert isolated_session.query(ApplicationTrackerRecord).count() == 0
 
 
@@ -84,6 +85,7 @@ def test_tracker_list_includes_verified_fit_metadata_without_leaking_other_users
         )
     )
     isolated_session.commit()
+    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
     owned = list_applications(isolated_session, TEST_USER_ID)[0]
     assert owned.score_kind == "verified"
     assert owned.match_score == pytest.approx(96.3)
@@ -92,9 +94,73 @@ def test_tracker_list_includes_verified_fit_metadata_without_leaking_other_users
     assert owned.confidence_level == "medium"
 
     ensure_user(isolated_session, TEST_USER_ID + 1)
-    other = list_applications(isolated_session, TEST_USER_ID + 1)[0]
-    assert other.match_score is None
-    assert other.score_kind is None
+    other = list_applications(isolated_session, TEST_USER_ID + 1)
+    assert other == []  # Neither another user's job nor their match is in Track.
+
+
+def test_tracker_lists_only_owner_saved_tracked_or_prepared_jobs(isolated_session) -> None:
+    from backend.services.saved_job_service import save_job
+
+    ensure_user(isolated_session, TEST_USER_ID)
+    ensure_user(isolated_session, TEST_USER_ID + 1)
+    global_job = _job(isolated_session, public_id="catalog-only")
+    saved_job = _job(isolated_session, public_id="saved-only")
+    tracked_job = _job(isolated_session, public_id="tracked-only")
+    package_job = _job(isolated_session, public_id="package-only")
+    someone_elses_job = _job(isolated_session, public_id="someone-elses-job")
+    save_job(isolated_session, TEST_USER_ID, saved_job.public_id)
+    update_tracking(
+        isolated_session, tracked_job.public_id,
+        ApplicationTrackerUpdate(status="applied"), TEST_USER_ID,
+    )
+    isolated_session.add(
+        ApplicationPackageRecord(
+            job_id=package_job.id, user_id=TEST_USER_ID,
+            approval_status="draft", tailored_bullets=[],
+            source_traceability_notes=[],
+        )
+    )
+    isolated_session.add(
+        SavedJobRecord(job_id=someone_elses_job.id, user_id=TEST_USER_ID + 1)
+    )
+    isolated_session.commit()
+
+    owned = list_applications(isolated_session, TEST_USER_ID)
+    assert {item.job_id for item in owned} == {
+        saved_job.public_id, tracked_job.public_id, package_job.public_id
+    }
+    assert global_job.public_id not in {item.job_id for item in owned}
+    other = list_applications(isolated_session, TEST_USER_ID + 1)
+    assert [item.job_id for item in other] == [someone_elses_job.public_id]
+    assert list_applications(isolated_session, TEST_USER_ID + 2) == []
+
+
+def test_tracker_and_dashboard_hide_stale_scores_without_changing_application_status(isolated_session) -> None:
+    from backend.services.analysis_service import StoredScoreNotFoundError, get_stored_match_score
+
+    job = _job(isolated_session, public_id="stale-track-score")
+    candidate = _candidate(isolated_session)
+    update_tracking(isolated_session, job.public_id, ApplicationTrackerUpdate(status="saved"), TEST_USER_ID)
+    match = MatchScoreRecord(
+        job_id=job.id, candidate_id=candidate.id,
+        overall_score=96.3, skill_score=100.0, matched_skills=["Python"],
+        partial_matches=[], missing_skills=[], recommendation="apply",
+        rationale="Based on an older profile.", score_kind="verified",
+        candidate_fingerprint="outdated-resume-fingerprint",
+    )
+    isolated_session.add(match)
+    isolated_session.commit()
+
+    # The canonical stored-score API rejects the same stale record.
+    with pytest.raises(StoredScoreNotFoundError):
+        get_stored_match_score(isolated_session, job.public_id, TEST_USER_ID)
+
+    item = list_applications(isolated_session, TEST_USER_ID)[0]
+    assert item.tracker_status == "saved"
+    assert item.match_score is None
+    assert item.score_kind is None
+    assert item.recommendation is None
+    assert get_dashboard_summary(isolated_session, TEST_USER_ID).high_matches == 0
 
 
 def test_tracker_missing_job_404(isolated_session) -> None:
