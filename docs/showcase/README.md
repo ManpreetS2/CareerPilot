@@ -2,41 +2,45 @@
 
 Assets for a recruiter’s first minute on GitHub and an engineer’s follow-up inspection.
 
-These files describe the **shipped v1.0.0 product**. They do not change runtime behavior.
+These files support a **portfolio showcase of the current mainline product**. They do not change production generation, do not move tags, and do not recertify runtime.
 
 ## What is here
 
 | File | Purpose |
 | --- | --- |
-| [demo-script.md](./demo-script.md) | 2–4 minute click-path and spoken beats. Complements [`docs/demo-runbook.md`](../demo-runbook.md). |
+| [demo-script.md](./demo-script.md) | 45–60 second recording sequence, plus an optional 2–4 minute spoken path. Complements [`docs/demo-runbook.md`](../demo-runbook.md). |
 | [recruiter-walkthrough.md](./recruiter-walkthrough.md) | 30–60 second spoken story. |
 | [technical-walkthrough.md](./technical-walkthrough.md) | 2–3 minute engineering walkthrough. |
 | [portfolio-copy.md](./portfolio-copy.md) | Portfolio, resume, LinkedIn, and interview language. |
 | [architecture.md](./architecture.md) | Compact architecture diagram (one local app, not microservices). |
-| [screenshot-inventory.md](./screenshot-inventory.md) | What each image shows and how it was captured. |
-| [visual-qa.md](./visual-qa.md) | Visual/accessibility notes from screenshot capture. |
+| [screenshot-inventory.md](./screenshot-inventory.md) | What each image shows, capture revision, and how it was captured. |
+| [visual-qa.md](./visual-qa.md) | Visual/accessibility notes from screenshot capture, including three grounded Career Growth focus areas. |
 | [post-v1-maintenance-triage.md](./post-v1-maintenance-triage.md) | Informational post-v1 items. Not part of this showcase’s runtime. |
-| [screenshots/](./screenshots/) | Desktop PNG captures (1440×900). |
+| [screenshots/](./screenshots/) | Desktop PNG captures (1440×900); Evidence, Track, and Analytics images predate the final PR #113 fixes and must be recaptured before publishing. |
 | [fixtures/generic-ats-form.html](./fixtures/generic-ats-form.html) | Illustrative ATS form + side-panel mock for the Fill-boundary image. Not the extension runtime. |
 
-## Released product state these assets demonstrate
+## Released product vs this showcase revision
 
 | Item | Value |
 | --- | --- |
 | Repository | [ManpreetS2/CareerPilot](https://github.com/ManpreetS2/CareerPilot) |
-| Tag | `v1.0.0` |
-| Tagged commit | `b73a983ed3605d498aa90070c3b5f786a73bc525` |
-| Certified runtime (A8 / A9 / Phase 6) | `7b6c3ee100ca4fe6399ac29441bece8df71783c7` |
+| Tagged release | `v1.0.0` at `b73a983ed3605d498aa90070c3b5f786a73bc525` |
+| Certified runtime (A8 / A9 / Phase 6) | `7b6c3ee100ca4fe6399ac29441bece8df71783c7` — that revision only |
+| Product baseline for this recapture | `7038b76` (`origin/main` when this showcase pass started: Himalayas attribution, #112) |
 | Release | https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0 |
 
-The showcase branch may add documentation, screenshots, and an isolated demo seeder. It does not move the `v1.0.0` tag. Landing remains the post-#103 PublicStage capture. Discover and Analyze (`03`/`04`) were recaptured after #104 so Harborline shows `Remote · Internship` and Cedar shows `Portland, OR · Hybrid · Internship`.
+The tagged **v1.0.0** GitHub Release and its A8/A9/Phase 6 certification stay historical. Screenshots and copy in this folder are a **newer showcase revision** of later mainline UI. They do not move the `v1.0.0` tag and they do not inherit certification from `7b6c3ee`.
+
+Public source is **source-visible**, not open source. Setup instructions in the root README are for authorized operators. LICENSE still requires prior written permission to run or deploy.
 
 ## How screenshots were generated
 
-1. Seed a **brand-new** isolated SQLite file with `scripts/seed_showcase_demo.py` (refuses `data/careerpilot.db`, production-looking names, and any path that already exists).
-2. Run backend and frontend against that database only.
+1. Seed a **brand-new** isolated SQLite file with `scripts/seed_showcase_demo.py` (refuses `data/careerpilot.db`, production-looking names, and any path that already exists). Provider calls are disabled by default; `CAREERPILOT_SHOWCASE_LIVE=1` explicitly opts in when providers are configured. Automated tests never call live providers.
+2. Run backend and frontend against that database only (authorized local use).
 3. Capture 1440×900 PNGs with `scripts/capture_showcase_screenshots.py` (loopback-only, synthetic showcase identity, Playwright, reduced motion, no Submit, no EEO fill).
-4. The Fill image uses `fixtures/generic-ats-form.html` — an **illustrative compatibility mock**, not the shipped extension runtime, not a live employer page, and not an endorsement. Live Greenhouse/Lever Fill was certified on Chrome 152 (A8).
+4. The Fill image uses `fixtures/generic-ats-form.html` — an **illustrative compatibility mock**, not the shipped extension runtime, not a live employer page, and not an endorsement. Live Greenhouse/Lever Fill was certified on Chrome 152 (A8) at `7b6c3ee`.
+
+Fit scores are calculated at seed time by the production scoring engine from a parsed synthetic résumé. They are not hardcoded. Prepare materials are **illustrative seeded materials** unless the seeder printed `materials_source=live_generation`. Do not call seeded text live-generated.
 
 See [screenshot-inventory.md](./screenshot-inventory.md) for the exact commands.
 

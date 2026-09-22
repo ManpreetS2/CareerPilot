@@ -8,11 +8,13 @@ The job catalog (`JobRecord`) is shared. Almost everything else is user-scoped: 
 
 ## Scoring and staleness
 
-Fit is **deterministic**. Fingerprints on the candidate, preferences, and posting invalidate stored Fit, Match Evidence, and materials when those inputs change. Ordinary page loads are read-only. Find Jobs may persist a deterministic score after an explicit click; it does not spend a provider call to do that.
+Fit is **deterministic**. Showcase Fit numbers come from `score_job_verified` against a parsed synthetic résumé and two distinct fictional postings — they are not hardcoded. Fingerprints on the candidate, preferences, and posting invalidate stored Fit, Match Evidence, and materials when those inputs change. Ordinary page loads are read-only. Find Jobs may persist a deterministic score after an explicit click; it does not spend a provider call to do that.
+
+The overall percentage is Fit V2 qualification (required/preferred skills, evidenced responsibilities, education) mixed with preference alignment when preferences exist. It is not a probability of getting hired and not an ATS pass-rate. Missing requirements stay missing. Unstated work authorization stays a watchout, not a claimed yes.
 
 ## Providers
 
-A thin `LLMClient` can try Ollama, then Gemini, Anthropic, and OpenAI in `LLM_PROVIDER_ORDER`. That path is for candidate extraction where applicable, job intelligence, application materials, and ephemeral interview feedback. If no provider is reachable, those steps fail honestly. Fit still works.
+A thin `LLMClient` can try Ollama, then Gemini, Anthropic, and OpenAI in `LLM_PROVIDER_ORDER`. That path is for candidate extraction where applicable, job intelligence, application materials, and ephemeral interview feedback. A local-first order still uses a configured cloud fallback if earlier providers fail. Ollama follows `OLLAMA_BASE_URL` and may be local or remote. If no provider is reachable, those steps fail honestly. Fit still works.
 
 ## Materials and approval
 
@@ -30,6 +32,7 @@ CareerPilot never calls submit. The human reviews the ATS form and presses Submi
 - **A9:** session isolation, IDOR fail-closed, account deletion, generic login errors. Isolated SQLite only.
 - **Phase 6:** adversarial QA on certified runtime SHA `7b6c3ee100ca4fe6399ac29441bece8df71783c7`.
 - **v1.0.0:** annotated tag on `b73a983ed3605d498aa90070c3b5f786a73bc525` — https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
+- **Showcase screenshots** in this folder were recaptured from later mainline (baseline `7038b76` plus this docs/UI pass). That is not a new certified release.
 
 Release-gate automated counts at tag time: frontend **226** tests, extension **109** tests, mapped paths **124** valid / 0 missing. That is not a grand total across pytest + npm.
 

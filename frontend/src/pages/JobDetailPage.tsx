@@ -540,13 +540,17 @@ export function JobDetailPage() {
           </div>
           <ErrorBanner error={verifyError} />
           <p className="mt-3 text-sm text-muted-foreground">
-            Current status: <span className="font-semibold capitalize">{job.status}</span>
+            Catalog status: <span className="font-semibold capitalize">{job.status}</span>
           </p>
           {job.verification_notes ? (
             <p className="mt-2 text-sm text-muted-foreground">{job.verification_notes}</p>
+          ) : job.verified_at ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              A posting check was recorded, but no verification details were saved.
+            </p>
           ) : (
             <p className="mt-2 text-sm text-muted-foreground">
-              Not verified yet — run "still open" and suspicious-posting checks with Verify.
+              No live posting check has been recorded. Use Verify to check whether the posting is still open and review suspicious-posting signals.
             </p>
           )}
           {job.verified_at ? (

@@ -58,8 +58,9 @@ export function SourceBadge({
         href={href}
         target="_blank"
         rel="noreferrer"
-        className={`status-pill ${tone} hover:opacity-80`}
+        className={`status-pill relative z-10 ${tone} hover:opacity-80`}
         aria-label={`${label} — open original listing`}
+        onClick={(event) => event.stopPropagation()}
       >
         {content}
       </a>

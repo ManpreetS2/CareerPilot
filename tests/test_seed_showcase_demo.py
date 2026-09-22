@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 
 from scripts.seed_showcase_demo import (
+    CEDAR_DESCRIPTION,
     EXISTING_DESTINATION_MESSAGE,
+    HARBORLINE_DESCRIPTION,
     SHOWCASE_COMPANY_PRIMARY,
     SHOWCASE_COMPANY_SECOND,
     SHOWCASE_EMAIL,
+    SHOWCASE_NAME,
+    SHOWCASE_RESUME_BANNER,
     SHOWCASE_SECOND_JOB,
+    build_showcase_resume_pdf,
     refuse_database_path,
 )
 
@@ -163,11 +169,113 @@ def test_seed_creates_synthetic_user_on_brand_new_path(tmp_path: Path, monkeypat
         )
         assert profile.profile_json.get("work_mode") == "hybrid"
         assert profile.profile_json.get("employment_type") == "internship"
+
+        from backend.db.models import (
+            ApplicationPackageRecord,
+            Candidate,
+            JobIntelligenceRecord,
+            MatchScoreRecord,
+            ResumeVersionRecord,
+        )
+
+        candidate = session.query(Candidate).filter(Candidate.user_id == user.id).one()
+        assert candidate.name == SHOWCASE_NAME
+        assert candidate.email == SHOWCASE_EMAIL
+        skills = {str(item).lower() for item in (candidate.skills or [])}
+        assert "python" in skills
+        assert "docker" not in skills
+        assert "aws" not in skills
+        project_blob = json.dumps(candidate.projects or []).lower()
+        assert "campus planner" in project_blob
+        assert "fastapi" in project_blob or "fastapi" in skills
+        experience_blob = json.dumps(candidate.experience or []).lower()
+        assert "northstar labs" in experience_blob
+        assert "28%" in experience_blob
+
+        harborline = session.query(JobRecord).filter(JobRecord.company == SHOWCASE_COMPANY_PRIMARY).one()
+        harbor_intel = (
+            session.query(JobIntelligenceRecord).filter(JobIntelligenceRecord.job_id == harborline.id).one()
+        )
+        cedar_intel = session.query(JobIntelligenceRecord).filter(JobIntelligenceRecord.job_id == cedar.id).one()
+        assert "Docker" not in (harbor_intel.required_skills or [])
+        assert "Docker" in (harbor_intel.preferred_skills or [])
+        assert "FastAPI" in (harbor_intel.required_skills or [])
+        assert "Docker" in (cedar_intel.required_skills or [])
+        assert "AWS" in (cedar_intel.required_skills or [])
+        assert "docker" in CEDAR_DESCRIPTION.lower()
+        assert "aws" in CEDAR_DESCRIPTION.lower()
+        assert "fastapi" in HARBORLINE_DESCRIPTION.lower()
+
+        scores = session.query(MatchScoreRecord).all()
+        assert len(scores) == 2
+        by_job = {row.job_id: row for row in scores}
+        harbor_score = by_job[harborline.id]
+        cedar_score = by_job[cedar.id]
+        assert harbor_score.overall_score > cedar_score.overall_score
+        harbor_matched = {item.lower() for item in (harbor_score.matched_skills or [])}
+        harbor_missing = {item.lower() for item in (harbor_score.missing_skills or [])}
+        cedar_missing = {item.lower() for item in (cedar_score.missing_skills or [])}
+        assert "python" in harbor_matched
+        assert "docker" in harbor_missing
+        assert "docker" in cedar_missing
+        assert "aws" in cedar_missing
+        assert harbor_score.eligibility_status in {None, "eligibility_uncertain", "likely_eligible"}
+        if harbor_score.eligibility_status == "likely_eligible":
+            watchouts = " ".join(harbor_score.watchouts or []).lower()
+            assert "authorization" in watchouts or "sponsorship" in watchouts
+
+        package = session.query(ApplicationPackageRecord).one()
+        assert package.approval_status == "approved"
+        assert package.eligibility_confirmed is True
+        assert package.grounded is True
+        assert package.candidate_profile_fingerprint
+        letter = package.cover_letter_draft or ""
+        recruiter = package.recruiter_message or ""
+        notes = " ".join(package.source_traceability_notes or []).lower()
+        assert "I am applying using stored Python and SQL evidence." not in letter
+        assert "Happy to discuss Python." not in recruiter
+        assert "Harborline Analytics" in letter
+        assert "Northstar Labs" in letter
+        assert "Campus Planner" in letter
+        assert "28%" in letter
+        assert "Docker" not in letter or "not claiming" in letter.lower()
+        assert "Harborline" in recruiter
+        assert "illustrative seeded" in notes
+        assert session.query(ResumeVersionRecord).count() == 1
     finally:
         session.close()
         engine.dispose()
 
 
+def test_showcase_live_provider_calls_are_explicit_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import seed_showcase_demo
+
+    monkeypatch.delenv("CAREERPILOT_SHOWCASE_LIVE", raising=False)
+    assert seed_showcase_demo._should_try_live_providers() is False
+    monkeypatch.setenv("CAREERPILOT_SHOWCASE_LIVE", "0")
+    assert seed_showcase_demo._should_try_live_providers() is False
+    monkeypatch.setenv("CAREERPILOT_SHOWCASE_LIVE", "1")
+    # pytest is a hard guard: even explicit opt-in cannot make test runs call providers.
+    assert seed_showcase_demo._should_try_live_providers() is False
+
+
 def test_refuse_message_is_operator_actionable() -> None:
     assert "already exists" in EXISTING_DESTINATION_MESSAGE
     assert "delete" in EXISTING_DESTINATION_MESSAGE.lower()
+
+
+def test_showcase_resume_pdf_is_labeled_synthetic_and_extractable() -> None:
+    from backend.services.candidate_profile_agent import extract_resume_text
+
+    pdf = build_showcase_resume_pdf()
+    assert pdf.startswith(b"%PDF")
+    extracted = extract_resume_text(pdf).text
+    assert SHOWCASE_NAME in extracted
+    assert SHOWCASE_EMAIL in extracted
+    assert SHOWCASE_RESUME_BANNER in extracted
+    assert "Northstar Labs" in extracted
+    assert "Campus Planner" in extracted
+    assert "Python" in extracted
+    assert "FastAPI" in extracted
+    assert "Docker" not in extracted
+    assert "AWS" not in extracted

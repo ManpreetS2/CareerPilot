@@ -190,23 +190,53 @@ def build_conversion_analytics(db: Session, user_id: int) -> ApplicationAnalytic
             if label in jobs_by_band:
                 by_match_score_band.append(_bucket(label, applied_jobs, jobs_by_band[label]))
 
+    # A row may be created milliseconds before its event is committed. That is
+    # normal for a fresh account, not evidence of missing historical analytics.
+    # Only warn when an older row represents a stage absent from this user's
+    # recorded event history for that same job.
     notice = None
     earliest_event = min(
-        (entry.first_occurrence[etype] for entry in job_events.values() for etype in entry.first_occurrence),
+        (timestamp for entry in job_events.values() for timestamp in entry.first_occurrence.values()),
         default=None,
     )
     if earliest_event is not None:
-        earlier_tracker = (
+        prior_trackers = (
             db.query(ApplicationTrackerRecord)
             .filter(ApplicationTrackerRecord.user_id == user_id, ApplicationTrackerRecord.created_at < earliest_event)
-            .first()
+            .all()
         )
-        earlier_package = (
+        prior_packages = (
             db.query(ApplicationPackageRecord)
             .filter(ApplicationPackageRecord.user_id == user_id, ApplicationPackageRecord.created_at < earliest_event)
-            .first()
+            .all()
         )
-        if earlier_tracker is not None or earlier_package is not None:
+
+        def recorded(job_id: int, event_type: str) -> bool:
+            entry = job_events.get(job_id)
+            return entry is not None and event_type in entry.first_occurrence
+
+        missing_tracker_history = any(
+            (
+                tracker.status in ("applied", "interviewing", "offer", "rejected", "withdrawn")
+                and not recorded(tracker.job_id, tracker.status)
+            )
+            or (
+                tracker.status == "saved" and not recorded(tracker.job_id, "saved")
+            )
+            for tracker in prior_trackers
+        )
+        missing_package_history = any(
+            (
+                package.approval_status == "approved"
+                and not recorded(package.job_id, "materials_approved")
+            )
+            or (
+                package.approval_status in ("pending_review", "approved")
+                and not recorded(package.job_id, "materials_generated")
+            )
+            for package in prior_packages
+        )
+        if missing_tracker_history or missing_package_history:
             notice = (
                 "Some of your applications predate conversion tracking and aren't reflected below — "
                 "numbers only cover activity since analytics started recording."

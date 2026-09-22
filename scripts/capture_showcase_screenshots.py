@@ -12,8 +12,13 @@ synthetic showcase user from scripts/seed_showcase_demo.py.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.seed_showcase_demo import (
     SHOWCASE_COMPANY_PRIMARY,
@@ -25,7 +30,6 @@ from scripts.seed_showcase_demo import (
     SHOWCASE_SECOND_JOB,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "docs" / "showcase" / "screenshots"
 FIXTURE = ROOT / "docs" / "showcase" / "fixtures" / "generic-ats-form.html"
 MOCK_SCREENSHOT = "08-assisted-fill-boundary-mock.png"
@@ -221,15 +225,33 @@ def main() -> int:
 
         page.goto(f"{base}/jobs/{job_id}", wait_until="networkidle")
         page.get_by_role("tab", name="Evidence").click()
-        page.wait_for_timeout(600)
+        page.get_by_test_id("match-evidence").wait_for()
+        # Show the *actual supporting résumé text*, not merely the "Satisfied"
+        # summary. Keep Docker's separate "Not enough evidence" row in frame.
+        # Verified Fit factors use hashed, importance-qualified IDs, not
+        # factor_skill_python (that stable ID exists only in mocked tests).
+        python_factor = (
+            page.get_by_test_id("evidence-section-required_skills")
+            .locator('[data-testid^="factor-factor_skill_required_"]')
+            .filter(has_text="Python")
+            .first
+        )
+        python_factor.get_by_role("button", name="View evidence").click()
+        drawer = page.get_by_test_id("evidence-drawer")
+        drawer.get_by_text("Candidate evidence").wait_for()
+        if drawer.get_by_text("No supporting candidate evidence found.").count():
+            raise SystemExit("Showcase Python evidence drawer has no candidate citation.")
+        page.wait_for_timeout(400)
         page.screenshot(path=str(out / "04-match-evidence.png"), full_page=False)
 
         page.goto(f"{base}/jobs/{job_id}/prepare", wait_until="networkidle")
         page.wait_for_timeout(400)
-        approval = page.get_by_test_id("approval-rail")
-        if approval.count():
-            approval.scroll_into_view_if_needed()
-            page.wait_for_timeout(200)
+        page.get_by_role("heading", name="Cover letter").wait_for()
+        page.get_by_test_id("approval-status").wait_for()
+        cover = page.get_by_role("heading", name="Cover letter")
+        if cover.count():
+            cover.evaluate("el => el.scrollIntoView({ block: 'start', inline: 'nearest' })")
+        page.wait_for_timeout(200)
         page.screenshot(path=str(out / "05-prepare.png"), full_page=False)
 
         page.goto(f"{base}/track", wait_until="networkidle")

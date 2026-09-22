@@ -4,7 +4,7 @@ Informational only. Opened during Phase 9 so these items are not rediscovered in
 
 Showcase work must not merge Dependabot #88–#91, must not perform a React Router 7 migration, and must not invent GitHub Actions commit SHAs.
 
-#88, #89, #90, and #91 remain **open** on GitHub at the time of this note. They are deferred / out of scope for showcase work. This document does not close them.
+**Status refresh (2026-09-22):** #88 and #91 were closed without merging; #89 and #90 were merged. The original items below are historical triage, not a list of current open PRs. Frontend dependency group #109 was also merged on 2026-09-22. Do not reopen old PRs or merge dependencies into the showcase branch merely to resolve these notes.
 
 ---
 

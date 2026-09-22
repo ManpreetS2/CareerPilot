@@ -47,11 +47,11 @@ export function PrivacyPage() {
           <section className="space-y-2">
             <h2 className="font-display text-xl font-semibold">Where data lives</h2>
             <p>
-              By default CareerPilot stores account and application data in a local SQLite database
-              on the machine running the API (<span className="font-mono text-xs">data/careerpilot.db</span>
-              ). There is no CareerPilot-operated cloud account in this codebase. If you configure
-              third-party AI providers, those providers receive only the content required for the
-              feature you explicitly run.
+              By default CareerPilot stores application records and uploaded files in a local SQLite
+              database on the machine running the API (<span className="font-mono text-xs">data/careerpilot.db</span>
+              ). There is no CareerPilot-operated cloud account in this codebase. Configured third-party
+              AI providers are separate: they can receive resume text, candidate evidence, or job
+              content required for the feature you explicitly run.
             </p>
           </section>
 
@@ -89,8 +89,11 @@ export function PrivacyPage() {
             <h2 className="font-display text-xl font-semibold">AI providers</h2>
             <p>
               Depending on configuration, CareerPilot may send relevant content to Ollama, Gemini,
-              Anthropic, and/or OpenAI. Ollama is typically a local/private model endpoint. Configured
-              cloud providers may receive the minimum content required for the requested feature.
+              Anthropic, and/or OpenAI. Ollama uses the host in <span className="font-mono text-xs">OLLAMA_BASE_URL</span>
+              — that can be on this machine or a remote endpoint, not an automatic on-device
+              guarantee. Configured cloud providers may receive the minimum content required for the
+              requested feature. A local-first provider order still reaches a cloud fallback when
+              that fallback is configured and earlier providers fail.
             </p>
             <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
               <li>Resume parsing / candidate profile extraction: resume text</li>

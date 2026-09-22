@@ -479,6 +479,10 @@ class ApplicationListItem(BaseModel):
     company: str
     match_score: float | None = None
     recommendation: Literal["apply", "consider", "skip"] | None = None
+    score_kind: Literal["full", "preliminary", "verified"] | None = None
+    match_tier: Literal["strong_match", "good_match", "possible_match", "weak_match"] | None = None
+    apply_recommendation: Literal["strong_apply", "apply", "consider", "probably_skip"] | None = None
+    confidence_level: Literal["high", "medium", "low"] | None = None
     approval_status: Literal[
         "draft", "pending_review", "approved", "edit_requested", "rejected"
     ] | None = None

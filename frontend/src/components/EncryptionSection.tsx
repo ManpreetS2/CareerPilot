@@ -4,10 +4,10 @@ import { useReducedMotion } from "motion/react";
 const ENCRYPTION_TEXT = [
   "iVBORw0KGgoAAAANSUhEUgAABjkAAAQqCAYAAACqkC9hAAAACXBIWXMAABYlAAAWJQFJU",
   "2VyaWFsaXplZCBkYXRhOiBwcm9maWxlLCBleHBlcmllbmNlLCBza2lsbHMsIGxvY2F0aW9u",
-  "Local SQLite stores account and application data on the machine running the API",
+  "Local SQLite stores application records and uploaded files in the CareerPilot deployment",
   "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI",
   "UmVzdW1lIG1ldGFkYXRhOiBlZHVjYXRpb24sIGNlcnRpZmljYXRpb25zLCBwcm9qZWN0cw",
-  "Self-hostable copilot: private records stay in your CareerPilot deployment",
+  "Configured cloud AI providers can receive resume text or job content for requested operations",
   "dXNlcl9pZDogYWJjZGVmMTIzNDU2LCByb2xlX3R5cGU6ICJlbmdpbmVlciIsIGxvY2F0aW9u",
   "You review the ATS form and press Submit; CareerPilot never auto-submits",
 ];
@@ -64,9 +64,12 @@ export function EncryptionSection() {
           Your resume stays protected
         </h2>
         <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
-          Grounded insights. Private by design. CareerPilot is local and self-hostable: your
-          documents and profile stay in the deployment you run. CareerPilot never submits an
-          application — you review the ATS form and press Submit.
+          Application records and uploaded files are stored in the CareerPilot deployment you run.
+          Configured AI providers can receive resume text, stored evidence, or job content for the
+          operation you request. Listing a local provider first is not local-only processing if a
+          cloud fallback is configured, and Ollama can point at a remote host. Fit scoring stays
+          deterministic. CareerPilot never submits an application — you review the ATS form and press
+          Submit.
         </p>
       </div>
     </section>

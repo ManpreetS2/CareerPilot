@@ -63,6 +63,40 @@ def test_tracker_get_is_read_only(isolated_session) -> None:
     assert isolated_session.query(ApplicationTrackerRecord).count() == 0
 
 
+def test_tracker_list_includes_verified_fit_metadata_without_leaking_other_users_scores(isolated_session) -> None:
+    job = _job(isolated_session, public_id="match-metadata")
+    candidate = _candidate(isolated_session)
+    isolated_session.add(
+        MatchScoreRecord(
+            job_id=job.id,
+            candidate_id=candidate.id,
+            overall_score=96.3,
+            skill_score=100.0,
+            matched_skills=["Python"],
+            partial_matches=[],
+            missing_skills=[],
+            recommendation="apply",
+            rationale="Grounded evidence.",
+            score_kind="verified",
+            match_tier="strong_match",
+            apply_recommendation="apply",
+            confidence_level="medium",
+        )
+    )
+    isolated_session.commit()
+    owned = list_applications(isolated_session, TEST_USER_ID)[0]
+    assert owned.score_kind == "verified"
+    assert owned.match_score == pytest.approx(96.3)
+    assert owned.match_tier == "strong_match"
+    assert owned.apply_recommendation == "apply"
+    assert owned.confidence_level == "medium"
+
+    ensure_user(isolated_session, TEST_USER_ID + 1)
+    other = list_applications(isolated_session, TEST_USER_ID + 1)[0]
+    assert other.match_score is None
+    assert other.score_kind is None
+
+
 def test_tracker_missing_job_404(isolated_session) -> None:
     with pytest.raises(TrackerJobNotFoundError):
         get_tracking(isolated_session, "missing", TEST_USER_ID)

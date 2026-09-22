@@ -1,6 +1,6 @@
 # Visual QA — Phase 9 showcase capture
 
-Screens inspected while capturing the v1.0.0 showcase package. Light theme desktop PNGs are committed; dark, 390, 768, and 1280 were probed and not all committed.
+Screens inspected while capturing the current showcase package (newer than tagged v1.0.0). Light theme desktop PNGs are committed; dark, 390, 768, and 1280 were probed and not all committed.
 
 Format: SCREEN / ISSUE / SEVERITY / EVIDENCE / FIXED or DEFERRED / REASON.
 
@@ -18,9 +18,9 @@ REASON: Existing layout contract, not a regression to “fix” by changing trac
 SCREEN: Prepare at 1440×900
 ISSUE: Approval rail, eligibility checkbox, and resume versions sit below the fold under the match-summary card.
 SEVERITY: P2
-EVIDENCE: Unscrolled Prepare capture showed Fit summary only; approval is the human-gate story.
-FIXED / DEFERRED: FIXED for screenshots — capture script scrolls `[data-testid=approval-rail]`. Product layout unchanged.
-REASON: Scrolling is expected; changing Prepare persistence or approval flow would be a runtime change.
+EVIDENCE: Unscrolled Prepare capture showed Fit summary only; approval is the human-gate story. Weak seeded copy (“I am applying using stored Python…”) was replaced with role-specific illustrative seeded materials.
+FIXED / DEFERRED: FIXED for screenshots — capture script scrolls the Cover letter heading so letter and recruiter copy are readable; approval controls stay on the same page. Product layout unchanged.
+REASON: Scrolling is expected; changing Prepare persistence or approval flow would be a runtime change. Seeded materials are labeled in docs and source-traceability notes.
 
 ---
 
@@ -34,11 +34,11 @@ REASON: Default Overview is reasonable for posting context; do not change analys
 ---
 
 SCREEN: Career Growth
-ISSUE: Recapture on the current tree shows two analyzed jobs and “No repeated skill gaps,” not the older empty-evidence copy.
-SEVERITY: P3 (honest empty-of-gaps, not a defect)
-EVIDENCE: `07-career-growth.png` — zeros for invented focus areas; copy still refuses to fabricate skills.
-FIXED / DEFERRED: n/a
-REASON: Caption the screenshot as refusal-to-invent, not as “no jobs analyzed.”
+ISSUE: Prior QA notes incorrectly said there were no repeated skill gaps.
+SEVERITY: P3 (incorrect showcase documentation, not a product defect)
+EVIDENCE: `07-career-growth.png` shows 2 analyzed jobs, 3 focus areas, including Docker (required in one job and preferred in the other) and AWS (required in one job).
+FIXED / DEFERRED: FIXED documentation to match the committed image.
+REASON: A job requirement can identify an evidence gap without inventing candidate experience. The screenshot shows real gaps, not an empty-of-gaps state.
 
 ---
 
@@ -78,6 +78,15 @@ REASON: Showcase must not show the retired globe/lattice. Native 200% browser zo
 
 ---
 
+SCREEN: Discover job cards (selection / link semantics)
+ISSUE: The badge row used `stopPropagation`, so Potential Match, timestamps, and non-link source badges did not select the job. Aggregator source links were nested inside the card’s selection button.
+SEVERITY: was P2
+EVIDENCE: Current `JobCard` keeps title/company/meta in the select button; badges sit outside it. Article click selects unless the target is a source `<a>` or the save control. Chromium 390/1440: nested `a`/`button` inside `.job-card-select` is 0. Potential Match and Manual badges select Harborline/Cedar. Keyboard focus remains on `.job-card-select`.
+FIXED / DEFERRED: FIXED in this pass.
+REASON: Valid interactive nesting; source links stay independently clickable.
+
+---
+
 SCREEN: 390 Discover
 ISSUE: Long Cedar title wraps; second card company is below the fold, not overflowing the viewport.
 SEVERITY: P3
@@ -105,6 +114,15 @@ REASON: Illustrative mock, not the shipped extension. Live A8 remains the Fill c
 
 ---
 
+SCREEN: Discover Fit scores
+ISSUE: Previous seed used identical intelligence on both jobs, so Harborline and Cedar could not demonstrate a real strong vs partial Fit.
+SEVERITY: n/a (showcase data)
+EVIDENCE: Recaptured `03-discover.png` — Harborline 96% Strong Match, Cedar 62% Possible Match from production Fit V2 on the parsed synthetic résumé. Docker is preferred on Harborline and required on Cedar.
+FIXED / DEFERRED: FIXED in this showcase seed pass.
+REASON: Scores are calculated, not hardcoded. Percentage is qualification/preference alignment, not a hire or ATS probability.
+
+---
+
 SCREEN: Dark / light
 ISSUE: Dark login/signup remain readable; committed README shots stay light for consistency.
 SEVERITY: P3
@@ -112,4 +130,4 @@ EVIDENCE: Dark login probe.
 FIXED / DEFERRED: DEFERRED for committed set
 REASON: One theme in the public screenshot strip. Dark is supported.
 
-No P0 or P1 visual defects. Track Kanban overflow, Prepare below-fold approval, and default Overview tab stay by design. Discover and Analyze both show Harborline as `Remote · Internship`. Cedar Discover shows `Portland, OR · Hybrid · Internship`. Public landing/auth use PublicStage; the dotted globe remains on Dashboard only. Career Growth recapture still refuses to invent skill gaps.
+No P0 or P1 visual defects. Track Kanban overflow, Prepare below-fold approval, and default Overview tab stay by design. Discover and Analyze both show Harborline as `Remote · Internship`. Cedar Discover shows `Portland, OR · Hybrid · Internship`. Public landing/auth use PublicStage; the dotted globe remains on Dashboard only. Career Growth identifies Docker/AWS evidence gaps without fabricating candidate skills.

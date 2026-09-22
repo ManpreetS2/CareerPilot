@@ -20,10 +20,14 @@ describe("EncryptionSection", () => {
     for (const pattern of FORBIDDEN_CLAIMS) {
       expect(text).not.toMatch(pattern);
     }
-    expect(text).toMatch(/local and self-hostable/i);
-    expect(text).toMatch(/deployment you run/i);
+    expect(text).toMatch(/Application records and uploaded files are stored/i);
+    expect(text).toMatch(/Configured AI providers can receive/i);
+    expect(text).toMatch(/cloud fallback/i);
+    expect(text).toMatch(/Ollama can point at a remote host/i);
+    expect(text).toMatch(/Fit scoring stays deterministic/i);
     expect(text).toMatch(/never submits an application/i);
     expect(text).toMatch(/local SQLite/i);
     expect(text).toMatch(/CareerPilot deployment/i);
+    expect(text).not.toMatch(/documents and profile stay in the deployment/i);
   });
 });

@@ -729,7 +729,7 @@ def run_browser_e2e() -> dict[str, int]:
                 verify_button = page.get_by_role("button", name="Re-verify")
                 expect(verify_button).to_be_visible()
                 verify_button.click()
-                expect(page.get_by_text("Current status: flagged", exact=False)).to_be_visible()
+                expect(page.get_by_text("Catalog status: flagged", exact=False)).to_be_visible()
                 expect(page.get_by_text("Description is missing or too short", exact=False)).to_be_visible()
                 if len(score_requests) != score_count_before_verify:
                     raise AssertionError("Verification triggered fit scoring.")

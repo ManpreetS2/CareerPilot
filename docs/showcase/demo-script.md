@@ -1,12 +1,12 @@
-# Showcase demo script (2–4 minutes)
+# Showcase demo script
 
-Use this for a live walkthrough. Keep [`docs/demo-runbook.md`](../demo-runbook.md) as the operator start (how to boot the app). This script is what to click and say.
-
-**Length:** 2–4 minutes. Do not detour into Settings.
+Use this for a live walkthrough or a short screen recording. Keep [`docs/demo-runbook.md`](../demo-runbook.md) as the operator start (how to boot the app, authorized use only). This script is what to click and say.
 
 **Data:** isolated showcase SQLite from `scripts/seed_showcase_demo.py`, or a throwaway signup. Never `data/careerpilot.db`. Never a real resume on a recorded demo unless the candidate owns that machine and the recording will not be committed.
 
 **Hostname:** `http://127.0.0.1:5173` talking to `http://127.0.0.1:8000`. Do not mix `localhost` and `127.0.0.1`.
+
+**Provenance:** Fit scores on the seeded demo are calculated by the production Fit V2 engine from the parsed synthetic résumé and two fictional postings. They are **not** hardcoded. Prepare may show **illustrative seeded materials** if live generation was not available; do not call those AI-generated. Production generation is unchanged.
 
 ## What not to expose
 
@@ -15,22 +15,39 @@ Use this for a live walkthrough. Keep [`docs/demo-runbook.md`](../demo-runbook.m
 - Submit being clicked
 - EEO/demographic answers
 - Fake placement, interview, or offer claims
+- A hosted demo, Chrome Web Store listing, or live extension recording that was not actually captured
 
-## Fallback if a provider is down
+## 45–60 second recording sequence
 
-Fit still works. Skip Generate Materials / Job Intelligence / interview feedback. Say: “Those steps need a configured model. Fit does not.” The seeded demo already has stored grounded materials, so you can still show Prepare → approved package without calling a provider.
+Record this path only. Do **not** include extension footage unless you actually recorded the unpacked extension on a real Greenhouse/Lever page in this take. The committed `08-assisted-fill-boundary-mock.png` is an illustrative mock, not the extension runtime.
 
-## Fallback if ATS attachment is blocked
+| Time | Click | Say |
+| --- | --- | --- |
+| 0:00–0:08 | Profile | Jordan Avery is a synthetic intern. The résumé went through parse and grounding: Python, SQL, FastAPI, pytest, Git — no Docker or cloud. Discover stays gated until that profile exists. |
+| 0:08–0:16 | Discover | Two fictional internships, both scored by Fit V2. Harborline is about 96%; Cedar is about 62%. These percentages measure qualification and preference alignment against stored evidence, not a chance of getting hired or passing an ATS. |
+| 0:16–0:32 | Harborline intern → Evidence | Strength: Python is cited from Campus Planner on the stored résumé. Gap: Docker is preferred here and is not on the résumé — missing stays missing. Work authorization was not listed, so it stays a watchout, not a yes. |
+| 0:32–0:48 | Prepare | Review the letter, confirm eligibility, approve. Approval does not submit. If this demo used seeded materials, say so; do not call them live-generated. |
+| 0:48–0:60 | Track | Ready to apply means materials are approved. Applied is a status you record after **you** submitted. CareerPilot never auto-submits. |
 
-Say the side panel will tell you to attach the file yourself. A matching filename is not proof. Do not pretend Cover Letter counts as Resume/CV.
+Stop. Do not open Settings. Do not click Submit.
 
-## Path
+### Fallback if a provider is down
+
+Fit still works. Skip Generate Materials / Job Intelligence / interview feedback. Say: “Those steps need a configured model. Fit does not.” The committed showcase capture used a live résumé parse and illustrative seeded materials after materials generation returned 503. A fresh seed run defaults to faithful synthetic extraction and illustrative seeded materials; live provider calls require `CAREERPILOT_SHOWCASE_LIVE=1`. Do not imply a new default run made live calls. Do not call that Prepare text live-generated.
+
+### Fallback if you cannot show a live ATS
+
+Do not splice in the HTML mock as if it were the extension. If you mention Fill at all, say out loud that `08-assisted-fill-boundary-mock.png` is an **illustrative compatibility mock**, not the shipped Chrome extension, and that live Greenhouse/Lever Fill was certified separately on Chrome 152 (A8) at runtime `7b6c3ee`.
+
+## Optional 2–4 minute spoken walkthrough
+
+Use this only when you have more than a minute. Same safety rules.
 
 ### 1. Landing (10s)
 
 **Click:** open `/`.
 
-**Say:** CareerPilot is local. It ranks jobs from a real profile and keeps applications human-approved. It never auto-submits.
+**Say:** CareerPilot is local/self-hostable. It ranks jobs from a real profile and keeps applications human-approved. It never auto-submits. Records live in the deployment you run; configured AI providers can receive resume or job text.
 
 ### 2. Sign in (10s)
 
@@ -48,7 +65,7 @@ Say the side panel will tell you to attach the file yourself. A matching filenam
 
 **Click:** Discover.
 
-**Say:** Find Jobs is explicit. Opening the page does not spend a model call. Ranked cards are Potential or Verified Fit, not “you will get this job.”
+**Say:** Find Jobs is explicit. Opening the page does not spend a model call. Harborline is the stronger Fit; Cedar is partial because required Docker and AWS are not on the résumé. The percentage is Fit V2 qualification/preference alignment, not a hire or ATS probability.
 
 If you are on a cold database, click Find Jobs and wait for the API to return. Do not leave it running as theater.
 
@@ -60,13 +77,13 @@ If you are on a cold database, click Find Jobs and wait for the API to return. D
 
 **Click:** Evidence (and Match if you need requirements).
 
-**Say:** This is the interesting part. Python and SQL are cited from the profile. Docker is “not enough evidence,” not a invented yes. If the resume changes, this row goes stale instead of lying.
+**Say:** This is the interesting part. Python is cited from Campus Planner on the stored résumé. Docker is preferred and still missing — not an invented yes. Cedar would miss required Docker and AWS. Work authorization was not listed, so eligibility is not treated as proven. If the resume changes, this row goes stale instead of lying.
 
 ### 7. Prepare grounded materials (25s)
 
 **Click:** Prepare Application.
 
-**Say:** Bullets and the letter have to point at stored evidence. If a provider is missing, generation fails honestly. Seeded demos can show an already-stored package.
+**Say:** Bullets and the letter have to point at stored evidence. Seeded demos show an already-stored illustrative package, not live generation. If a provider is missing on a real account, generation fails honestly.
 
 ### 8. Approval (15s)
 
@@ -80,9 +97,9 @@ If you are on a cold database, click Find Jobs and wait for the API to return. D
 
 **Say:** Immutable snapshot of the tailored bullets. Download is not a send.
 
-### 10. Assisted Fill (20s)
+### 10. Assisted Fill (only if recorded)
 
-**Show:** unpacked extension on a Greenhouse or Lever page you already ingested. If you cannot use a live ATS on this recording, you may show `docs/showcase/fixtures/generic-ats-form.html` / `08-assisted-fill-boundary-mock.png` and say out loud that it is an **illustrative mock**, not the extension runtime. Live Fill was certified on Chrome 152 (A8).
+**Show:** unpacked extension on a Greenhouse or Lever page you already ingested, **if this recording actually captured it**. Otherwise skip. Do not present `docs/showcase/fixtures/generic-ats-form.html` as the extension.
 
 **Say:** Greenhouse and Lever only. Mapped fields can fill. EEO and terms stay empty for you.
 
@@ -91,8 +108,6 @@ If you are on a cold database, click Find Jobs and wait for the API to return. D
 **Do not click Submit.**
 
 **Say:** The human reviews the form and presses Submit. CareerPilot does not.
-
-If attachment was blocked, point at the panel’s manual-upload message and stop.
 
 ### 12. Track (15s)
 
@@ -106,6 +121,6 @@ If attachment was blocked, point at the panel’s manual-upload message and stop
 
 **Say, Analytics:** Funnel is this account’s events. Applied, interview, and offer stay zero until you record them. No fake success metrics.
 
-**Say, Growth:** If there is no stored Match Evidence to aggregate, the page says so. It will not invent a skills-gap story.
+**Say, Growth:** The seeded profile has three focus areas across two analyzed fictional jobs, including Docker and AWS evidence gaps. It does not invent candidate experience or promise a hiring outcome.
 
 Stop. Do not open Settings unless asked about deletion.

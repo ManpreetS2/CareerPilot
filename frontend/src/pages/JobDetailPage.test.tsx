@@ -197,6 +197,27 @@ describe("JobDetailPage", () => {
     expect(api.scoreJob).not.toHaveBeenCalled();
   });
 
+  it("distinguishes a catalog Verified status from a recorded live posting check", async () => {
+    mockJob({ status: "verified", verified_at: null, verification_notes: null });
+    renderJob();
+    expect(await screen.findByText(/Catalog status:/)).toHaveTextContent("Catalog status: verified");
+    expect(screen.getByText(/No live posting check has been recorded/)).toBeInTheDocument();
+    expect(screen.queryByText(/Not verified yet/)).not.toBeInTheDocument();
+  });
+
+  it("shows the recorded live verification details without a false not-verified warning", async () => {
+    mockJob({
+      status: "verified",
+      verified_at: "2026-09-22T12:00:00Z",
+      verification_notes: "Posting was checked against employer evidence.",
+    });
+    renderJob();
+    expect(await screen.findByText(/Catalog status:/)).toHaveTextContent("Catalog status: verified");
+    expect(screen.getByText("Posting was checked against employer evidence.")).toBeInTheDocument();
+    expect(screen.getByText(/Last checked/)).toBeInTheDocument();
+    expect(screen.queryByText(/No live posting check has been recorded/)).not.toBeInTheDocument();
+  });
+
   it("shows Remote once when location and work mode are both Remote", async () => {
     mockJob({ location: "Remote" });
     vi.mocked(api.getRequirementProfile).mockResolvedValue(

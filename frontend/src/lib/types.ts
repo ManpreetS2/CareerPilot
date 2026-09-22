@@ -308,6 +308,10 @@ export type ApplicationListItem = {
   company: string;
   match_score?: number | null;
   recommendation?: "apply" | "consider" | "skip" | null;
+  score_kind?: MatchScore["score_kind"];
+  match_tier?: MatchScore["match_tier"];
+  apply_recommendation?: MatchScore["apply_recommendation"];
+  confidence_level?: MatchScore["confidence_level"];
   approval_status?: ApplicationPackage["approval_status"] | null;
   tracker_status?: TrackerStatus | null;
   reminder_date?: string | null;

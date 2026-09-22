@@ -288,6 +288,27 @@ def test_breakdown_by_source_and_match_score_band(isolated_session) -> None:
     assert by_band["85+"].applied_count == 1
 
 
+def test_new_seeded_application_activity_does_not_trigger_historical_notice(isolated_session) -> None:
+    candidate, _prefs = insert_ready_profile(isolated_session)
+    job = insert_job(isolated_session, public_id="fresh-showcase-job")
+    package = insert_grounded_package(isolated_session, job, candidate=candidate)
+    package.approval_status = "approved"
+    tracker = ApplicationTrackerRecord(
+        job_id=job.id, user_id=TEST_USER_ID, status="ready_to_apply",
+        created_at=datetime.now(timezone.utc) - timedelta(seconds=2),
+    )
+    isolated_session.add(tracker)
+    isolated_session.commit()
+
+    timestamp = datetime.now(timezone.utc)
+    for event in ("saved", "materials_generated", "materials_approved"):
+        _seed_event(isolated_session, job=job, user_id=TEST_USER_ID, event_type=event, occurred_at=timestamp)
+
+    summary = build_conversion_analytics(isolated_session, TEST_USER_ID)
+    assert summary.notice is None
+    assert [step.jobs_count for step in summary.funnel][:3] == [1, 1, 1]
+
+
 def test_notice_flags_activity_older_than_earliest_recorded_event(isolated_session) -> None:
     ensure_user(isolated_session, TEST_USER_ID)
     insert_ready_profile(isolated_session)

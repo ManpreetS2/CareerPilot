@@ -1,11 +1,12 @@
 # CareerPilot demo runbook
 
-Local/self-hostable demo. Prefer an isolated SQLite URL. Never run destructive
-QA against `data/careerpilot.db`.
+Authorized local/self-hostable demo. Prefer an isolated SQLite URL. Never run destructive
+QA against `data/careerpilot.db`. Public viewing of the repository is not permission to
+run or deploy CareerPilot; see the root LICENSE.
 
 Canonical product path: **Profile → Discover → Analyze → Prepare → Track**.
 
-For a 2–4 minute spoken walkthrough, recruiter copy, and screenshot recapture, see [`docs/showcase/README.md`](./showcase/README.md). This runbook stays the operator boot.
+For a 45–60 second recording sequence, a longer spoken walkthrough, recruiter copy, and screenshot recapture, see [`docs/showcase/README.md`](./showcase/README.md). This runbook stays the operator boot.
 
 ## Start
 
