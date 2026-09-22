@@ -4,7 +4,7 @@ Primary viewport: **1440×900**, light theme, `prefers-reduced-motion: reduce`, 
 
 **Tagged release:** v1.0.0 at `b73a983ed3605d498aa90070c3b5f786a73bc525`. **Certified runtime** for Fill/isolation remains `7b6c3ee100ca4fe6399ac29441bece8df71783c7` and applies only to that revision.
 
-**Showcase capture revision:** the committed PNGs were recaptured from mainline after `7038b76` with résumé-to-job Fit demo data (parsed synthetic Jordan Avery résumé, Harborline 96% vs Cedar 62%). **Important: 04-match-evidence.png, 06-track.png, and 06b-analytics.png predate the verification-label, Track-badge, and Analytics-notice fixes in PR #113. They are historical images, not accurate screenshots of the newest code. Recapture all three before using them in LinkedIn or a current-product walkthrough.** This is not a recertification or a moved tag.
+**Showcase capture revision:** Discover, cited Python Evidence, separate Docker-gap Evidence, Track, and Analytics were recaptured from the PR #114 branch against a **brand-new isolated synthetic SQLite database** after the PR #113 fixes. Other screenshots retain their previous mainline capture revision. The 96%/62% percentages are calculated from the synthetic résumé by production Fit V2, not hand-entered or hire probabilities. This showcase does not recertify the tagged v1.0.0 runtime or move the release tag.
 
 Data: isolated SQLite from `scripts/seed_showcase_demo.py`. Not `data/careerpilot.db`. Fit scores are production Fit V2 results for the synthetic Jordan Avery résumé. Provider calls are disabled by default; explicitly set `CAREERPILOT_SHOWCASE_LIVE=1` for configured live extraction/generation. Prepare copy is **illustrative seeded materials** unless the seeder reported live generation.
 
@@ -15,7 +15,8 @@ Data: isolated SQLite from `scripts/seed_showcase_demo.py`. Not `data/careerpilo
 | [01-landing.png](./screenshots/01-landing.png) | Public landing: PublicStage glass card, no globe or lattice, never auto-submitted | Landing page with CareerPilot headline, Get Started / Sign In, and a PublicStage summary card |
 | [02-profile-readiness.png](./screenshots/02-profile-readiness.png) | Profile gate: identity, grounded evidence, target role all Ready | Profile page showing Discover unlocks only after identity, evidence, and target role |
 | [03-discover.png](./screenshots/03-discover.png) | Discover list + preview: Harborline stronger Fit vs Cedar partial Fit; `Remote · Internship` vs `Portland, OR · Hybrid · Internship`; no fake offers | Discover workspace with two synthetic internships and distinct Fit scores |
-| [04-match-evidence.png](./screenshots/04-match-evidence.png) | Analyze → Evidence: required Python/SQL/FastAPI satisfied from the résumé; preferred Docker not enough evidence | Job analysis Evidence tab citing stored résumé skills and a genuine Docker gap |
+| [04-match-evidence.png](./screenshots/04-match-evidence.png) | Open Python Evidence drawer: employer claim and exact stored synthetic résumé excerpt are visible; background is intentionally blurred by the dialog | Python requirement supported by a cited fictional candidate project |
+| [04b-match-gap.png](./screenshots/04b-match-gap.png) | Closed drawer: required Python/SQL/FastAPI supported; preferred Docker has not enough evidence; posting has no recorded live check | Python, SQL and FastAPI satisfy required skills, while preferred Docker has no supporting candidate evidence |
 | [05-prepare.png](./screenshots/05-prepare.png) | Cover letter, recruiter message, eligibility/approval controls, Harborline intern; seeded unless live generation was verified | Prepare page with Harborline materials and human approval controls |
 | [06-track.png](./screenshots/06-track.png) | Tracker list: saved vs ready_to_apply; follow-up export; `applied` not claimed | Track list showing one saved role and one approved ready-to-apply role |
 | [06b-analytics.png](./screenshots/06b-analytics.png) | Honest funnel: saved/generated/approved, applied/interview/offer at 0 | Analytics funnel with materials approved and applied/offer still zero |
@@ -41,7 +42,7 @@ The script:
 - Does not type into EEO fields
 - Opens Discover and selects the Harborline intern so the card and preview both show `Remote · Internship` and the stronger Fit
 - Cedar card is expected to show `Portland, OR · Hybrid · Internship` and the partial Fit
-- Scrolls Evidence so a matched skill (Python) and the Docker gap can share the frame
+- Captures the Python evidence drawer separately from the unblurred Docker gap, since opening a modal blurs underlying rows
 - Scrolls Prepare to the Cover letter heading (`block: start`) so the letter, recruiter message, source-traceability label, and approval rail can share the 900px frame
 - Uses Track **List** view so both seeded rows are visible (Kanban columns scroll horizontally by design)
 - Writes `08-assisted-fill-boundary-mock.png` from the local HTML fixture, labeled as a mock
