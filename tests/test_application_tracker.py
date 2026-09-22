@@ -59,7 +59,7 @@ def test_tracker_get_is_read_only(isolated_session) -> None:
     assert item.status is None
     assert isolated_session.query(ApplicationTrackerRecord).count() == 0
     listed = list_applications(isolated_session, TEST_USER_ID)
-    assert listed[0].tracker_status is None
+    assert listed == []  # An unsaved global catalog job is not an application.
     assert isolated_session.query(ApplicationTrackerRecord).count() == 0
 
 
