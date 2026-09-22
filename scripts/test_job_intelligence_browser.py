@@ -405,7 +405,7 @@ def main() -> int:
                 page.unroute("**/api/jobs/*/intelligence", _delay_intelligence_post)
                 page.get_by_role("button", name="Re-verify").click()
                 expect(page.get_by_role("button", name="Re-verify")).to_be_visible()
-                expect(page.get_by_text("Current status:", exact=False)).to_be_visible()
+                expect(page.get_by_text("Catalog status:", exact=False)).to_be_visible()
                 checks += 1
 
                 page.route(
