@@ -6,7 +6,7 @@ Primary viewport: **1440×900**, light theme, `prefers-reduced-motion: reduce`, 
 
 **Showcase capture revision:** recaptured from current mainline after `7038b76` with résumé-to-job Fit demo data (parsed synthetic Jordan Avery résumé, Harborline 96% vs Cedar 62%). This is a newer screenshot revision, not a recertification and not a moved tag.
 
-Data: isolated SQLite from `scripts/seed_showcase_demo.py`. Not `data/careerpilot.db`. Fit scores are production Fit V2 results for the synthetic Jordan Avery résumé. Prepare copy is **illustrative seeded materials** unless the seeder reported live generation.
+Data: isolated SQLite from `scripts/seed_showcase_demo.py`. Not `data/careerpilot.db`. Fit scores are production Fit V2 results for the synthetic Jordan Avery résumé. Provider calls are disabled by default; explicitly set `CAREERPILOT_SHOWCASE_LIVE=1` for configured live extraction/generation. Prepare copy is **illustrative seeded materials** unless the seeder reported live generation.
 
 ## Committed images
 
