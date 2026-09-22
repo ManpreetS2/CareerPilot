@@ -279,6 +279,10 @@ def list_applications(db: Session, user_id: int) -> list[ApplicationListItem]:
                 company=job.company,
                 match_score=match.overall_score if match is not None else None,
                 recommendation=match.recommendation if match is not None else None,  # type: ignore[arg-type]
+                score_kind=match.score_kind if match is not None else None,  # type: ignore[arg-type]
+                match_tier=match.match_tier if match is not None else None,  # type: ignore[arg-type]
+                apply_recommendation=match.apply_recommendation if match is not None else None,  # type: ignore[arg-type]
+                confidence_level=match.confidence_level if match is not None else None,  # type: ignore[arg-type]
                 approval_status=package.approval_status if package is not None else None,  # type: ignore[arg-type]
                 tracker_status=tracker.status if tracker is not None else None,  # type: ignore[arg-type]
                 reminder_date=tracker.reminder_date if tracker is not None else None,
