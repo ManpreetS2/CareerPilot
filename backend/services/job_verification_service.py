@@ -8,6 +8,7 @@ verified — the whole point is surfacing doubt, not resolving it automatically.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -273,21 +274,35 @@ def verify_all(status_filter: str | None = "discovered") -> list[Job]:
         return results
 
 
-def mark_stale_if_unseen(max_absence_days: int = DEFAULT_ABSENCE_STALE_AFTER_DAYS) -> int:
-    """Mark discovered/verified jobs stale if no scout run has seen them in
-    max_absence_days — a job silently dropping out of a source's live feed,
-    as distinct from check_staleness's posting-age-only signal.
+MAX_REVALIDATE_PER_TICK = 25
 
-    Assumes every scout run queries every configured source with the same
-    query — true today, since there is no user-facing search query yet
-    (run_scout always uses the backend's own default). If a query field is
-    ever added to "Find Jobs", this would need to become query-aware: a job
-    still live but not matching a one-off different query would otherwise
-    look incorrectly "unseen" and eventually get swept as stale.
 
-    Single session, unlike verify_all's two-phase read/write split — that
-    split exists specifically to avoid holding a write lock across N slow
-    HTTP checks, which doesn't apply here (pure DB read+write, no network).
+async def revalidate_unseen_candidates(max_absence_days: int = DEFAULT_ABSENCE_STALE_AFTER_DAYS) -> int:
+    """Real-verify (not merely mark stale) discovered/verified jobs that no
+    scout run has re-scraped in max_absence_days.
+
+    A job silently dropping out of a source's live feed used to be treated
+    as proof it closed — but that assumed every scout run searched with the
+    same query, which stopped being true once Discover took explicit
+    queries and Saved Searches each store their own distinct query text. A
+    job absent from an unrelated query is not evidence it closed; it is
+    only evidence worth spending a real check on. This function is that
+    check: it treats "not seen in a while" purely as a trigger for
+    `verify_job`'s actual network-based liveness check, the same one
+    `verify_all` already uses, never as the verdict itself.
+
+    Same two-phase read/close-session/network-checks/reopen-session/write
+    split `verify_all` uses, for the same reason (its own docstring above
+    explains why: avoid holding a SQLite write lock across N slow HTTP
+    checks). Capped at MAX_REVALIDATE_PER_TICK, oldest-unseen first, same
+    fairness rule saved_search_service.run_due_saved_searches uses for its
+    own per-tick cap — otherwise a growing catalog could let some jobs never
+    get revalidated.
+
+    Called from the scheduler on its own (infrequent) cadence, never inline
+    from a scout run — verify_job makes a real synchronous HTTP call per
+    job, so running many of these from a live "Find Jobs" click would add
+    unrelated network latency to the user's own request.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_absence_days)
     with SessionLocal() as db:
@@ -296,12 +311,30 @@ def mark_stale_if_unseen(max_absence_days: int = DEFAULT_ABSENCE_STALE_AFTER_DAY
             .filter(JobRecord.status.in_(("discovered", "verified")))
             .filter(JobRecord.source.in_(_SCOUT_MANAGED_SOURCES))
             .filter(JobRecord.date_scraped < cutoff)
+            .order_by(JobRecord.date_scraped.asc())
+            .limit(MAX_REVALIDATE_PER_TICK)
             .all()
         )
-        marked_at = datetime.now(timezone.utc)
-        for record in candidates:
-            record.status = "stale"
-            record.verification_notes = f"Not seen in a scout run for over {max_absence_days} days."
-            record.verified_at = marked_at
+        jobs_to_check = [(record.public_id, record_to_job(record)) for record in candidates]
+
+    if not jobs_to_check:
+        return 0
+
+    # verify_job() makes a real synchronous httpx call per job — same reason
+    # saved_search_service._run_one_saved_search wraps scout_jobs in
+    # asyncio.to_thread: bare, this would block the whole event loop for
+    # the entire sweep.
+    results_by_id: dict[str, tuple[str, str]] = {}
+    for public_id, job in jobs_to_check:
+        results_by_id[public_id] = await asyncio.to_thread(verify_job, job)
+
+    verified_at = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        records = db.query(JobRecord).filter(JobRecord.public_id.in_(results_by_id.keys())).all()
+        for record in records:
+            new_status, notes = results_by_id[record.public_id]
+            record.status = new_status
+            record.verification_notes = notes
+            record.verified_at = verified_at
         db.commit()
-        return len(candidates)
+        return len(records)

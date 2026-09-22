@@ -120,10 +120,40 @@ def test_normalize_himalayas_job_maps_fields() -> None:
     assert job.company == "Stripe"
     assert job.location == "Remote"
     assert job.salary == "$120,000–$180,000"
+    # url stays the direct application link — Fill-eligibility detection,
+    # dedupe, and the live "still open" check all key off this field, and
+    # must not be repointed at himalayas.app for attribution purposes.
     assert job.url == "https://stripe.com/careers/senior-engineer"
+    # source_url is additive: himalayas.app's own listing page, built from
+    # the raw payload's guid, so the source badge can link back there
+    # without disturbing url's existing meaning.
+    assert job.source_url == "https://himalayas.app/jobs/stripe-senior-software-engineer-abc123"
     assert "Senior Software Engineer" in job.description
     assert job.source == "himalayas"
     assert job.date_posted == date(2026, 8, 21)
+
+
+def test_normalize_himalayas_job_omits_source_url_when_guid_is_missing() -> None:
+    job = normalize_job(_himalayas_listing(guid=None), "himalayas")
+    assert job.source_url is None
+
+
+@pytest.mark.parametrize(
+    "unsafe_guid",
+    [
+        "../../etc/passwd",
+        "stripe/senior-engineer",
+        "javascript:alert(1)",
+        "guid with spaces",
+        "",
+    ],
+)
+def test_normalize_himalayas_job_omits_source_url_for_an_unsafe_guid(unsafe_guid: str) -> None:
+    """guid is untrusted third-party data that ends up in a rendered link —
+    anything outside the plain slug allowlist must not become source_url,
+    not even by stripping it down to something safe."""
+    job = normalize_job(_himalayas_listing(guid=unsafe_guid), "himalayas")
+    assert job.source_url is None
 
 
 def test_normalize_himalayas_job_joins_location_restrictions() -> None:
@@ -208,6 +238,23 @@ def test_jobicy_and_himalayas_same_url_collapse_to_one_row(isolated_engine, monk
         rows = db.query(JobRecord).all()
         assert len(rows) == 1
         assert rows[0].url == shared_url
+
+
+def test_persist_jobs_carries_source_url_through_insert_and_update(isolated_engine, monkeypatch) -> None:
+    SessionLocal = sessionmaker(bind=isolated_engine, autocommit=False, autoflush=False)
+    monkeypatch.setattr(job_scout_service, "SessionLocal", SessionLocal)
+
+    persist_jobs([normalize_job(_himalayas_listing(), "himalayas")])
+    with SessionLocal() as db:
+        record = db.query(JobRecord).one()
+        assert record.source_url == "https://himalayas.app/jobs/stripe-senior-software-engineer-abc123"
+
+    # Re-discovering the same posting (same applicationLink) must not drop
+    # source_url on the update path.
+    persist_jobs([normalize_job(_himalayas_listing(), "himalayas")])
+    with SessionLocal() as db:
+        record = db.query(JobRecord).one()
+        assert record.source_url == "https://himalayas.app/jobs/stripe-senior-software-engineer-abc123"
 
 
 def test_deduplicate_jobs_collapses_jobicy_and_himalayas_same_url() -> None:

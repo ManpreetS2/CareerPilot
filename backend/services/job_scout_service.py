@@ -25,6 +25,7 @@ from backend.db.models import JobRecord
 from backend.schemas.schemas import Job
 from backend.services.job_content import classify_content_status, source_fingerprint
 from backend.services.job_service import record_to_job
+from backend.services.provider_throttle import provider_fetch_cache
 from backend.services.url_safety import UnsafeURLError, assert_safe_outbound_url, fetch_url_safely
 
 logger = logging.getLogger(__name__)
@@ -598,38 +599,49 @@ def _client() -> httpx.Client:
 
 
 def scout_adzuna(query: str, location: str | None = None) -> list[dict]:
-    """Call Adzuna's job search API and return raw listing dicts."""
+    """Call Adzuna's job search API and return raw listing dicts.
+
+    The provider does the filtering server-side, so unlike the feed
+    sources there's no separate raw-vs-filtered split — the whole response
+    is cached (subject to provider_fetch_cache's cooldown), keyed by the
+    exact query+location that produced it, to protect Adzuna's account
+    quota against repeated identical requests from saved searches.
+    """
     if not settings.adzuna_app_id or not settings.adzuna_app_key:
         raise JobScoutError(
             "Adzuna is not configured. Add ADZUNA_APP_ID and ADZUNA_APP_KEY to .env "
             "(free signup at https://developer.adzuna.com/)."
         )
-    params = {
-        "app_id": settings.adzuna_app_id,
-        "app_key": settings.adzuna_app_key,
-        "results_per_page": settings.scout_results_per_source,
-        "what": query,
-        "content-type": "application/json",
-    }
-    if location:
-        params["where"] = location
-    url = ADZUNA_SEARCH_URL.format(country=settings.adzuna_country)
-    try:
-        with _client() as client:
-            response = client.get(url, params=params)
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise JobScoutError(f"Adzuna request failed: {exc}") from exc
-    return response.json().get("results", [])
+
+    def _fetch() -> list[dict]:
+        params = {
+            "app_id": settings.adzuna_app_id,
+            "app_key": settings.adzuna_app_key,
+            "results_per_page": settings.scout_results_per_source,
+            "what": query,
+            "content-type": "application/json",
+        }
+        if location:
+            params["where"] = location
+        url = ADZUNA_SEARCH_URL.format(country=settings.adzuna_country)
+        try:
+            with _client() as client:
+                response = client.get(url, params=params)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise JobScoutError(f"Adzuna request failed: {exc}") from exc
+        return response.json().get("results", [])
+
+    cache_key = f"{query}|{location or ''}"
+    return provider_fetch_cache.get_or_fetch("adzuna", cache_key, _fetch)
 
 
-def scout_remoteok(queries: list[str] | None = None) -> list[dict]:
-    """Pull RemoteOK's public listings feed and return raw listing dicts.
-
-    Takes every target role at once: the feed is identical whatever is being
-    searched for, so it is fetched once and filtered against all of them.
-    """
-    _reject_bare_query_string(queries)
+def _fetch_remoteok_raw() -> list[dict]:
+    """The query-independent half of scout_remoteok: fetch the feed and
+    drop the one non-job entry. Split out so the raw response can be
+    shared (via provider_fetch_cache) across every caller regardless of
+    what role each one is searching for — title filtering happens fresh
+    per call in scout_remoteok, never on the cached side."""
     try:
         with _client() as client:
             response = client.get(REMOTEOK_URL)
@@ -640,7 +652,18 @@ def scout_remoteok(queries: list[str] | None = None) -> list[dict]:
     payload = response.json()
     # RemoteOK's first array element is a legal notice, not a job — every real
     # listing carries an "id", so filter on that rather than slicing [1:].
-    listings = [item for item in payload if isinstance(item, dict) and item.get("id")]
+    return [item for item in payload if isinstance(item, dict) and item.get("id")]
+
+
+def scout_remoteok(queries: list[str] | None = None) -> list[dict]:
+    """Pull RemoteOK's public listings feed and return raw listing dicts.
+
+    Takes every target role at once: the feed is identical whatever is being
+    searched for, so it is fetched once (subject to provider_fetch_cache's
+    cooldown) and filtered against all of them.
+    """
+    _reject_bare_query_string(queries)
+    listings = provider_fetch_cache.get_or_fetch("remoteok", None, _fetch_remoteok_raw)
 
     if queries:
         listings = [item for item in listings if _title_matches_any_query(item.get("position"), queries)]
@@ -655,7 +678,7 @@ def _default_lever_companies() -> list[str]:
     return [slug.strip() for slug in (settings.lever_company_slugs or "").split(",") if slug.strip()]
 
 
-def _fetch_greenhouse_board_jobs(board_token: str) -> list[dict]:
+def _fetch_greenhouse_board_jobs_raw(board_token: str) -> list[dict]:
     """One list call per board (content=true inlines full descriptions) —
     not the existing per-job single endpoint, which would be one HTTP call
     per opening on a board that can have hundreds."""
@@ -684,6 +707,17 @@ def _fetch_greenhouse_board_jobs(board_token: str) -> list[dict]:
     return payload.get("jobs") or []
 
 
+def _fetch_greenhouse_board_jobs(board_token: str) -> list[dict]:
+    """Cached (per board_token, subject to provider_fetch_cache's cooldown)
+    wrapper around the raw fetch — a JobScoutError from a dead/renamed
+    board is never cached, so scout_greenhouse's per-token isolation is
+    unaffected: a failure here still surfaces every call until the board
+    is reachable again."""
+    return provider_fetch_cache.get_or_fetch(
+        "greenhouse", board_token, lambda: _fetch_greenhouse_board_jobs_raw(board_token)
+    )
+
+
 def scout_greenhouse(queries: list[str] | None = None) -> list[dict]:
     """Discover current openings across every configured Greenhouse board.
 
@@ -709,7 +743,7 @@ def scout_greenhouse(queries: list[str] | None = None) -> list[dict]:
     return listings[: settings.scout_results_per_source]
 
 
-def _fetch_lever_company_postings(company_slug: str) -> list[dict]:
+def _fetch_lever_company_postings_raw(company_slug: str) -> list[dict]:
     url = f"{LEVER_API_BASE}/postings/{company_slug}?mode=json"
     try:
         response = fetch_url_safely(
@@ -733,6 +767,14 @@ def _fetch_lever_company_postings(company_slug: str) -> list[dict]:
     if not isinstance(payload, list):
         raise JobScoutError("Lever returned an unreadable postings list.")
     return payload
+
+
+def _fetch_lever_company_postings(company_slug: str) -> list[dict]:
+    """Cached (per company_slug) wrapper — same rationale as
+    _fetch_greenhouse_board_jobs above."""
+    return provider_fetch_cache.get_or_fetch(
+        "lever", company_slug, lambda: _fetch_lever_company_postings_raw(company_slug)
+    )
 
 
 def scout_lever(queries: list[str] | None = None) -> list[dict]:
@@ -764,34 +806,42 @@ def scout_remotive(query: str | None = None) -> list[dict]:
     gated by its own terms (linking back to the original remotive.com URL
     and crediting Remotive as the source — both already satisfied here,
     since job.url stores the Remotive URL and job.source="remotive" drives
-    the UI's source badge; and no more than a few requests a day, satisfied
-    by only ever calling this from a user-triggered "Find Jobs" click, never
-    a schedule)."""
-    params: dict[str, object] = {"limit": settings.scout_results_per_source}
-    if query:
-        params["search"] = query
-    try:
-        response = fetch_url_safely(
-            f"{REMOTIVE_SEARCH_URL}?{urlencode(params)}",
-            user_agent=settings.http_user_agent,
-            timeout_seconds=settings.http_timeout_seconds,
-            allowed_hosts=REMOTIVE_API_HOSTS,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except UnsafeURLError:
-        raise
-    except httpx.HTTPStatusError:
-        raise JobScoutError("Could not reach Remotive.") from None
-    except httpx.TimeoutException:
-        raise JobScoutError("Remotive request timed out.") from None
-    except httpx.HTTPError:
-        raise JobScoutError("Could not reach Remotive.") from None
-    except json.JSONDecodeError:
-        raise JobScoutError("Remotive returned an unreadable response.") from None
-    if not isinstance(payload, dict):
-        raise JobScoutError("Remotive returned an unreadable response.")
-    return payload.get("jobs") or []
+    the UI's source badge).
+
+    A background Saved Search tick can call this too now, not only a live
+    "Find Jobs" click — provider_fetch_cache's hour-long cooldown for this
+    source is what actually keeps repeated calls within Remotive's terms,
+    not caller discipline.
+    """
+
+    def _fetch() -> list[dict]:
+        params: dict[str, object] = {"limit": settings.scout_results_per_source}
+        if query:
+            params["search"] = query
+        try:
+            response = fetch_url_safely(
+                f"{REMOTIVE_SEARCH_URL}?{urlencode(params)}",
+                user_agent=settings.http_user_agent,
+                timeout_seconds=settings.http_timeout_seconds,
+                allowed_hosts=REMOTIVE_API_HOSTS,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except UnsafeURLError:
+            raise
+        except httpx.HTTPStatusError:
+            raise JobScoutError("Could not reach Remotive.") from None
+        except httpx.TimeoutException:
+            raise JobScoutError("Remotive request timed out.") from None
+        except httpx.HTTPError:
+            raise JobScoutError("Could not reach Remotive.") from None
+        except json.JSONDecodeError:
+            raise JobScoutError("Remotive returned an unreadable response.") from None
+        if not isinstance(payload, dict):
+            raise JobScoutError("Remotive returned an unreadable response.")
+        return payload.get("jobs") or []
+
+    return provider_fetch_cache.get_or_fetch("remotive", query or "", _fetch)
 
 
 def _jobicy_tag(query: str | None) -> str | None:
@@ -815,13 +865,9 @@ def _listings_from_payload(payload: object, source_label: str) -> list:
     return jobs
 
 
-def scout_jobicy(query: str | None = None) -> list[dict]:
-    """Jobicy's public remote-jobs API: keyless. `tag` is a server-side
-    keyword search (3–50 chars), so a normal role is one request. A too-short
-    query omits `tag` and is filtered locally by title."""
+def _fetch_jobicy_raw(tag: str | None) -> list[dict]:
     count = max(1, min(int(settings.scout_results_per_source), 200))
     params: dict[str, object] = {"count": count}
-    tag = _jobicy_tag(query)
     if tag:
         params["tag"] = tag
     try:
@@ -843,7 +889,21 @@ def scout_jobicy(query: str | None = None) -> list[dict]:
         raise JobScoutError("Could not reach Jobicy.") from None
     except json.JSONDecodeError:
         raise JobScoutError("Jobicy returned an unreadable response.") from None
-    listings = _listings_from_payload(payload, "Jobicy")
+    return _listings_from_payload(payload, "Jobicy")
+
+
+def scout_jobicy(query: str | None = None) -> list[dict]:
+    """Jobicy's public remote-jobs API: keyless. `tag` is a server-side
+    keyword search (3–50 chars), so a normal role is one request. A too-short
+    query omits `tag` and is filtered locally by title.
+
+    Cached by the actual outgoing `tag`, not the raw query — two different
+    too-short queries ("ai", "ml") both produce the identical untagged
+    request, and caching by query alone would miss that they're the same
+    request to Jobicy.
+    """
+    tag = _jobicy_tag(query)
+    listings = provider_fetch_cache.get_or_fetch("jobicy", tag or "", lambda: _fetch_jobicy_raw(tag))
     if query and not tag:
         listings = [item for item in listings if _title_matches_query(item.get("jobTitle"), query)]
     return listings[: settings.scout_results_per_source]
@@ -851,31 +911,41 @@ def scout_jobicy(query: str | None = None) -> list[dict]:
 
 def scout_himalayas(query: str | None = None) -> list[dict]:
     """Himalayas public search API: keyless, free-text `q` is server-side, so
-    one request per role. Attribution is the source badge plus stored URL."""
-    params: dict[str, object] = {}
-    if query:
-        params["q"] = query
-    try:
-        url = HIMALAYAS_SEARCH_URL if not params else f"{HIMALAYAS_SEARCH_URL}?{urlencode(params)}"
-        response = fetch_url_safely(
-            url,
-            user_agent=settings.http_user_agent,
-            timeout_seconds=settings.http_timeout_seconds,
-            allowed_hosts=HIMALAYAS_API_HOSTS,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except UnsafeURLError:
-        raise JobScoutError("Could not reach Himalayas.") from None
-    except httpx.HTTPStatusError:
-        raise JobScoutError("Could not reach Himalayas.") from None
-    except httpx.TimeoutException:
-        raise JobScoutError("Himalayas request timed out.") from None
-    except httpx.HTTPError:
-        raise JobScoutError("Could not reach Himalayas.") from None
-    except json.JSONDecodeError:
-        raise JobScoutError("Himalayas returned an unreadable response.") from None
-    listings = _listings_from_payload(payload, "Himalayas")
+    one request per role. Attribution is the source badge plus stored URL.
+
+    Himalayas' own catalog refreshes daily — provider_fetch_cache's
+    24-hour cooldown for this source means a saved search re-checking more
+    often than that reuses yesterday's fetch rather than repeating
+    identical work against an unchanged catalog.
+    """
+
+    def _fetch() -> list[dict]:
+        params: dict[str, object] = {}
+        if query:
+            params["q"] = query
+        try:
+            url = HIMALAYAS_SEARCH_URL if not params else f"{HIMALAYAS_SEARCH_URL}?{urlencode(params)}"
+            response = fetch_url_safely(
+                url,
+                user_agent=settings.http_user_agent,
+                timeout_seconds=settings.http_timeout_seconds,
+                allowed_hosts=HIMALAYAS_API_HOSTS,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except UnsafeURLError:
+            raise JobScoutError("Could not reach Himalayas.") from None
+        except httpx.HTTPStatusError:
+            raise JobScoutError("Could not reach Himalayas.") from None
+        except httpx.TimeoutException:
+            raise JobScoutError("Himalayas request timed out.") from None
+        except httpx.HTTPError:
+            raise JobScoutError("Could not reach Himalayas.") from None
+        except json.JSONDecodeError:
+            raise JobScoutError("Himalayas returned an unreadable response.") from None
+        return _listings_from_payload(payload, "Himalayas")
+
+    listings = provider_fetch_cache.get_or_fetch("himalayas", query or "", _fetch)
     cap = min(int(settings.scout_results_per_source), _HIMALAYAS_SEARCH_PAGE_SIZE)
     return listings[:cap]
 
@@ -1014,6 +1084,23 @@ def _coerce_salary_number(value: object) -> float | None:
         except ValueError:
             return None
     return None
+
+
+HIMALAYAS_JOB_URL_BASE = "https://himalayas.app/jobs"
+
+
+def _himalayas_source_url(raw: dict) -> str | None:
+    """Himalayas' own listing page, when the raw payload's `guid` is safe to
+    splice into a URL. `guid` is untrusted third-party data that ends up
+    rendered as a clickable link — validated against the same slug
+    allowlist _BOARD_TOKEN_RE already uses for exactly this situation
+    elsewhere in this file, rather than trusted outright. Anything that
+    doesn't match yields None: no source_url, not a malformed or unsafe one.
+    """
+    guid = raw.get("guid")
+    if not isinstance(guid, str) or not _BOARD_TOKEN_RE.fullmatch(guid):
+        return None
+    return f"{HIMALAYAS_JOB_URL_BASE}/{guid}"
 
 
 def _himalayas_location(raw: dict) -> str:
@@ -1167,6 +1254,7 @@ def normalize_job(raw: dict, source: str) -> Job:
                 _coerce_salary_number(raw.get("maxSalary")),
             ),
             url=raw.get("applicationLink") or "",
+            source_url=_himalayas_source_url(raw),
             description=_clean_description(raw.get("description") or raw.get("excerpt")),
             source="himalayas",
             date_posted=_parse_epoch_millis(raw.get("pubDate")),
@@ -1270,6 +1358,7 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                 existing.description = _merge_description(existing.description, job.description)
                 if job.url:
                     existing.url = job.url
+                existing.source_url = job.source_url or existing.source_url
                 if job.date_posted:
                     existing.date_posted = job.date_posted.isoformat()
                 existing.date_scraped = job.date_scraped
@@ -1298,6 +1387,7 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                     location=job.location,
                     salary=job.salary,
                     url=job.url,
+                    source_url=job.source_url,
                     description=job.description,
                     source=job.source,
                     date_posted=job.date_posted.isoformat() if job.date_posted else None,
@@ -1429,9 +1519,12 @@ def run_scout_with_stats(
         count=len(stored),
     )
 
-    from backend.services.job_verification_service import mark_stale_if_unseen
-
-    mark_stale_if_unseen()
+    # Absence-based staleness sweeping used to run inline here after every
+    # scout. It's not: a job absent from one scout's results isn't evidence
+    # it closed (see job_verification_service.revalidate_unseen_candidates,
+    # which now owns this via a real per-job liveness check instead, on its
+    # own scheduler cadence rather than inline with every live/scheduled
+    # scout call).
 
     sources_ok = tuple(name for name in _SCOUT_SOURCE_NAMES if source_success[name])
     sources_failed = tuple(name for name in _SCOUT_SOURCE_NAMES if not source_success[name])
