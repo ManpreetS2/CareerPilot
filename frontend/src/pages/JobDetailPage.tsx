@@ -32,6 +32,10 @@ import type { InterviewPrep, Job, JobIntelligence, JobRequirementProfile, MatchE
 
 export function JobDetailPage() {
   const { jobId = "" } = useParams();
+  // Route IDs change without remounting this page. Async completions must
+  // compare against the *current* ID, not the stale ID closed over on launch.
+  const activeJobId = useRef(jobId);
+  activeJobId.current = jobId;
   const [job, setJob] = useState<Job | null>(null);
   const [intelligence, setIntelligence] = useState<JobIntelligence | null>(null);
   const [intelligenceLoading, setIntelligenceLoading] = useState(true);
@@ -52,6 +56,9 @@ export function JobDetailPage() {
   const scoringRequest = useRef(0);
   const extractionInFlight = useRef(false);
   const intelligenceRequest = useRef(0);
+  const verificationRequest = useRef(0);
+  const evidenceRequest = useRef(0);
+  const interviewRequest = useRef(0);
   const [neighbors, setNeighbors] = useState<{ prev: string | null; next: string | null }>({
     prev: null,
     next: null,
