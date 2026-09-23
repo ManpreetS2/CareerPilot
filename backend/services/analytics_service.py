@@ -198,69 +198,58 @@ def build_conversion_analytics(db: Session, user_id: int) -> ApplicationAnalytic
             if label in jobs_by_band:
                 by_match_score_band.append(_bucket(label, applied_jobs, jobs_by_band[label]))
 
-    # A row may be created milliseconds before its event is committed. That is
-    # normal for a fresh account, not evidence of missing historical analytics.
-    # Only warn when an older row represents a stage absent from this user's
-    # recorded event history for that same job.
+    # Brand-new rows may precede their event by milliseconds; compare the
+    # recorded stage for each job, not just its row timestamp. When there
+    # are no events at all, legacy bookmarks/applied trackers/materials still
+    # require a notice rather than silently reporting an all-zero funnel.
     notice = None
     earliest_event = min(
         (timestamp for entry in job_events.values() for timestamp in entry.first_occurrence.values()),
         default=None,
     )
+
+    saved_query = db.query(SavedJobRecord).filter(SavedJobRecord.user_id == user_id)
+    tracker_query = db.query(ApplicationTrackerRecord).filter(ApplicationTrackerRecord.user_id == user_id)
+    package_query = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.user_id == user_id)
     if earliest_event is not None:
-        prior_trackers = (
-            db.query(ApplicationTrackerRecord)
-            .filter(ApplicationTrackerRecord.user_id == user_id, ApplicationTrackerRecord.created_at < earliest_event)
-            .all()
-        )
-        prior_packages = (
-            db.query(ApplicationPackageRecord)
-            .filter(ApplicationPackageRecord.user_id == user_id, ApplicationPackageRecord.created_at < earliest_event)
-            .all()
-        )
+        saved_query = saved_query.filter(SavedJobRecord.created_at < earliest_event)
+        tracker_query = tracker_query.filter(ApplicationTrackerRecord.created_at < earliest_event)
+        package_query = package_query.filter(ApplicationPackageRecord.created_at < earliest_event)
 
-        # Setting a tracker row to "saved" directly does NOT emit a funnel
-        # "saved" event: that event belongs to the bookmark action. A direct
-        # manually tracked role is therefore not missing historical analytics.
-        bookmarked_job_ids = {
-            job_id
-            for (job_id,) in db.query(SavedJobRecord.job_id).filter(
-                SavedJobRecord.user_id == user_id
-            ).all()
-        }
+    prior_saved = saved_query.all()
+    prior_trackers = tracker_query.all()
+    prior_packages = package_query.all()
 
-        def recorded(job_id: int, event_type: str) -> bool:
-            entry = job_events.get(job_id)
-            return entry is not None and event_type in entry.first_occurrence
+    def recorded(job_id: int, event_type: str) -> bool:
+        entry = job_events.get(job_id)
+        return entry is not None and event_type in entry.first_occurrence
 
-        missing_tracker_history = any(
-            (
-                tracker.status in ("applied", "interviewing", "offer", "rejected", "withdrawn")
-                and not recorded(tracker.job_id, tracker.status)
-            )
-            or (
-                tracker.status == "saved"
-                and tracker.job_id in bookmarked_job_ids
-                and not recorded(tracker.job_id, "saved")
-            )
-            for tracker in prior_trackers
+    # Tracker "saved" is distinct from the bookmark action and deliberately
+    # has no conversion event of its own.
+    missing_saved_history = any(
+        not recorded(bookmark.job_id, "saved") for bookmark in prior_saved
+    )
+    missing_tracker_history = any(
+        tracker.status in ("applied", "interviewing", "offer", "rejected", "withdrawn")
+        and not recorded(tracker.job_id, tracker.status)
+        for tracker in prior_trackers
+    )
+    missing_package_history = any(
+        (
+            package.approval_status == "approved"
+            and not recorded(package.job_id, "materials_approved")
         )
-        missing_package_history = any(
-            (
-                package.approval_status == "approved"
-                and not recorded(package.job_id, "materials_approved")
-            )
-            or (
-                package.approval_status in ("pending_review", "approved")
-                and not recorded(package.job_id, "materials_generated")
-            )
-            for package in prior_packages
+        or (
+            package.approval_status in ("pending_review", "approved")
+            and not recorded(package.job_id, "materials_generated")
         )
-        if missing_tracker_history or missing_package_history:
-            notice = (
-                "Some of your applications predate conversion tracking and aren't reflected below — "
-                "numbers only cover activity since analytics started recording."
-            )
+        for package in prior_packages
+    )
+    if missing_saved_history or missing_tracker_history or missing_package_history:
+        notice = (
+            "Some of your applications predate conversion tracking and aren't reflected below — "
+            "numbers only cover activity since analytics started recording."
+        )
 
     return ApplicationAnalyticsSummary(
         generated_at=datetime.now(timezone.utc),
