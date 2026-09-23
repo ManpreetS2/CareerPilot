@@ -87,6 +87,33 @@ def test_disallowed_origin_is_rejected_for_state_changing_cookie_requests(isolat
     assert response.status_code == 403
 
 
+def test_unhandled_server_error_is_readable_only_by_an_allowed_origin(isolated_client, monkeypatch) -> None:
+    """The catch-all 500 runs outside CORSMiddleware. Without CORS headers the
+    browser hid the response and the UI claimed the backend was unreachable."""
+    from fastapi.testclient import TestClient
+
+    from backend.db.database import get_db
+    from backend.main import app
+
+    def _failing_db():
+        raise RuntimeError("internal detail that must not reach the client")
+        yield  # pragma: no cover
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, _failing_db)
+    client = TestClient(app, raise_server_exceptions=False)
+    allowed = settings.cors_allow_origins[0]
+
+    readable = client.get("/health", headers={"Origin": allowed})
+    assert readable.status_code == 500
+    assert readable.json() == {"detail": "Internal server error"}
+    assert readable.headers["access-control-allow-origin"] == allowed
+    assert readable.headers["access-control-allow-credentials"] == "true"
+
+    foreign = client.get("/health", headers={"Origin": "https://evil.example"})
+    assert foreign.status_code == 500
+    assert "access-control-allow-origin" not in foreign.headers
+
+
 def test_production_insecure_cookies_are_rejected() -> None:
     original_env = settings.app_env
     original_secure = settings.cookie_secure
