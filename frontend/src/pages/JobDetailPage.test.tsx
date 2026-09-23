@@ -188,7 +188,7 @@ describe("JobDetailPage", () => {
     );
     renderJob();
     expect(await screen.findByRole("heading", { name: "First role" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Verify", exact: true }));
+    await userEvent.click(screen.getByRole("button", { name: /^Verify$/ }));
     expect(api.verifyJob).toHaveBeenCalledWith("job-1");
     await userEvent.click(screen.getByRole("link", { name: /Next job/i }));
     expect(await screen.findByRole("heading", { name: "Second role" })).toBeInTheDocument();
