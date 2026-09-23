@@ -15,7 +15,8 @@ export function ProtectedRoute() {
   }
 
   if (!user) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+    // Jobs keeps its tab, filters, and selection in the query string.
+    return <Navigate to="/login" state={{ from: `${location.pathname}${location.search}${location.hash}` }} replace />;
   }
 
   return <Outlet />;

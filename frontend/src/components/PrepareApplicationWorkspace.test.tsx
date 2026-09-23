@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -118,6 +118,31 @@ describe("PrepareApplicationWorkspace", () => {
     expect(getComputedStyle(rail).position).not.toBe("sticky");
     expect(getComputedStyle(rail).position).not.toBe("fixed");
     expect(Number.parseInt(getComputedStyle(rail).zIndex, 10) || 0).toBeLessThan(20);
+  });
+
+  it("does not let Calculate fit and Generate materials run at the same time", async () => {
+    vi.mocked(api.getStoredMaterials).mockRejectedValue(new ApiClientError(404, "No stored materials"));
+    let finishScoring: () => void = () => undefined;
+    vi.mocked(api.scoreJob).mockImplementation(
+      () => new Promise((_resolve, reject) => { finishScoring = () => reject(new ApiClientError(502, "busy")); }),
+    );
+    let finishGenerating: () => void = () => undefined;
+    vi.mocked(api.generateMaterials).mockImplementation(
+      () => new Promise((_resolve, reject) => { finishGenerating = () => reject(new ApiClientError(502, "busy")); }),
+    );
+    renderPrepare();
+    const calculate = await screen.findByTestId("calculate-fit");
+    const generate = await screen.findByTestId("generate-materials");
+
+    await userEvent.click(calculate);
+    expect(generate).toBeDisabled();
+    await act(async () => finishScoring());
+    await waitFor(() => expect(generate).toBeEnabled());
+
+    await userEvent.click(generate);
+    expect(calculate).toBeDisabled();
+    await act(async () => finishGenerating());
+    await waitFor(() => expect(calculate).toBeEnabled());
   });
 
   it("passes false for a normal generate", async () => {

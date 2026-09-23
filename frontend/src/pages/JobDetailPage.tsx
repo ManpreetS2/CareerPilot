@@ -73,6 +73,11 @@ export function JobDetailPage() {
   function isActiveRequest(requestJobId: string, requestId: number, token: { current: number }): boolean {
     return activeJobId.current === requestJobId && token.current === requestId;
   }
+  // The superseded read's own `finally` no longer owns the loading flag.
+  function supersedeEvidenceRead() {
+    evidenceRequest.current += 1;
+    setEvidenceLoading(false);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -211,7 +216,7 @@ export function JobDetailPage() {
     const requestId = ++intelligenceRequest.current;
     const requestJobId = jobId;
     // An in-flight Evidence tab read belongs to the old requirements.
-    evidenceRequest.current += 1;
+    supersedeEvidenceRead();
     setExtracting(true);
     setIntelligenceError(null);
     try {
@@ -264,7 +269,7 @@ export function JobDetailPage() {
     const requestJobId = jobId;
     // A concurrent Evidence-tab GET must not overwrite the freshly scored
     // evidence after this calculation finishes.
-    evidenceRequest.current += 1;
+    supersedeEvidenceRead();
     setScoring(true);
     setScoreError(null);
     async function refreshIntelligence() {
@@ -290,7 +295,7 @@ export function JobDetailPage() {
         setMatch(nextMatch);
         setEvidence(null);
         setEvidenceError(null);
-        evidenceRequest.current += 1;
+        supersedeEvidenceRead();
         if (nextMatch.score_kind === "verified") {
           storedScoreValues.current = {
             ...storedScoreValues.current,

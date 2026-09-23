@@ -280,7 +280,7 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
             type="button"
             className="btn-secondary"
             data-testid="calculate-fit"
-            disabled={scoring}
+            disabled={scoring || generating}
             onClick={() => void calculateFit()}
           >
             {scoring ? "Calculating…" : "Calculate fit"}
@@ -316,7 +316,7 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
               type="button"
               className="btn-primary"
               data-testid="generate-materials"
-              disabled={generating}
+              disabled={generating || scoring}
               onClick={() => void generateMaterials(false)}
             >
               <Wand2 className={`h-4 w-4 ${generating ? "animate-pulse" : ""}`} aria-hidden />
@@ -340,7 +340,7 @@ export function PrepareApplicationWorkspace({ jobId }: { jobId: string }) {
               type="button"
               className="btn-secondary mt-3"
               data-testid="generate-materials-override"
-              disabled={generating}
+              disabled={generating || scoring}
               onClick={() => void generateMaterials(true)}
             >
               {generating ? "Generating…" : "Generate anyway for this job"}
