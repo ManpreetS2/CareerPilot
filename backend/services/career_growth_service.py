@@ -224,7 +224,11 @@ def build_career_growth(db: Session, user_id: int) -> CareerGrowthSummary:
             analyzed.append(job)
             _accumulate_from_factors(skill_acc, job, factors, saved=saved)
             continue
-        if score is not None and profile is not None:
+        # Only a current *verified* Fit may stand in for a missing Evidence
+        # row. Preliminary matched-skill lists are not proof that the full
+        # employer requirements were checked, even if a profile was extracted
+        # after that preliminary score was stored.
+        if score is not None and score.score_kind == "verified" and profile is not None:
             analyzed.append(job)
             _accumulate_from_score(skill_acc, job, score, profile, saved=saved)
             continue
