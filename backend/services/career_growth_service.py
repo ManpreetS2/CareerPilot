@@ -31,6 +31,7 @@ from backend.schemas.job_requirements import JobRequirementProfile
 from backend.schemas.match_evidence import EVIDENCE_VERSION, MatchFactor
 from backend.services.analysis_service import (
     _canonical_skill_key,
+    _stored_score_is_stale,
     canonicalize_skill,
     load_latest_candidate,
     load_preferences,
@@ -190,6 +191,13 @@ def build_career_growth(db: Session, user_id: int) -> CareerGrowthSummary:
         else:
             matched_in_cohort += 1
         score = scores_by_job.get(pk)
+        # The score-only fallback must honor the same résumé/preference/job
+        # fingerprint invalidation as Track, Analytics and the stored-Fit API.
+        # Otherwise missing Match Evidence could silently resurrect stale
+        # candidate strengths and gaps after a résumé update.
+        if score is not None and _stored_score_is_stale(db, score, job, candidate, user_id):
+            stale_excluded += 1
+            continue
         profile_row = profiles_by_job.get(pk)
         profile = None
         if is_current_requirement_profile(job, profile_row) and profile_row is not None:
