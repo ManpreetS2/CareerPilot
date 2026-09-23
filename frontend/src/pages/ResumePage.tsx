@@ -12,6 +12,7 @@ import { Surface } from "../components/ui/surface";
 import { Skeleton } from "../components/ui/skeleton";
 import { api, ApiClientError } from "../lib/api";
 import { cn } from "../lib/cn";
+import { formatApiDate, formatApiTimestamp } from "../lib/datetime";
 import { queryKeys } from "../lib/query-keys";
 import type { ResumeVersionDetail, ResumeVersionProfile } from "../lib/types";
 
@@ -26,9 +27,7 @@ function asRecords(value: unknown): Record<string, unknown>[] {
 }
 
 function formatDate(value: string) {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatApiTimestamp(value, value);
 }
 
 function ResumePreview({ detail }: { detail: ResumeVersionDetail }) {
@@ -247,7 +246,7 @@ export function ResumePage() {
               <span className="flex items-center justify-between gap-2">
                 <span className="font-semibold tabular">Version {version.version_number}</span>
                 <span className="text-xs text-muted-foreground tabular">
-                  {new Date(version.created_at).toLocaleDateString()}
+                  {formatApiDate(version.created_at)}
                 </span>
               </span>
               <span className="mt-0.5 block wrap-anywhere text-muted-foreground">

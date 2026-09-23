@@ -1,6 +1,7 @@
 import type { JobRequirementProfile, MatchScore, Requirement, RequirementGroup } from "../lib/types";
 import { MatchBadge } from "./MatchBadge";
 import { chipLabel } from "../lib/search-intent";
+import { formatApiTimestamp, parseApiTimestamp } from "../lib/datetime";
 
 type RequirementResult = "satisfied" | "partially_satisfied" | "not_satisfied" | "unknown" | "not_applicable";
 
@@ -12,9 +13,8 @@ export function PotentialMatchBadge() {
 
 export function formatPostedDate(value?: string | null): string {
   if (!value || !value.trim() || /^0+$/.test(value.trim())) return "Not stated";
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) return "Not stated";
-  const date = new Date(parsed);
+  const date = parseApiTimestamp(value);
+  if (Number.isNaN(date.getTime())) return "Not stated";
   if (date.getFullYear() < 1990) return "Not stated";
   return date.toLocaleDateString();
 }
@@ -38,11 +38,11 @@ export function JobFreshnessBadge({
       </div>
       <div>
         <dt className="text-muted-foreground">Last fetched</dt>
-        <dd>{dateScraped ? new Date(dateScraped).toLocaleString() : "Not stated"}</dd>
+        <dd>{formatApiTimestamp(dateScraped, "Not stated")}</dd>
       </div>
       <div>
         <dt className="text-muted-foreground">Last verified</dt>
-        <dd>{verifiedAt ? new Date(verifiedAt).toLocaleString() : "Not yet"}</dd>
+        <dd>{formatApiTimestamp(verifiedAt, "Not yet")}</dd>
       </div>
       <div>
         <dt className="text-muted-foreground">Status</dt>

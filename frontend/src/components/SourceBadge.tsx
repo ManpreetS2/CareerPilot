@@ -1,4 +1,5 @@
 import { Building2, Globe2, Link2 } from "lucide-react";
+import { parseApiTimestamp } from "../lib/datetime";
 
 const LABELS: Record<string, string> = {
   adzuna: "Adzuna",
@@ -70,18 +71,9 @@ export function SourceBadge({
   return <span className={`status-pill ${tone}`}>{content}</span>;
 }
 
-/** date_scraped arrives as a naive UTC timestamp (SQLite drops tzinfo), and
- * JavaScript parses an offset-less date-time as LOCAL time — shifting it by
- * the viewer's UTC offset and pushing the day count across a boundary.
- * Appending the offset the value actually carries keeps the math right. */
-function parseUtcTimestamp(value: string): number {
-  const hasOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
-  return new Date(hasOffset ? value : `${value}Z`).getTime();
-}
-
 export function scoutedTimeAgo(dateScraped?: string | null): string | null {
   if (!dateScraped) return null;
-  const scraped = parseUtcTimestamp(dateScraped);
+  const scraped = parseApiTimestamp(dateScraped).getTime();
   if (Number.isNaN(scraped)) return null;
   const days = Math.floor((Date.now() - scraped) / (1000 * 60 * 60 * 24));
   if (days <= 0) return "Seen today";
