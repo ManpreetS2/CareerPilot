@@ -363,6 +363,66 @@ def test_manual_tracker_saved_without_bookmark_is_not_missing_analytics_history(
     assert old_bookmark.notice is not None
 
 
+def test_analytics_warns_when_legacy_activity_has_no_events_at_all(isolated_session) -> None:
+    insert_ready_profile(isolated_session)
+    old_saved_job = insert_job(isolated_session, public_id="legacy-saved-no-events")
+    old_applied_job = insert_job(isolated_session, public_id="legacy-applied-no-events")
+    isolated_session.add(
+        SavedJobRecord(
+            job_id=old_saved_job.id, user_id=TEST_USER_ID,
+            created_at=datetime.now(timezone.utc) - timedelta(days=30),
+        )
+    )
+    isolated_session.add(
+        ApplicationTrackerRecord(
+            job_id=old_applied_job.id, user_id=TEST_USER_ID, status="applied",
+            created_at=datetime.now(timezone.utc) - timedelta(days=30),
+        )
+    )
+    isolated_session.commit()
+
+    summary = build_conversion_analytics(isolated_session, TEST_USER_ID)
+    assert all(step.jobs_count == 0 for step in summary.funnel)
+    assert summary.notice is not None
+    assert "predate" in summary.notice
+
+
+def test_recent_saved_bookmark_missing_event_is_not_hidden_by_unrelated_event(isolated_session) -> None:
+    insert_ready_profile(isolated_session)
+    legacy = insert_job(isolated_session, public_id="legacy-bookmark-no-tracker")
+    recent = insert_job(isolated_session, public_id="recent-bookmark-event")
+    isolated_session.add(
+        SavedJobRecord(
+            job_id=legacy.id, user_id=TEST_USER_ID,
+            created_at=datetime.now(timezone.utc) - timedelta(days=30),
+        )
+    )
+    isolated_session.commit()
+    _seed_event(
+        isolated_session, job=recent, user_id=TEST_USER_ID,
+        event_type="saved", occurred_at=datetime.now(timezone.utc),
+    )
+
+    summary = build_conversion_analytics(isolated_session, TEST_USER_ID)
+    assert summary.funnel[0].jobs_count == 1
+    assert summary.notice is not None
+
+
+def test_direct_saved_tracker_with_no_events_does_not_warn(isolated_session) -> None:
+    insert_ready_profile(isolated_session)
+    job = insert_job(isolated_session, public_id="direct-saved-no-event")
+    isolated_session.add(
+        ApplicationTrackerRecord(
+            job_id=job.id, user_id=TEST_USER_ID, status="saved",
+            created_at=datetime.now(timezone.utc) - timedelta(days=30),
+        )
+    )
+    isolated_session.commit()
+    summary = build_conversion_analytics(isolated_session, TEST_USER_ID)
+    assert summary.notice is None
+    assert all(step.jobs_count == 0 for step in summary.funnel)
+
+
 def test_notice_flags_activity_older_than_earliest_recorded_event(isolated_session) -> None:
     ensure_user(isolated_session, TEST_USER_ID)
     insert_ready_profile(isolated_session)
