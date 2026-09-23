@@ -168,6 +168,31 @@ describe("JobDetailPage", () => {
     expect(screen.getAllByText("Go").length).toBeGreaterThan(0);
   });
 
+  it("does not leave the Evidence tab loading when re-extraction supersedes its read", async () => {
+    let finishEvidenceRead: (reason: unknown) => void = () => undefined;
+    vi.mocked(api.getMatchEvidence).mockImplementation(
+      () => new Promise((_resolve, reject) => { finishEvidenceRead = reject; }),
+    );
+    vi.mocked(api.extractJobIntelligence).mockResolvedValue({
+      job_id: "job-1", required_skills: ["Go"], preferred_skills: [],
+      education_requirements: [], tech_stack: ["Go"],
+      responsibilities: [], likely_interview_focus: [],
+    });
+    const user = userEvent.setup();
+    renderJob();
+    await screen.findByRole("heading", { name: /Staff Platform Engineer/i });
+    await user.click(screen.getByRole("tab", { name: "Evidence" }));
+    expect(screen.getByTestId("evidence-loading")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Extract requirements" }));
+    await waitFor(() => expect(api.extractJobIntelligence).toHaveBeenCalled());
+    await act(async () => {
+      finishEvidenceRead(new ApiClientError(404, "None"));
+    });
+
+    await waitFor(() => expect(screen.queryByTestId("evidence-loading")).not.toBeInTheDocument());
+  });
+
   it("ignores a previous job's verification result after navigating to the next job", async () => {
     bindSessionUser(1);
     saveJobsNavIds(["job-1", "job-2"]);

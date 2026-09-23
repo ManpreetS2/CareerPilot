@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ProtectedRoute } from "./ProtectedRoute";
 
@@ -55,5 +55,31 @@ describe("ProtectedRoute", () => {
     );
     expect(screen.getByText("Login page")).toBeInTheDocument();
     expect(screen.queryByText("Dashboard secret")).not.toBeInTheDocument();
+  });
+
+  it("remembers the full requested URL, including query and hash, for after sign-in", () => {
+    vi.mocked(useAuth).mockReturnValue({
+      user: null,
+      loading: false,
+      login: vi.fn(),
+      signup: vi.fn(),
+      logout: vi.fn(),
+      deleteAccount: vi.fn(),
+    });
+    function LoginProbe() {
+      const location = useLocation();
+      return <p>from={(location.state as { from?: string } | null)?.from}</p>;
+    }
+    render(
+      <MemoryRouter initialEntries={["/jobs?tab=matches&selected=job-7#preview"]}>
+        <Routes>
+          <Route path="/login" element={<LoginProbe />} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/jobs" element={<p>Jobs secret</p>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("from=/jobs?tab=matches&selected=job-7#preview")).toBeInTheDocument();
   });
 });
