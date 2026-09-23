@@ -31,7 +31,7 @@ from backend.schemas.schemas import (
     TrackerStatus,
 )
 from backend.services.analytics_service import record_event
-from backend.services.analysis_service import _stored_score_is_stale
+from backend.services.analysis_service import _stored_score_is_stale, list_stored_match_scores
 
 logger = logging.getLogger(__name__)
 
@@ -429,17 +429,13 @@ def get_dashboard_summary(db: Session, user_id: int) -> DashboardSummary:
     tracker_by_job = {row.job_id: row for row in trackers}
     package_by_job = {row.job_id: row for row in packages}
 
-    high_matches = 0
-    candidate_id = candidate.id if candidate else None
-    for job in jobs:
-        match = _latest_match_for_job(db, job.id, candidate_id)
-        if (
-            match is not None
-            and candidate is not None
-            and match.recommendation == "apply"
-            and not _stored_score_is_stale(db, match, job, candidate, user_id)
-        ):
-            high_matches += 1
+    # Read only this user's scored jobs instead of issuing one match query for
+    # every entry in the shared catalog. The canonical bulk reader also omits
+    # stale fingerprints, just like the stored-score API.
+    high_matches = sum(
+        1 for match in list_stored_match_scores(db, user_id)
+        if match.recommendation == "apply"
+    )
 
     applications_saved = 0
     applications_ready = 0
