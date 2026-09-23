@@ -54,6 +54,28 @@ def _candidate(session):
 
 
 
+def test_dashboard_bulk_score_count_does_not_query_each_shared_catalog_job(
+    isolated_session, monkeypatch
+) -> None:
+    from tests.mvp_helpers import insert_score
+
+    candidate = _candidate(isolated_session)
+    scored = _job(isolated_session, public_id="dashboard-scored")
+    _job(isolated_session, public_id="dashboard-global-unscored")
+    insert_score(isolated_session, scored, candidate, recommendation="apply")
+
+    def forbidden_per_job_lookup(*_args, **_kwargs):
+        raise AssertionError("Dashboard must bulk-read only the user's stored scores")
+
+    monkeypatch.setattr(
+        "backend.services.application_tracker_service._latest_match_for_job",
+        forbidden_per_job_lookup,
+    )
+    summary = get_dashboard_summary(isolated_session, TEST_USER_ID)
+    assert summary.jobs_discovered == 2
+    assert summary.high_matches == 1
+
+
 def test_tracker_get_is_read_only(isolated_session) -> None:
     job = _job(isolated_session)
     item = get_tracking(isolated_session, job.public_id, TEST_USER_ID)

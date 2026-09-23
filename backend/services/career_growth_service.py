@@ -31,6 +31,7 @@ from backend.schemas.job_requirements import JobRequirementProfile
 from backend.schemas.match_evidence import EVIDENCE_VERSION, MatchFactor
 from backend.services.analysis_service import (
     _canonical_skill_key,
+    _stored_score_is_stale,
     canonicalize_skill,
     load_latest_candidate,
     load_preferences,
@@ -190,6 +191,13 @@ def build_career_growth(db: Session, user_id: int) -> CareerGrowthSummary:
         else:
             matched_in_cohort += 1
         score = scores_by_job.get(pk)
+        # The score-only fallback must honor the same résumé/preference/job
+        # fingerprint invalidation as Track, Analytics and the stored-Fit API.
+        # Otherwise missing Match Evidence could silently resurrect stale
+        # candidate strengths and gaps after a résumé update.
+        if score is not None and _stored_score_is_stale(db, score, job, candidate, user_id):
+            stale_excluded += 1
+            continue
         profile_row = profiles_by_job.get(pk)
         profile = None
         if is_current_requirement_profile(job, profile_row) and profile_row is not None:
@@ -216,7 +224,11 @@ def build_career_growth(db: Session, user_id: int) -> CareerGrowthSummary:
             analyzed.append(job)
             _accumulate_from_factors(skill_acc, job, factors, saved=saved)
             continue
-        if score is not None and profile is not None:
+        # Only a current *verified* Fit may stand in for a missing Evidence
+        # row. Preliminary matched-skill lists are not proof that the full
+        # employer requirements were checked, even if a profile was extracted
+        # after that preliminary score was stored.
+        if score is not None and score.score_kind == "verified" and profile is not None:
             analyzed.append(job)
             _accumulate_from_score(skill_acc, job, score, profile, saved=saved)
             continue

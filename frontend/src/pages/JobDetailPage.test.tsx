@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,6 +141,98 @@ describe("JobDetailPage", () => {
     renderJob();
     expect(await screen.findByRole("link", { name: /Previous job/i })).toHaveAttribute("href", "/jobs/job-0");
     expect(screen.getByRole("link", { name: /Next job/i })).toHaveAttribute("href", "/jobs/job-2");
+  });
+
+  it("clears an old Fit score when employer requirements are re-extracted", async () => {
+    vi.mocked(api.getStoredScore).mockResolvedValue({
+      job_id: "job-1", overall_score: 96,
+      matched_skills: ["Python"], partial_matches: [], missing_skills: [],
+      recommendation: "apply", rationale: "Old requirements",
+      score_kind: "verified", match_tier: "strong_match",
+    });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(
+      requirementProfile({ required_skills: ["Python"] }),
+    );
+    vi.mocked(api.extractJobIntelligence).mockResolvedValue({
+      job_id: "job-1", required_skills: ["Go"], preferred_skills: [],
+      education_requirements: [], tech_stack: ["Go"],
+      responsibilities: [], likely_interview_focus: [],
+    });
+    renderJob();
+    expect((await screen.findAllByText(/96% Strong Match/)).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "Extract requirements" }));
+    await waitFor(() => expect(screen.queryAllByText(/96% Strong Match/)).toHaveLength(0));
+    await userEvent.click(screen.getByRole("tab", { name: "Match" }));
+    expect(screen.getByText(/No fit score yet/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "What they're looking for" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Go").length).toBeGreaterThan(0);
+  });
+
+  it("ignores a previous job's verification result after navigating to the next job", async () => {
+    bindSessionUser(1);
+    saveJobsNavIds(["job-1", "job-2"]);
+    const firstJob: Job = {
+      id: "job-1", title: "First role", company: "First Employer",
+      url: "https://example.com/first", description: "First description",
+      source: "manual", status: "discovered",
+    };
+    const secondJob: Job = {
+      id: "job-2", title: "Second role", company: "Second Employer",
+      url: "https://example.com/second", description: "Second description",
+      source: "manual", status: "discovered",
+    };
+    vi.mocked(api.getJob).mockImplementation(async (id) => id === "job-2" ? secondJob : firstJob);
+    let completeVerification: (value: Job) => void = () => undefined;
+    vi.mocked(api.verifyJob).mockImplementation(
+      () => new Promise<Job>((resolve) => { completeVerification = resolve; }),
+    );
+    renderJob();
+    expect(await screen.findByRole("heading", { name: "First role" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /^Verify$/ }));
+    expect(api.verifyJob).toHaveBeenCalledWith("job-1");
+    await userEvent.click(screen.getByRole("link", { name: /Next job/i }));
+    expect(await screen.findByRole("heading", { name: "Second role" })).toBeInTheDocument();
+    await act(async () => {
+      completeVerification({ ...firstJob, status: "flagged", verification_notes: "First posting closed." });
+    });
+    expect(screen.getByRole("heading", { name: "Second role" })).toBeInTheDocument();
+    expect(screen.queryByText("First posting closed.")).not.toBeInTheDocument();
+  });
+
+  it("does not show a previous job's late Fit result in the next job header", async () => {
+    bindSessionUser(1);
+    saveJobsNavIds(["job-1", "job-2"]);
+    vi.mocked(api.getJob).mockImplementation(async (id) => ({
+      id,
+      title: id === "job-1" ? "First scoring role" : "Second scoring role",
+      company: "Example Employer",
+      url: "https://example.com/job",
+      description: "Requirements",
+      source: "manual",
+      status: "discovered",
+    }));
+    let completeScore: (value: Awaited<ReturnType<typeof api.scoreJob>>) => void = () => undefined;
+    vi.mocked(api.scoreJob).mockImplementation(
+      () => new Promise((resolve) => { completeScore = resolve; }),
+    );
+    renderJob();
+    expect(await screen.findByRole("heading", { name: "First scoring role" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Match" }));
+    await userEvent.click(screen.getByRole("button", { name: "Calculate fit" }));
+    expect(api.scoreJob).toHaveBeenCalledWith("job-1");
+    await userEvent.click(screen.getByRole("link", { name: /Next job/i }));
+    expect(await screen.findByRole("heading", { name: "Second scoring role" })).toBeInTheDocument();
+    await act(async () => {
+      completeScore({
+        job_id: "job-1", overall_score: 98.0,
+        matched_skills: ["Python"], partial_matches: [], missing_skills: [],
+        recommendation: "apply", rationale: "Old posting only.", score_kind: "verified",
+        match_tier: "strong_match", apply_recommendation: "apply", confidence_level: "high",
+      });
+    });
+    expect(screen.getByRole("heading", { name: "Second scoring role" })).toBeInTheDocument();
+    expect(screen.queryByText(/98% Strong Match/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Old posting only.")).not.toBeInTheDocument();
   });
 
   it("keeps Potential Match until a verified score exists", async () => {
