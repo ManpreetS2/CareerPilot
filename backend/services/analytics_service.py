@@ -31,6 +31,7 @@ from backend.db.models import (
     Candidate,
     JobRecord,
     MatchScoreRecord,
+    SavedJobRecord,
 )
 from backend.services.analysis_service import _stored_score_is_stale
 from backend.schemas.analytics import (
@@ -218,6 +219,16 @@ def build_conversion_analytics(db: Session, user_id: int) -> ApplicationAnalytic
             .all()
         )
 
+        # Setting a tracker row to "saved" directly does NOT emit a funnel
+        # "saved" event: that event belongs to the bookmark action. A direct
+        # manually tracked role is therefore not missing historical analytics.
+        bookmarked_job_ids = {
+            job_id
+            for (job_id,) in db.query(SavedJobRecord.job_id).filter(
+                SavedJobRecord.user_id == user_id
+            ).all()
+        }
+
         def recorded(job_id: int, event_type: str) -> bool:
             entry = job_events.get(job_id)
             return entry is not None and event_type in entry.first_occurrence
@@ -228,7 +239,9 @@ def build_conversion_analytics(db: Session, user_id: int) -> ApplicationAnalytic
                 and not recorded(tracker.job_id, tracker.status)
             )
             or (
-                tracker.status == "saved" and not recorded(tracker.job_id, "saved")
+                tracker.status == "saved"
+                and tracker.job_id in bookmarked_job_ids
+                and not recorded(tracker.job_id, "saved")
             )
             for tracker in prior_trackers
         )
