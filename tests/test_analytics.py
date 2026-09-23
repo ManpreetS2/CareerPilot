@@ -11,6 +11,7 @@ from backend.db.models import (
     ApplicationEventRecord,
     ApplicationPackageRecord,
     ApplicationTrackerRecord,
+    SavedJobRecord,
 )
 from backend.schemas.schemas import ApplicationTrackerUpdate, ApprovalRequest
 from backend.services.analytics_service import (
@@ -332,6 +333,34 @@ def test_analytics_match_band_rejects_stale_scores_but_preserves_event_counts(is
     assert len(current.by_match_score_band) == 1
     assert current.by_match_score_band[0].label == "85+"
     assert current.by_match_score_band[0].applied_count == 1
+
+
+def test_manual_tracker_saved_without_bookmark_is_not_missing_analytics_history(isolated_session) -> None:
+    """Direct tracker 'saved' never emits the bookmark event, even on new accounts."""
+    insert_ready_profile(isolated_session)
+    direct = insert_job(isolated_session, public_id="external-direct-tracker")
+    recent = insert_job(isolated_session, public_id="recent-actual-bookmark")
+    isolated_session.add(
+        ApplicationTrackerRecord(
+            job_id=direct.id, user_id=TEST_USER_ID, status="saved",
+            created_at=datetime.now(timezone.utc) - timedelta(days=2),
+        )
+    )
+    isolated_session.commit()
+    _seed_event(
+        isolated_session, job=recent, user_id=TEST_USER_ID,
+        event_type="saved", occurred_at=datetime.now(timezone.utc),
+    )
+    summary = build_conversion_analytics(isolated_session, TEST_USER_ID)
+    assert summary.notice is None
+    assert summary.funnel[0].jobs_count == 1  # Direct tracker is not a bookmarked job.
+
+    # By contrast, an actual legacy bookmark without its event is missing
+    # history and should still produce the existing, truthful warning.
+    isolated_session.add(SavedJobRecord(job_id=direct.id, user_id=TEST_USER_ID))
+    isolated_session.commit()
+    old_bookmark = build_conversion_analytics(isolated_session, TEST_USER_ID)
+    assert old_bookmark.notice is not None
 
 
 def test_notice_flags_activity_older_than_earliest_recorded_event(isolated_session) -> None:
