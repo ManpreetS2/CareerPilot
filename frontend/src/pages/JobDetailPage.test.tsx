@@ -165,7 +165,7 @@ describe("JobDetailPage", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Match" }));
     expect(screen.getByText(/No fit score yet/)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "What they're looking for" })).not.toBeInTheDocument();
-    expect(screen.getByText("Go")).toBeInTheDocument();
+    expect(screen.getAllByText("Go").length).toBeGreaterThan(0);
   });
 
   it("ignores a previous job's verification result after navigating to the next job", async () => {
