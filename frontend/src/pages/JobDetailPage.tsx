@@ -233,15 +233,17 @@ export function JobDetailPage() {
 
   async function handleVerify() {
     if (!jobId) return;
+    const requestJobId = jobId;
+    const requestId = ++verificationRequest.current;
     setVerifying(true);
     setVerifyError(null);
     try {
-      const updated = await api.verifyJob(jobId);
-      setJob(updated);
+      const updated = await api.verifyJob(requestJobId);
+      if (isActiveRequest(requestJobId, requestId, verificationRequest)) setJob(updated);
     } catch (err) {
-      setVerifyError(err);
+      if (isActiveRequest(requestJobId, requestId, verificationRequest)) setVerifyError(err);
     } finally {
-      setVerifying(false);
+      if (isActiveRequest(requestJobId, requestId, verificationRequest)) setVerifying(false);
     }
   }
 
@@ -285,18 +287,25 @@ export function JobDetailPage() {
           setPercentile(null);
         }
         try {
-          setProfile(await api.getRequirementProfile(jobId));
+          const nextProfile = await api.getRequirementProfile(requestJobId);
+          if (isActiveRequest(requestJobId, requestId, scoringRequest)) setProfile(nextProfile);
         } catch {
           /* stored profile is optional */
         }
+        if (!isActiveRequest(requestJobId, requestId, scoringRequest)) return;
         try {
-          setEvidence(await api.getMatchEvidence(jobId));
-          setEvidenceError(null);
+          const nextEvidence = await api.getMatchEvidence(requestJobId);
+          if (isActiveRequest(requestJobId, requestId, scoringRequest)) {
+            setEvidence(nextEvidence);
+            setEvidenceError(null);
+          }
         } catch (err) {
-          if (err instanceof ApiClientError && err.status === 404) {
-            setEvidence(null);
-          } else {
-            setEvidenceError(err);
+          if (isActiveRequest(requestJobId, requestId, scoringRequest)) {
+            if (err instanceof ApiClientError && err.status === 404) {
+              setEvidence(null);
+            } else {
+              setEvidenceError(err);
+            }
           }
         }
       }
