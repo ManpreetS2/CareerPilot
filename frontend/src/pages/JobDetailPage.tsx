@@ -70,9 +70,18 @@ export function JobDetailPage() {
   const [evidenceError, setEvidenceError] = useState<unknown>(null);
   const [analysisTab, setAnalysisTab] = useState("overview");
   const storedScoreValues = useRef<Record<string, number>>({});
+  function isActiveRequest(requestJobId: string, requestId: number, token: { current: number }): boolean {
+    return activeJobId.current === requestJobId && token.current === requestId;
+  }
 
   useEffect(() => {
     let cancelled = false;
+    // Invalidate every outstanding user-initiated request from the prior job.
+    scoringRequest.current += 1;
+    intelligenceRequest.current += 1;
+    verificationRequest.current += 1;
+    evidenceRequest.current += 1;
+    interviewRequest.current += 1;
     scoringInFlight.current = false;
     extractionInFlight.current = false;
     async function load() {
@@ -82,6 +91,9 @@ export function JobDetailPage() {
       setIntelligenceLoading(true);
       setError(null);
       setVerifyError(null);
+      setVerifying(false);
+      setEvidenceLoading(false);
+      setInterviewGenerating(false);
       setIntelligence(null);
       setIntelligenceError(null);
       setMatch(null);
@@ -202,17 +214,17 @@ export function JobDetailPage() {
     setIntelligenceError(null);
     try {
       const extracted = await api.extractJobIntelligence(jobId);
-      if (requestId === intelligenceRequest.current && requestJobId === jobId) {
+      if (isActiveRequest(requestJobId, requestId, intelligenceRequest)) {
         setIntelligence(extracted);
         setMatch(null);
         setScoreError(null);
       }
     } catch (err) {
-      if (requestId === intelligenceRequest.current && requestJobId === jobId) {
+      if (isActiveRequest(requestJobId, requestId, intelligenceRequest)) {
         setIntelligenceError(err);
       }
     } finally {
-      if (requestId === intelligenceRequest.current && requestJobId === jobId) {
+      if (isActiveRequest(requestJobId, requestId, intelligenceRequest)) {
         extractionInFlight.current = false;
         setExtracting(false);
       }
@@ -243,12 +255,12 @@ export function JobDetailPage() {
     async function refreshIntelligence() {
       try {
         const stored = await api.getJobIntelligence(requestJobId);
-        if (requestId === scoringRequest.current && requestJobId === jobId) {
+        if (isActiveRequest(requestJobId, requestId, scoringRequest)) {
           setIntelligence(stored);
           setIntelligenceError(null);
         }
       } catch (err) {
-        if (requestId === scoringRequest.current && requestJobId === jobId) {
+        if (isActiveRequest(requestJobId, requestId, scoringRequest)) {
           if (err instanceof ApiClientError && err.status === 404) {
             setIntelligence(null);
           } else {
@@ -259,7 +271,7 @@ export function JobDetailPage() {
     }
     try {
       const nextMatch = await api.scoreJob(jobId);
-      if (requestId === scoringRequest.current && requestJobId === jobId) {
+      if (isActiveRequest(requestJobId, requestId, scoringRequest)) {
         setMatch(nextMatch);
         if (nextMatch.score_kind === "verified") {
           storedScoreValues.current = {
@@ -290,13 +302,13 @@ export function JobDetailPage() {
       }
       await refreshIntelligence();
     } catch (err) {
-      if (requestId === scoringRequest.current && requestJobId === jobId) {
+      if (isActiveRequest(requestJobId, requestId, scoringRequest)) {
         setMatch(null);
         setScoreError(err);
       }
       await refreshIntelligence();
     } finally {
-      if (requestId === scoringRequest.current && requestJobId === jobId) {
+      if (isActiveRequest(requestJobId, requestId, scoringRequest)) {
         scoringInFlight.current = false;
         setScoring(false);
       }
