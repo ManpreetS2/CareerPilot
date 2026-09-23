@@ -5,13 +5,12 @@ import { ErrorBanner } from "./ErrorBanner";
 import { LoadingState } from "./LoadingState";
 import { LockIn } from "./signature/LockIn";
 import { api, ApiClientError } from "../lib/api";
+import { formatApiTimestamp } from "../lib/datetime";
 import { queryKeys } from "../lib/query-keys";
 import type { ApplicationPackage, ResumeVersion } from "../lib/types";
 
 function formatCreatedAt(value: string) {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatApiTimestamp(value, value);
 }
 
 export function ResumeVersionPanel({

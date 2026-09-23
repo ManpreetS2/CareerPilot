@@ -128,7 +128,25 @@ async def validation_exception_handler(
     )
 
 
+def _cors_headers_for_error(request: Request) -> dict[str, str]:
+    # This handler runs in Starlette's outermost ServerErrorMiddleware, outside
+    # CORSMiddleware. Without these headers the browser hides the 500 and the
+    # UI reports the backend as unreachable. Same exact-origin allowlist.
+    origin = request.headers.get("origin")
+    if origin and origin in settings.cors_allow_origins:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+    return {}
+
+
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.error("Unhandled server error type=%s", type(exc).__name__)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+        headers=_cors_headers_for_error(request),
+    )

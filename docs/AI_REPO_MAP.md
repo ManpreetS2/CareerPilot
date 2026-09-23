@@ -140,13 +140,16 @@ Human reviews and manually presses Submit
 - `job_verification_service.py` — verification/freshness. `revalidate_unseen_candidates` real-checks (never merely infers) staleness for a job unseen in a scout run for a while — absence from one query is not proof a posting closed, since Discover/Saved Searches no longer all search the same terms.
 - `job_content.py` — content status/fingerprint.
 - `url_safety.py` — outbound/SSRF safety.
+- `provider_throttle.py` — in-memory per-provider fetch cache with centralized minimum intervals (`PROVIDER_MIN_INTERVAL_SECONDS`), so Saved Searches reuse one recent fetch instead of refetching in lockstep.
 - `saved_job_service.py` — user bookmark state.
-**Models** shared `JobRecord`; user-scoped `SavedJobRecord`.
-**Frontend** `JobsPage.tsx`, `JobDetailPage.tsx`.
+**Models** shared `JobRecord` (`url` is the application link; nullable `source_url` is an aggregator's own listing page, currently Himalayas only); user-scoped `SavedJobRecord`.
+**Frontend** `JobsPage.tsx`, `JobDetailPage.tsx`, `SourceBadge.tsx` (aggregator badges link to `source_url`, else `url`; ATS/manual badges stay plain).
 **Invariants**
 - readiness before scouting/provider work;
 - Find Jobs avoids LLM-per-listing behavior;
-- one dead provider does not kill entire scout;
+- one dead provider does not kill entire scout — a refused fetch (oversized, off-allowlist redirect) is a skipped board/source, never a failed scout; whole-company ATS listings use `ATS_LISTING_MAX_RESPONSE_BYTES`, not the page-sized default cap;
+- the provider cache sits under each feed source's per-call title filter (raw board/feed fetches are cached, filtering is not), and failures are never cached; `tests/conftest.py` resets it between tests;
+- never repoint `job.url` for attribution: Assisted Fill detection parses its hostname;
 - shared JobRecord is not private application state;
 - a job absent from one scout query is not evidence it closed — only a real per-job liveness check (`revalidate_unseen_candidates`) marks something stale.
 ## 8. Greenhouse Identity / Ingestion

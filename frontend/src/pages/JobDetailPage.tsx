@@ -23,6 +23,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { ScoreOrb } from "../components/signature/ScoreOrb";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { api, ApiClientError } from "../lib/api";
+import { formatApiTimestamp } from "../lib/datetime";
 import { getJobsNavIds, jobsListPath } from "../lib/jobs-workspace";
 import { topMatchPercentileLabel } from "../lib/match-percentile";
 import { chipLabel } from "../lib/search-intent";
@@ -614,7 +615,7 @@ export function JobDetailPage() {
           )}
           {job.verified_at ? (
             <p className="mt-2 text-xs text-muted-foreground">
-              Last checked {new Date(job.verified_at).toLocaleString()}
+              Last checked {formatApiTimestamp(job.verified_at)}
             </p>
           ) : null}
         </section>
