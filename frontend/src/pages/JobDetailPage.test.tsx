@@ -143,6 +143,31 @@ describe("JobDetailPage", () => {
     expect(screen.getByRole("link", { name: /Next job/i })).toHaveAttribute("href", "/jobs/job-2");
   });
 
+  it("clears an old Fit score when employer requirements are re-extracted", async () => {
+    vi.mocked(api.getStoredScore).mockResolvedValue({
+      job_id: "job-1", overall_score: 96,
+      matched_skills: ["Python"], partial_matches: [], missing_skills: [],
+      recommendation: "apply", rationale: "Old requirements",
+      score_kind: "verified", match_tier: "strong_match",
+    });
+    vi.mocked(api.getRequirementProfile).mockResolvedValue(
+      requirementProfile({ required_skills: ["Python"] }),
+    );
+    vi.mocked(api.extractJobIntelligence).mockResolvedValue({
+      job_id: "job-1", required_skills: ["Go"], preferred_skills: [],
+      education_requirements: [], tech_stack: ["Go"],
+      responsibilities: [], likely_interview_focus: [],
+    });
+    renderJob();
+    expect(await screen.findByText(/96% Strong Match/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Extract requirements" }));
+    await waitFor(() => expect(screen.queryByText(/96% Strong Match/)).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole("tab", { name: "Match" }));
+    expect(screen.getByText(/No fit score yet/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "What they're looking for" })).not.toBeInTheDocument();
+    expect(screen.getByText("Go")).toBeInTheDocument();
+  });
+
   it("ignores a previous job's verification result after navigating to the next job", async () => {
     bindSessionUser(1);
     saveJobsNavIds(["job-1", "job-2"]);
