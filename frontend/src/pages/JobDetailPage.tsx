@@ -326,33 +326,39 @@ export function JobDetailPage() {
 
   async function loadEvidence() {
     if (!jobId) return;
+    const requestJobId = jobId;
+    const requestId = ++evidenceRequest.current;
     setEvidenceLoading(true);
     setEvidenceError(null);
     try {
-      const next = await api.getMatchEvidence(jobId);
-      setEvidence(next);
+      const next = await api.getMatchEvidence(requestJobId);
+      if (isActiveRequest(requestJobId, requestId, evidenceRequest)) setEvidence(next);
     } catch (err) {
-      if (err instanceof ApiClientError && err.status === 404) {
-        setEvidence(null);
-      } else {
-        setEvidenceError(err);
+      if (isActiveRequest(requestJobId, requestId, evidenceRequest)) {
+        if (err instanceof ApiClientError && err.status === 404) {
+          setEvidence(null);
+        } else {
+          setEvidenceError(err);
+        }
       }
     } finally {
-      setEvidenceLoading(false);
+      if (isActiveRequest(requestJobId, requestId, evidenceRequest)) setEvidenceLoading(false);
     }
   }
 
   async function handlePrepareInterview() {
     if (!jobId || interviewGenerating) return;
+    const requestJobId = jobId;
+    const requestId = ++interviewRequest.current;
     setInterviewGenerating(true);
     setInterviewError(null);
     try {
-      const next = await api.prepareInterview(jobId);
-      setInterviewPrep(next);
+      const next = await api.prepareInterview(requestJobId);
+      if (isActiveRequest(requestJobId, requestId, interviewRequest)) setInterviewPrep(next);
     } catch (err) {
-      setInterviewError(err);
+      if (isActiveRequest(requestJobId, requestId, interviewRequest)) setInterviewError(err);
     } finally {
-      setInterviewGenerating(false);
+      if (isActiveRequest(requestJobId, requestId, interviewRequest)) setInterviewGenerating(false);
     }
   }
 
