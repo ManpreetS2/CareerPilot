@@ -116,6 +116,10 @@ LEVER_POSTING_URL_BASE = "https://jobs.lever.co"
 LEVER_POSTING_HOSTS = frozenset({"jobs.lever.co"})
 LEVER_API_BASE = "https://api.lever.co/v0"
 LEVER_API_HOSTS = frozenset({"api.lever.co"})
+# A whole-company listing from an allowlisted ATS API is far bigger than one
+# posting page: Stripe's Greenhouse board with content=true passed the default
+# 5 MB fetch cap in 2026 (~700 openings, ~5.4 MB). Still bounded.
+ATS_LISTING_MAX_RESPONSE_BYTES = 25_000_000
 REMOTIVE_SEARCH_URL = "https://remotive.com/api/remote-jobs"
 REMOTIVE_API_HOSTS = frozenset({"remotive.com"})
 JOBICY_SEARCH_URL = "https://jobicy.com/api/v2/remote-jobs"
@@ -689,11 +693,14 @@ def _fetch_greenhouse_board_jobs_raw(board_token: str) -> list[dict]:
             user_agent=settings.http_user_agent,
             timeout_seconds=settings.http_timeout_seconds,
             allowed_hosts=GREENHOUSE_API_HOSTS,
+            max_bytes=ATS_LISTING_MAX_RESPONSE_BYTES,
         )
         response.raise_for_status()
         payload = response.json()
     except UnsafeURLError:
-        raise
+        # Refused (oversized, off-allowlist redirect): skip this board rather
+        # than failing every other board and source in the same scout.
+        raise JobScoutError("Greenhouse board listing was refused by the fetch guard.") from None
     except httpx.HTTPStatusError:
         raise JobScoutError("Could not load board listing from Greenhouse.") from None
     except httpx.TimeoutException:
@@ -751,11 +758,12 @@ def _fetch_lever_company_postings_raw(company_slug: str) -> list[dict]:
             user_agent=settings.http_user_agent,
             timeout_seconds=settings.http_timeout_seconds,
             allowed_hosts=LEVER_API_HOSTS,
+            max_bytes=ATS_LISTING_MAX_RESPONSE_BYTES,
         )
         response.raise_for_status()
         payload = response.json()
     except UnsafeURLError:
-        raise
+        raise JobScoutError("Lever postings list was refused by the fetch guard.") from None
     except httpx.HTTPStatusError:
         raise JobScoutError("Could not load company postings from Lever.") from None
     except httpx.TimeoutException:
@@ -828,7 +836,7 @@ def scout_remotive(query: str | None = None) -> list[dict]:
             response.raise_for_status()
             payload = response.json()
         except UnsafeURLError:
-            raise
+            raise JobScoutError("Remotive response was refused by the fetch guard.") from None
         except httpx.HTTPStatusError:
             raise JobScoutError("Could not reach Remotive.") from None
         except httpx.TimeoutException:
