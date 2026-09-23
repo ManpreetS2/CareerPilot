@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,6 +141,37 @@ describe("JobDetailPage", () => {
     renderJob();
     expect(await screen.findByRole("link", { name: /Previous job/i })).toHaveAttribute("href", "/jobs/job-0");
     expect(screen.getByRole("link", { name: /Next job/i })).toHaveAttribute("href", "/jobs/job-2");
+  });
+
+  it("ignores a previous job's verification result after navigating to the next job", async () => {
+    bindSessionUser(1);
+    saveJobsNavIds(["job-1", "job-2"]);
+    const firstJob: Job = {
+      id: "job-1", title: "First role", company: "First Employer",
+      url: "https://example.com/first", description: "First description",
+      source: "manual", status: "discovered",
+    };
+    const secondJob: Job = {
+      id: "job-2", title: "Second role", company: "Second Employer",
+      url: "https://example.com/second", description: "Second description",
+      source: "manual", status: "discovered",
+    };
+    vi.mocked(api.getJob).mockImplementation(async (id) => id === "job-2" ? secondJob : firstJob);
+    let completeVerification: (value: Job) => void = () => undefined;
+    vi.mocked(api.verifyJob).mockImplementation(
+      () => new Promise<Job>((resolve) => { completeVerification = resolve; }),
+    );
+    renderJob();
+    expect(await screen.findByRole("heading", { name: "First role" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Verify", exact: true }));
+    expect(api.verifyJob).toHaveBeenCalledWith("job-1");
+    await userEvent.click(screen.getByRole("link", { name: /Next job/i }));
+    expect(await screen.findByRole("heading", { name: "Second role" })).toBeInTheDocument();
+    await act(async () => {
+      completeVerification({ ...firstJob, status: "flagged", verification_notes: "First posting closed." });
+    });
+    expect(screen.getByRole("heading", { name: "Second role" })).toBeInTheDocument();
+    expect(screen.queryByText("First posting closed.")).not.toBeInTheDocument();
   });
 
   it("keeps Potential Match until a verified score exists", async () => {
