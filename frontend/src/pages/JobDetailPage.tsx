@@ -210,13 +210,23 @@ export function JobDetailPage() {
     extractionInFlight.current = true;
     const requestId = ++intelligenceRequest.current;
     const requestJobId = jobId;
+    // An in-flight Evidence tab read belongs to the old requirements.
+    evidenceRequest.current += 1;
     setExtracting(true);
     setIntelligenceError(null);
     try {
       const extracted = await api.extractJobIntelligence(jobId);
       if (isActiveRequest(requestJobId, requestId, intelligenceRequest)) {
         setIntelligence(extracted);
+        // Re-extraction invalidates the displayed requirements, prior Fit and
+        // their evidence. Do not leave an old score, percentile or citation on
+        // the newly extracted employer posting.
         setMatch(null);
+        setProfile(null);
+        setEvidence(null);
+        setEvidenceError(null);
+        setPercentile(null);
+        delete storedScoreValues.current[requestJobId];
         setScoreError(null);
       }
     } catch (err) {
@@ -252,6 +262,9 @@ export function JobDetailPage() {
     scoringInFlight.current = true;
     const requestId = ++scoringRequest.current;
     const requestJobId = jobId;
+    // A concurrent Evidence-tab GET must not overwrite the freshly scored
+    // evidence after this calculation finishes.
+    evidenceRequest.current += 1;
     setScoring(true);
     setScoreError(null);
     async function refreshIntelligence() {
@@ -275,6 +288,9 @@ export function JobDetailPage() {
       const nextMatch = await api.scoreJob(jobId);
       if (isActiveRequest(requestJobId, requestId, scoringRequest)) {
         setMatch(nextMatch);
+        setEvidence(null);
+        setEvidenceError(null);
+        evidenceRequest.current += 1;
         if (nextMatch.score_kind === "verified") {
           storedScoreValues.current = {
             ...storedScoreValues.current,
