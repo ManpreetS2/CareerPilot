@@ -16,6 +16,7 @@ from backend.db.models import JobRecord
 from backend.schemas.schemas import Job
 from backend.services import job_scout_service, job_verification_service
 from backend.services.job_scout_service import (
+    ATS_LISTING_MAX_RESPONSE_BYTES,
     JobScoutError,
     LEVER_API_HOSTS,
     MANUAL_INGEST_PLACEHOLDER_DESCRIPTION,
@@ -335,6 +336,63 @@ def test_scout_lever_isolates_one_dead_company_from_others(
     assert [item["id"] for item in listings] == ["abc"]
 
 
+def _refused(url, **_):
+    raise UnsafeURLError("Response exceeded the maximum allowed size.")
+
+
+def test_scout_greenhouse_skips_a_board_the_fetch_guard_refuses(
+    monkeypatch: pytest.MonkeyPatch, mock_fetch
+) -> None:
+    """One board whose listing the fetch guard refuses (e.g. it outgrew the
+    size cap, as Stripe's did) must be skipped like a dead board, not raised
+    out of the whole Greenhouse source."""
+    monkeypatch.setattr(job_scout_service.settings, "greenhouse_board_tokens", "bigboard,stripe")
+    mock_fetch["by_url"]["https://boards-api.greenhouse.io/v1/boards/bigboard/jobs"] = _refused
+    mock_fetch["by_url"]["https://boards-api.greenhouse.io/v1/boards/stripe/jobs"] = lambda url, **_: (
+        _json_response(url, _greenhouse_board_payload({"id": 1, "title": "Engineer", "content": "Text."}))
+    )
+    listings = scout_greenhouse()
+    assert [item["id"] for item in listings] == [1]
+
+
+def test_scout_lever_skips_a_company_the_fetch_guard_refuses(
+    monkeypatch: pytest.MonkeyPatch, mock_fetch
+) -> None:
+    monkeypatch.setattr(job_scout_service.settings, "lever_company_slugs", "bigco,ro")
+    mock_fetch["by_url"]["https://api.lever.co/v0/postings/bigco"] = _refused
+    mock_fetch["by_url"]["https://api.lever.co/v0/postings/ro"] = lambda url, **_: _json_response(
+        url, _lever_company_payload({"id": "abc", "text": "Engineer", "categories": {}})
+    )
+    listings = scout_lever()
+    assert [item["id"] for item in listings] == ["abc"]
+
+
+def test_scout_remotive_refused_response_is_a_skippable_source_error(mock_fetch) -> None:
+    mock_fetch["by_url"]["https://remotive.com/api/remote-jobs"] = _refused
+    with pytest.raises(JobScoutError):
+        scout_remotive("engineer")
+
+
+def test_whole_company_ats_listings_use_the_listing_size_cap(
+    monkeypatch: pytest.MonkeyPatch, mock_fetch
+) -> None:
+    """A whole-board listing is far larger than one posting page; the
+    default page-sized cap made a real default board (Stripe) unfetchable."""
+    monkeypatch.setattr(job_scout_service.settings, "greenhouse_board_tokens", "stripe")
+    monkeypatch.setattr(job_scout_service.settings, "lever_company_slugs", "ro")
+    mock_fetch["by_url"]["https://boards-api.greenhouse.io/v1/boards/stripe/jobs"] = lambda url, **_: (
+        _json_response(url, _greenhouse_board_payload())
+    )
+    mock_fetch["by_url"]["https://api.lever.co/v0/postings/ro"] = lambda url, **_: _json_response(url, [])
+    scout_greenhouse()
+    scout_lever()
+    assert [kwargs.get("max_bytes") for kwargs in mock_fetch["kwargs"]] == [
+        ATS_LISTING_MAX_RESPONSE_BYTES,
+        ATS_LISTING_MAX_RESPONSE_BYTES,
+    ]
+    assert ATS_LISTING_MAX_RESPONSE_BYTES > 5_400_000
+
+
 def test_scout_remotive_builds_search_query_and_returns_jobs(mock_fetch) -> None:
     mock_fetch["by_url"]["https://remotive.com/api/remote-jobs"] = lambda url, **_: _json_response(
         url, {"jobs": [{"id": 1, "url": "https://remotive.com/x", "title": "Engineer"}]}
@@ -621,6 +679,41 @@ def test_run_scout_survives_greenhouse_failure(
 
     result = job_scout_service.run_scout(["software engineer intern"])
     assert result == []  # every source failed/empty, but run_scout itself must not raise
+
+
+def test_run_scout_keeps_other_sources_when_the_fetch_guard_refuses_one(
+    monkeypatch: pytest.MonkeyPatch, mock_fetch, isolated_db
+) -> None:
+    """Regression: an oversized Greenhouse board used to raise UnsafeURLError
+    straight out of run_scout, turning every Find Jobs click into a 500."""
+    monkeypatch.setattr(job_scout_service.settings, "greenhouse_board_tokens", "bigboard")
+    monkeypatch.setattr(job_scout_service.settings, "lever_company_slugs", "bigco")
+    for name in ("scout_remoteok", "scout_adzuna", "scout_jobicy", "scout_himalayas"):
+        monkeypatch.setattr(
+            job_scout_service, name, lambda *_a, **_k: (_ for _ in ()).throw(JobScoutError("x"))
+        )
+    mock_fetch["by_url"]["https://boards-api.greenhouse.io/v1/boards/bigboard/jobs"] = _refused
+    mock_fetch["by_url"]["https://api.lever.co/v0/postings/bigco"] = _refused
+    mock_fetch["by_url"]["https://remotive.com/api/remote-jobs"] = lambda url, **_: _json_response(
+        url,
+        {
+            "jobs": [
+                {
+                    "id": 7,
+                    "url": "https://remotive.com/remote-jobs/software-dev/backend-intern-7",
+                    "title": "Software Engineer Intern",
+                    "company_name": "Northwind",
+                    "description": "<p>Build backend services.</p>",
+                    "publication_date": "2026-09-20T10:00:00",
+                }
+            ]
+        },
+    )
+
+    jobs, stats = job_scout_service.run_scout_with_stats(["software engineer intern"])
+
+    assert [job.title for job in jobs] == ["Software Engineer Intern"]
+    assert "remotive" in stats.sources_ok
 
 
 # ---------------------------------------------------------------------------
