@@ -212,7 +212,11 @@ def build_conversion_analytics(db: Session, user_id: int) -> ApplicationAnalytic
     tracker_query = db.query(ApplicationTrackerRecord).filter(ApplicationTrackerRecord.user_id == user_id)
     package_query = db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.user_id == user_id)
     if earliest_event is not None:
-        saved_query = saved_query.filter(SavedJobRecord.created_at < earliest_event)
+        # Bookmarks have an atomic saved-event hook. Missing a saved event is
+        # incomplete tracking even when the bookmark was created after the
+        # first event on a different job (or this session's earliest event).
+        # Tracker/package legacy checks retain a historical cutoff to avoid
+        # mistaking a newly-created row for missing activity.
         tracker_query = tracker_query.filter(ApplicationTrackerRecord.created_at < earliest_event)
         package_query = package_query.filter(ApplicationPackageRecord.created_at < earliest_event)
 
