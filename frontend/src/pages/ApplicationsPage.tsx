@@ -11,6 +11,7 @@ import { api, ApiClientError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { googleCalendarUrl } from "../lib/calendar";
 import { cn } from "../lib/cn";
+import { formatApiTimestamp } from "../lib/datetime";
 import { isSyntheticShowcasePosting } from "../lib/showcase";
 import { readTrackerView, saveTrackerView, type TrackerView } from "../lib/tracker-view";
 import type { ApplicationListItem, TrackerStatus } from "../lib/types";
@@ -43,10 +44,7 @@ function statusOptions(item: ApplicationListItem): TrackerStatus[] {
 }
 
 function formatUpdated(value?: string | null) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString();
+  return formatApiTimestamp(value);
 }
 
 function columnItems(items: ApplicationListItem[], column: TrackerStatus | "untracked") {

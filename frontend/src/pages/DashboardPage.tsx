@@ -10,6 +10,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { resolveNextAction } from "../lib/dashboard-next-action";
+import { formatApiDate } from "../lib/datetime";
 import { evidenceSourcesFromCandidate, requiredReadinessFromServer } from "../lib/profile-gate";
 import { shouldPromptFinishSetup } from "../lib/onboarding";
 import { queryKeys } from "../lib/query-keys";
@@ -234,7 +235,7 @@ export function DashboardPage() {
                           <span className="text-muted-foreground"> · {version.company}</span>
                         </span>
                         <span className="shrink-0 text-xs tabular text-muted-foreground">
-                          {new Date(version.created_at).toLocaleDateString()}
+                          {formatApiDate(version.created_at)}
                         </span>
                       </Link>
                     </li>

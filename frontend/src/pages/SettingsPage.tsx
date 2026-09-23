@@ -9,6 +9,7 @@ import { Surface } from "../components/ui/surface";
 import { Switch } from "../components/ui/switch";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { formatApiDate } from "../lib/datetime";
 import { queryKeys } from "../lib/query-keys";
 import { useTheme, type ThemePreference } from "../lib/theme";
 
@@ -61,7 +62,7 @@ export function SettingsPage() {
             </div>
             <div>
               <dt className="text-muted-foreground">Signed in since</dt>
-              <dd className="tabular">{new Date(user.created_at).toLocaleDateString()}</dd>
+              <dd className="tabular">{formatApiDate(user.created_at)}</dd>
             </div>
           </dl>
         ) : (
