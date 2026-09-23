@@ -408,6 +408,20 @@ def test_score_fallback_when_evidence_row_is_absent(isolated_session) -> None:
     assert stale.skill_gaps == []
     assert stale.strengths == []
 
+    # A preliminary score is not verified evidence for a newly extracted
+    # complete requirements profile, even when its fingerprint is current.
+    score.candidate_fingerprint = fingerprint_for_candidate(
+        isolated_session, candidate, TEST_USER_ID
+    )
+    score.score_kind = "preliminary"
+    isolated_session.commit()
+    preliminary = build_career_growth(isolated_session, TEST_USER_ID)
+    assert preliminary.stale_jobs_excluded == 0
+    assert preliminary.unavailable_jobs_excluded == 1
+    assert preliminary.jobs_with_current_evidence == 0
+    assert preliminary.strengths == []
+    assert preliminary.skill_gaps == []
+
 
 def test_eligibility_and_eeo_are_excluded(isolated_session) -> None:
     candidate, prefs = insert_ready_profile(isolated_session)
