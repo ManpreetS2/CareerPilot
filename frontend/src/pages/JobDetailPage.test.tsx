@@ -159,9 +159,9 @@ describe("JobDetailPage", () => {
       responsibilities: [], likely_interview_focus: [],
     });
     renderJob();
-    expect(await screen.findByText(/96% Strong Match/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/96% Strong Match/)).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: "Extract requirements" }));
-    await waitFor(() => expect(screen.queryByText(/96% Strong Match/)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryAllByText(/96% Strong Match/)).toHaveLength(0));
     await userEvent.click(screen.getByRole("tab", { name: "Match" }));
     expect(screen.getByText(/No fit score yet/)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "What they're looking for" })).not.toBeInTheDocument();
