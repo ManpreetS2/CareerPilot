@@ -1276,7 +1276,7 @@ def normalize_job(raw: dict, source: str) -> Job:
 # Only unambiguous marketing tags are discarded. Employer URLs can encode
 # *different* job IDs in query parameters such as ?job=123 and ?job=456.
 _TRACKING_QUERY_KEYS = frozenset({
-    "fbclid", "gclid", "gbraid", "wbraid", "msclkid", "igshid",
+    "utm", "fbclid", "gclid", "gbraid", "wbraid", "msclkid", "igshid",
     "mc_cid", "mc_eid", "gh_src", "lever-origin",
 })
 
