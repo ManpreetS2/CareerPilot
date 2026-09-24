@@ -193,6 +193,28 @@ def test_check_still_open_treats_redirect_to_private_address_as_uncertain(monkey
     assert "not safe" in reason.lower()
 
 
+def test_check_still_open_does_not_verify_other_http_errors(monkeypatch) -> None:
+    from backend.services import job_verification_service as mod
+
+    for code in (302, 400, 418, 451, 503):
+        monkeypatch.setattr(
+            mod, "fetch_url_safely",
+            lambda *_args, code=code, **_kwargs: httpx.Response(code, text="Apply now for this role."),
+        )
+        is_open, reason = check_still_open("https://example.com/jobs/1")
+        assert is_open is None
+        assert str(code) in reason
+
+    for code in (404, 410):
+        monkeypatch.setattr(
+            mod, "fetch_url_safely",
+            lambda *_args, code=code, **_kwargs: httpx.Response(code, text="Not found."),
+        )
+        is_open, reason = check_still_open("https://example.com/jobs/1")
+        assert is_open is False
+        assert str(code) in reason
+
+
 def test_check_still_open_succeeds_for_a_safe_url(monkeypatch) -> None:
     monkeypatch.setattr(socket, "getaddrinfo", _fake_resolve("93.184.216.34"))
 
