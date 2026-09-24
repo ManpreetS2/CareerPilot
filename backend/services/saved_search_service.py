@@ -36,6 +36,12 @@ logger = logging.getLogger(__name__)
 MAX_SEARCHES_PER_TICK = 5
 MIN_CADENCE_HOURS = 3
 
+# Cursor is advanced even on failed attempts. Keeping it separate from
+# last_run_at preserves truthful retry semantics while preventing permanently
+# failing jobs from monopolizing the first five scheduler slots. In a new
+# worker, the first tick begins at the lowest ID, then resumes round-robin.
+_last_attempted_search_id: int | None = None
+
 
 class SavedSearchError(Exception):
     """Sanitized saved-search error. str(exc) is safe for HTTP details."""
@@ -275,11 +281,13 @@ async def _run_one_saved_search(db: Session, search: SavedSearchRecord) -> None:
 
 
 async def run_due_saved_searches() -> None:
-    """One scheduler tick. Small, per-user catalog — cadence math happens in
-    Python over the (short) list of enabled searches rather than in SQL,
-    same "hundreds of rows, not millions" philosophy job_query_service.py
-    already documents for the jobs table itself."""
+    """Run up to MAX_SEARCHES_PER_TICK due searches fairly across repeated ticks.
 
+    The cursor advances on attempted searches, including failures. A failed
+    entry stays due for retry but cannot indefinitely block later entries.
+    """
+
+    global _last_attempted_search_id
     now = datetime.now(timezone.utc)
     with SessionLocal() as db:
         enabled = db.query(SavedSearchRecord).filter(SavedSearchRecord.enabled.is_(True)).all()
@@ -289,8 +297,17 @@ async def run_due_saved_searches() -> None:
             if _as_utc(search.last_run_at) is None
             or (now - _as_utc(search.last_run_at)) >= timedelta(hours=search.cadence_hours)
         ]
-        overdue.sort(key=lambda search: (search.last_run_at is not None, _as_utc(search.last_run_at) or now))
-        for search in overdue[:MAX_SEARCHES_PER_TICK]:
+        overdue.sort(key=lambda search: search.id)
+        if not overdue:
+            return
+        start_index = next(
+            (index for index, search in enumerate(overdue)
+             if _last_attempted_search_id is None or search.id > _last_attempted_search_id),
+            0,
+        )
+        queue = overdue[start_index:] + overdue[:start_index]
+        for search in queue[:MAX_SEARCHES_PER_TICK]:
+            _last_attempted_search_id = search.id
             try:
                 await _run_one_saved_search(db, search)
             except Exception:
