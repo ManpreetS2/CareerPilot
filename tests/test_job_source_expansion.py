@@ -610,6 +610,48 @@ def test_revalidate_unseen_candidates_caps_and_orders_oldest_first(isolated_db, 
     assert checked_ids == [f"old-{i}" for i in range(MAX_REVALIDATE_PER_TICK)]
 
 
+def test_revalidation_does_not_starve_old_jobs_on_subsequent_ticks(isolated_db, monkeypatch) -> None:
+    """The oldest 25 must leave the eligible queue after they were checked."""
+    with isolated_db() as db:
+        old = datetime.now(timezone.utc) - timedelta(days=DEFAULT_ABSENCE_STALE_AFTER_DAYS + 10)
+        for i in range(MAX_REVALIDATE_PER_TICK + 2):
+            _seed_job(db, public_id=f"backlog-{i}", date_scraped=old + timedelta(minutes=i))
+
+    checked: list[str] = []
+
+    def verify(job):
+        checked.append(job.id)
+        return "verified", "Still accepting applications."
+
+    monkeypatch.setattr(job_verification_service, "verify_job", verify)
+    first = asyncio.run(revalidate_unseen_candidates())
+    second = asyncio.run(revalidate_unseen_candidates())
+    third = asyncio.run(revalidate_unseen_candidates())
+
+    assert (first, second, third) == (MAX_REVALIDATE_PER_TICK, 2, 0)
+    assert checked == [f"backlog-{i}" for i in range(MAX_REVALIDATE_PER_TICK + 2)]
+    with isolated_db() as db:
+        assert db.query(JobRecord).filter(JobRecord.verified_at.is_not(None)).count() == (
+            MAX_REVALIDATE_PER_TICK + 2
+        )
+
+
+def test_recent_verification_excludes_old_discovery_until_check_is_due(isolated_db, monkeypatch) -> None:
+    with isolated_db() as db:
+        old = datetime.now(timezone.utc) - timedelta(days=DEFAULT_ABSENCE_STALE_AFTER_DAYS + 10)
+        _seed_job(db, public_id="old-but-checked", date_scraped=old)
+        record = db.query(JobRecord).filter(JobRecord.public_id == "old-but-checked").one()
+        record.verified_at = datetime.now(timezone.utc)
+        db.commit()
+    called: list[str] = []
+    monkeypatch.setattr(
+        job_verification_service, "verify_job",
+        lambda job: (called.append(job.id) or "verified", "Still open."),
+    )
+    assert asyncio.run(revalidate_unseen_candidates()) == 0
+    assert called == []
+
+
 def test_reappearing_stale_job_resets_to_discovered(isolated_db) -> None:
     with isolated_db() as db:
         old = datetime.now(timezone.utc) - timedelta(days=DEFAULT_ABSENCE_STALE_AFTER_DAYS + 1)
