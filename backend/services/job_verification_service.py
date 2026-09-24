@@ -311,7 +311,12 @@ async def revalidate_unseen_candidates(max_absence_days: int = DEFAULT_ABSENCE_S
             .filter(JobRecord.status.in_(("discovered", "verified")))
             .filter(JobRecord.source.in_(_SCOUT_MANAGED_SOURCES))
             .filter(JobRecord.date_scraped < cutoff)
-            .order_by(JobRecord.date_scraped.asc())
+            # A live posting checked recently must not occupy the same capped
+            # slot every tick just because its last scout discovery was old.
+            # Both timestamps must be beyond the absence window (or never
+            # verified) before another network recheck is due.
+            .filter((JobRecord.verified_at.is_(None)) | (JobRecord.verified_at < cutoff))
+            .order_by(JobRecord.date_scraped.asc(), JobRecord.id.asc())
             .limit(MAX_REVALIDATE_PER_TICK)
             .all()
         )
