@@ -1068,6 +1068,22 @@ def test_failed_reextraction_preserves_prior_valid_record(isolated_session) -> N
     assert isolated_session.query(JobIntelligenceRecord).count() == 1
 
 
+def test_stored_intelligence_is_hidden_after_posting_content_changes(isolated_session) -> None:
+    job = _job(isolated_session)
+    extract_job_intelligence(
+        isolated_session,
+        job.public_id,
+        generate_fn=_json_generator(_payload()),
+    )
+    assert get_stored_job_intelligence(isolated_session, job.public_id).required_skills
+
+    job.description = "Requirements:\n- Go\n- 5 years of experience"
+    isolated_session.commit()
+
+    with pytest.raises(JobIntelligenceNotFoundError):
+        get_stored_job_intelligence(isolated_session, job.public_id)
+
+
 def test_commit_failure_rolls_back_new_and_existing_records(isolated_session) -> None:
     job = _job(isolated_session)
     with patch.object(isolated_session, "commit", side_effect=RuntimeError("private SQL error")):
