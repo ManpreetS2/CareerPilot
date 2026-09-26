@@ -26,8 +26,12 @@ from backend.db.models import (
 from backend.schemas.schemas import InterviewAnswerFeedback, InterviewPrep, JobIntelligence, MatchScore
 from backend.services.analysis_service import StoredScoreNotFoundError, get_stored_match_score
 from backend.services.application_materials_agent import candidate_record_to_profile
-from backend.services.job_intelligence_service import get_stored_job_intelligence
-from backend.services.job_requirement_extractor import load_requirement_profile
+from backend.services.candidate_provenance import hash_canonical
+from backend.services.job_intelligence_service import (
+    JobIntelligenceNotFoundError,
+    get_stored_job_intelligence,
+)
+from backend.services.job_requirement_extractor import current_posting_fingerprint, load_requirement_profile
 from backend.services.job_service import record_to_job
 from backend.services.llm_client import (
     LLMConfigurationError,
@@ -120,8 +124,23 @@ def _record_to_prep(record: InterviewPrepRecord, job_public_id: str) -> Intervie
     )
 
 
+def _interview_prep_record_is_current(
+    db: Session, record: InterviewPrepRecord, job: JobRecord, user_id: int
+) -> bool:
+    candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
+    current_candidate_fp = (
+        hash_canonical(candidate_record_to_profile(candidate).model_dump(mode="json"))
+        if candidate is not None
+        else None
+    )
+    return (
+        record.candidate_fingerprint == current_candidate_fp
+        and record.requirement_fingerprint == current_posting_fingerprint(job)
+    )
+
+
 def get_interview_prep(db: Session, job_id: str, user_id: int) -> InterviewPrep | None:
-    """Read-only. Does not create, generate, or call a provider."""
+    """Read-only. Stale prep is treated as missing; never calls a provider."""
 
     job = _get_job(db, job_id)
     record = (
@@ -129,8 +148,8 @@ def get_interview_prep(db: Session, job_id: str, user_id: int) -> InterviewPrep 
         .filter(InterviewPrepRecord.job_id == job.id, InterviewPrepRecord.user_id == user_id)
         .first()
     )
-    if record is None:
-        logger.info("interview_prep read miss job_pk=%s", job.id)
+    if record is None or not _interview_prep_record_is_current(db, record, job, user_id):
+        logger.info("interview_prep read miss_or_stale job_pk=%s", job.id)
         return None
     logger.info("interview_prep read hit job_pk=%s", job.id)
     return _record_to_prep(record, job_id)
@@ -164,16 +183,28 @@ def load_interview_prep_context(db: Session, job_id: str, user_id: int) -> Inter
             likely_interview_focus=[],
         )
     else:
-        intelligence = get_stored_job_intelligence(db, job_id)
-        if profile is not None:
-            intelligence.required_skills = list(
-                dict.fromkeys([*profile.required_skills, *intelligence.required_skills])
+        try:
+            intelligence = get_stored_job_intelligence(db, job_id)
+        except JobIntelligenceNotFoundError:
+            if profile is None:
+                raise InterviewIntelligenceMissingError() from None
+            intelligence = JobIntelligence(
+                job_id=job.public_id,
+                required_skills=list(profile.required_skills),
+                preferred_skills=list(profile.preferred_skills),
+                responsibilities=list(profile.primary_responsibilities),
+                likely_interview_focus=[],
             )
-            intelligence.preferred_skills = list(
-                dict.fromkeys([*profile.preferred_skills, *intelligence.preferred_skills])
-            )
-            if profile.primary_responsibilities:
-                intelligence.responsibilities = list(profile.primary_responsibilities)
+        else:
+            if profile is not None:
+                intelligence.required_skills = list(
+                    dict.fromkeys([*profile.required_skills, *intelligence.required_skills])
+                )
+                intelligence.preferred_skills = list(
+                    dict.fromkeys([*profile.preferred_skills, *intelligence.preferred_skills])
+                )
+                if profile.primary_responsibilities:
+                    intelligence.responsibilities = list(profile.primary_responsibilities)
     candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     skills: list[str] = []
     if candidate is not None:
@@ -293,6 +324,14 @@ def generate_and_store_interview_prep(
         prep = improver(context, prep)
 
     now = _now()
+    job = _get_job(db, job_id)
+    candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
+    candidate_fp = (
+        hash_canonical(candidate_record_to_profile(candidate).model_dump(mode="json"))
+        if candidate is not None
+        else None
+    )
+    requirement_fp = current_posting_fingerprint(job)
     record = (
         db.query(InterviewPrepRecord)
         .filter(InterviewPrepRecord.job_id == context.job_pk, InterviewPrepRecord.user_id == user_id)
@@ -305,6 +344,8 @@ def generate_and_store_interview_prep(
             likely_questions=list(prep.likely_questions),
             talking_points=list(prep.talking_points),
             gaps_to_address=list(prep.gaps_to_address),
+            candidate_fingerprint=candidate_fp,
+            requirement_fingerprint=requirement_fp,
             created_at=now,
             updated_at=now,
         )
@@ -326,6 +367,8 @@ def generate_and_store_interview_prep(
             existing.likely_questions = list(prep.likely_questions)
             existing.talking_points = list(prep.talking_points)
             existing.gaps_to_address = list(prep.gaps_to_address)
+            existing.candidate_fingerprint = candidate_fp
+            existing.requirement_fingerprint = requirement_fp
             existing.updated_at = now
             db.commit()
             db.refresh(existing)
@@ -336,6 +379,8 @@ def generate_and_store_interview_prep(
         record.likely_questions = list(prep.likely_questions)
         record.talking_points = list(prep.talking_points)
         record.gaps_to_address = list(prep.gaps_to_address)
+        record.candidate_fingerprint = candidate_fp
+        record.requirement_fingerprint = requirement_fp
         record.updated_at = now
         db.commit()
         db.refresh(record)
@@ -444,7 +489,11 @@ def get_interview_answer_feedback(
         .filter(InterviewPrepRecord.job_id == job.id, InterviewPrepRecord.user_id == user_id)
         .first()
     )
-    if record is None or question not in (record.likely_questions or []):
+    if (
+        record is None
+        or not _interview_prep_record_is_current(db, record, job, user_id)
+        or question not in (record.likely_questions or [])
+    ):
         raise InterviewQuestionNotFoundError()
 
     context = load_interview_prep_context(db, job_id, user_id)

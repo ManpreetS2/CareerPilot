@@ -257,6 +257,31 @@ def test_load_target_preference_returns_most_recent_record(isolated_session) -> 
     assert pref.preferred_locations == ["Remote"]
 
 
+def test_load_target_preference_falls_back_to_owner_row_saved_before_resume(isolated_session) -> None:
+    from backend.db.models import User
+
+    if isolated_session.get(User, TEST_USER_ID) is None:
+        isolated_session.add(User(id=TEST_USER_ID, email="pref-owner@example.com", hashed_password="x"))
+        isolated_session.commit()
+    isolated_session.add(
+        TargetPreference(
+            user_id=TEST_USER_ID,
+            candidate_id=None,
+            preferred_locations=["Chicago, IL"],
+            legal_name="Jordan Legal Quill",
+            work_authorization="US Citizen",
+        )
+    )
+    isolated_session.commit()
+    candidate = _seed_candidate(isolated_session)
+
+    pref = _load_target_preference(isolated_session, candidate)
+    assert pref is not None
+    assert pref.preferred_locations == ["Chicago, IL"]
+    assert pref.legal_name == "Jordan Legal Quill"
+    assert pref.work_authorization == "US Citizen"
+
+
 def test_load_target_preference_none_without_a_preference_record(isolated_session) -> None:
     candidate = _seed_candidate(isolated_session)
     assert _load_target_preference(isolated_session, candidate) is None
@@ -1033,6 +1058,25 @@ def test_find_job_by_url_matches_lever_apply_page(isolated_session) -> None:
     found = find_job_by_url(isolated_session, "https://jobs.lever.co/acme/abc-123/apply")
     assert found is not None
     assert found.id == job.id
+
+
+def test_find_job_by_url_matches_generic_employer_url_with_marketing_parameters(isolated_session) -> None:
+    job = _job(
+        isolated_session,
+        url="https://careers.example.com/jobs/123?job=123&utm_source=careerpilot",
+    )
+    found = find_job_by_url(
+        isolated_session,
+        "https://careers.example.com/jobs/123?utm_medium=extension&job=123",
+    )
+    assert found is not None
+    assert found.id == job.id
+
+    # A real identity-bearing query difference must remain a different job.
+    assert find_job_by_url(
+        isolated_session,
+        "https://careers.example.com/jobs/123?job=456&utm_source=careerpilot",
+    ) is None
 
 
 def test_find_job_by_url_no_match_returns_none(isolated_session) -> None:
