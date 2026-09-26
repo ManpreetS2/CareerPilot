@@ -26,8 +26,9 @@ from backend.db.models import (
 from backend.schemas.schemas import InterviewAnswerFeedback, InterviewPrep, JobIntelligence, MatchScore
 from backend.services.analysis_service import StoredScoreNotFoundError, get_stored_match_score
 from backend.services.application_materials_agent import candidate_record_to_profile
+from backend.services.candidate_provenance import fingerprint_for_candidate
 from backend.services.job_intelligence_service import get_stored_job_intelligence
-from backend.services.job_requirement_extractor import load_requirement_profile
+from backend.services.job_requirement_extractor import current_posting_fingerprint, load_requirement_profile
 from backend.services.job_service import record_to_job
 from backend.services.llm_client import (
     LLMConfigurationError,
@@ -120,8 +121,23 @@ def _record_to_prep(record: InterviewPrepRecord, job_public_id: str) -> Intervie
     )
 
 
+def _interview_prep_record_is_current(
+    db: Session, record: InterviewPrepRecord, job: JobRecord, user_id: int
+) -> bool:
+    candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
+    current_candidate_fp = (
+        fingerprint_for_candidate(db, candidate, user_id, refresh=True)
+        if candidate is not None
+        else None
+    )
+    return (
+        record.candidate_fingerprint == current_candidate_fp
+        and record.requirement_fingerprint == current_posting_fingerprint(job)
+    )
+
+
 def get_interview_prep(db: Session, job_id: str, user_id: int) -> InterviewPrep | None:
-    """Read-only. Does not create, generate, or call a provider."""
+    """Read-only. Stale prep is treated as missing; never calls a provider."""
 
     job = _get_job(db, job_id)
     record = (
@@ -129,8 +145,8 @@ def get_interview_prep(db: Session, job_id: str, user_id: int) -> InterviewPrep 
         .filter(InterviewPrepRecord.job_id == job.id, InterviewPrepRecord.user_id == user_id)
         .first()
     )
-    if record is None:
-        logger.info("interview_prep read miss job_pk=%s", job.id)
+    if record is None or not _interview_prep_record_is_current(db, record, job, user_id):
+        logger.info("interview_prep read miss_or_stale job_pk=%s", job.id)
         return None
     logger.info("interview_prep read hit job_pk=%s", job.id)
     return _record_to_prep(record, job_id)
