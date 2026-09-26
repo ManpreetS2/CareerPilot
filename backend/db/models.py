@@ -441,6 +441,8 @@ class InterviewPrepRecord(Base):
     likely_questions: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     talking_points: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
     gaps_to_address: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    candidate_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    requirement_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
