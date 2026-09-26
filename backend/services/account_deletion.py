@@ -52,6 +52,11 @@ def delete_user_account(db: Session, user: User) -> None:
         db.query(ResumeVersionRecord).filter(
             ResumeVersionRecord.candidate_id.in_(candidate_ids)
         ).delete(synchronize_session=False)
+        # Legacy preference rows may predate user_id ownership and only point
+        # at the user's Candidate. Delete them before removing the candidate.
+        db.query(TargetPreference).filter(
+            TargetPreference.candidate_id.in_(candidate_ids)
+        ).delete(synchronize_session=False)
 
     db.query(ApplicationPackageRecord).filter(ApplicationPackageRecord.user_id == user_id).delete(
         synchronize_session=False
