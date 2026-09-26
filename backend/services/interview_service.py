@@ -26,7 +26,7 @@ from backend.db.models import (
 from backend.schemas.schemas import InterviewAnswerFeedback, InterviewPrep, JobIntelligence, MatchScore
 from backend.services.analysis_service import StoredScoreNotFoundError, get_stored_match_score
 from backend.services.application_materials_agent import candidate_record_to_profile
-from backend.services.candidate_provenance import fingerprint_for_candidate
+from backend.services.candidate_provenance import hash_canonical
 from backend.services.job_intelligence_service import (
     JobIntelligenceNotFoundError,
     get_stored_job_intelligence,
@@ -129,7 +129,7 @@ def _interview_prep_record_is_current(
 ) -> bool:
     candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     current_candidate_fp = (
-        fingerprint_for_candidate(db, candidate, user_id, refresh=True)
+        hash_canonical(candidate_record_to_profile(candidate).model_dump(mode="json"))
         if candidate is not None
         else None
     )
@@ -327,7 +327,7 @@ def generate_and_store_interview_prep(
     job = _get_job(db, job_id)
     candidate = db.query(Candidate).filter(Candidate.user_id == user_id).first()
     candidate_fp = (
-        fingerprint_for_candidate(db, candidate, user_id, refresh=True)
+        hash_canonical(candidate_record_to_profile(candidate).model_dump(mode="json"))
         if candidate is not None
         else None
     )
