@@ -21,7 +21,7 @@ from backend.services.interview_service import (
     get_interview_answer_feedback,
     get_interview_prep,
 )
-from backend.services.llm_client import LLMConfigurationError, LLMEmptyResponseError, LLMProviderError
+from backend.services.llm_client import AI_UNAVAILABLE_DETAIL, LLMConfigurationError, LLMEmptyResponseError, LLMProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def _http_for_interview_error(exc: Exception) -> HTTPException:
     if isinstance(exc, (LLMProviderError, LLMEmptyResponseError)):
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="The language model request failed.",
+            detail=AI_UNAVAILABLE_DETAIL,
         )
     if isinstance(exc, InterviewPrepError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

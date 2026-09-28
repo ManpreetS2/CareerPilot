@@ -32,7 +32,7 @@ from backend.services.candidate_profile_agent import (
     build_candidate_profile_from_upload,
     validate_pdf_upload,
 )
-from backend.services.llm_client import LLMConfigurationError
+from backend.services.llm_client import AI_UNAVAILABLE_DETAIL, LLMConfigurationError
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def _http_for_candidate_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LLMConfigurationError):
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI service temporarily unavailable. Please try again.",
+            detail=AI_UNAVAILABLE_DETAIL,
         )
     if isinstance(exc, ProfileExtractionError):
         text = (str(exc) or "").lower()
@@ -90,7 +90,7 @@ def _http_for_candidate_error(exc: Exception) -> HTTPException:
             )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="AI service temporarily unavailable. Please try again.",
+            detail=AI_UNAVAILABLE_DETAIL,
         )
     if isinstance(exc, ResumeExtractionError):
         text = (str(exc) or "").lower()
