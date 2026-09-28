@@ -58,6 +58,7 @@ from backend.services.analysis_service import (
 from sqlalchemy.exc import IntegrityError
 
 from backend.services.job_intelligence_service import (
+    JobIntelligenceNotFoundError,
     _has_usable_intelligence,
     get_stored_job_intelligence,
 )
@@ -551,7 +552,12 @@ def load_application_materials_context(db: Session, job_id: str, user_id: int) -
     )
     if intelligence_record is None:
         raise MissingJobIntelligenceError()
-    intelligence = get_stored_job_intelligence(db, job_id)
+    try:
+        intelligence = get_stored_job_intelligence(db, job_id)
+    except JobIntelligenceNotFoundError as exc:
+        # A stored row can exist while its posting fingerprint is obsolete.
+        # Materials must never ground against stale employer requirements.
+        raise MissingJobIntelligenceError() from exc
 
     try:
         fit_score = get_stored_match_score(db, job_id, user_id)

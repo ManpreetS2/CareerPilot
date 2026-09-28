@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from fastapi import HTTPException, status
 from playwright.sync_api import Error as PlaywrightError
@@ -189,6 +189,17 @@ def _categorize_urls(evidence_links: list[str]) -> tuple[str | None, str | None,
 
 
 def _load_target_preference(db: Session, candidate: Candidate) -> TargetPreference | None:
+    # Preferences may be saved before a resume exists, so the newest
+    # owner-linked row is canonical. Fall back to candidate_id for legacy rows.
+    if candidate.user_id is not None:
+        linked = (
+            db.query(TargetPreference)
+            .filter(TargetPreference.user_id == candidate.user_id)
+            .order_by(TargetPreference.id.desc())
+            .first()
+        )
+        if linked is not None:
+            return linked
     return (
         db.query(TargetPreference)
         .filter(TargetPreference.candidate_id == candidate.id)
@@ -698,6 +709,33 @@ def _strip_lever_apply_suffix(url: str) -> str:
     return trimmed
 
 
+_EXTENSION_TRACKING_QUERY_KEYS = frozenset({
+    "utm", "fbclid", "gclid", "gbraid", "wbraid", "msclkid", "igshid",
+    "mc_cid", "mc_eid", "gh_src", "lever-origin",
+})
+
+
+def _extension_url_identity(url: str) -> str:
+    """Strip marketing-only URL noise while preserving job-identifying queries."""
+    parsed = urlparse(url.strip())
+    if not parsed.netloc:
+        return url.rstrip("/")
+    query = sorted(
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_")
+        and key.lower() not in _EXTENSION_TRACKING_QUERY_KEYS
+    )
+    return urlunparse((
+        "",
+        parsed.netloc.lower().removeprefix("www."),
+        parsed.path.rstrip("/"),
+        "",
+        urlencode(query),
+        "",
+    ))
+
+
 def find_job_by_url(db: Session, url: str) -> JobRecord | None:
     """Match a real browser tab's URL back to a stored job.
 
@@ -731,6 +769,13 @@ def find_job_by_url(db: Session, url: str) -> JobRecord | None:
     for candidate_url in candidates:
         record = db.query(JobRecord).filter(JobRecord.url == candidate_url).first()
         if record is not None:
+            return record
+
+    # Generic employer URLs can also differ only by marketing parameters.
+    # Preserve identity-bearing query parameters such as ?job=123.
+    incoming_identity = _extension_url_identity(url)
+    for record in db.query(JobRecord).all():
+        if _extension_url_identity(record.url or "") == incoming_identity:
             return record
 
     # Existing rows may have been stored with tracking query parameters

@@ -90,9 +90,19 @@ def test_delete_account_revokes_all_sessions_and_private_data(isolated_client) -
                 query_text="backend engineer intern",
             )
         )
+        # Legacy preference rows may be linked only through candidate_id.
+        db.add(
+            TargetPreference(
+                user_id=None,
+                candidate_id=candidate_a.id,
+                target_roles=["Legacy private preference"],
+                preferred_locations=["Private location"],
+            )
+        )
         db.commit()
         job_id = job.public_id
         job_pk = job.id
+        candidate_pk = candidate_a.id
 
     client.patch(f"/api/applications/{job_id}/tracking", json={"status": "saved"})
     client.post(f"/api/jobs/{job_id}/save")
@@ -130,6 +140,7 @@ def test_delete_account_revokes_all_sessions_and_private_data(isolated_client) -
         assert db.query(UserSession).filter(UserSession.user_id == user_a).count() == 0
         assert db.query(Candidate).filter(Candidate.user_id == user_a).count() == 0
         assert db.query(TargetPreference).filter(TargetPreference.user_id == user_a).count() == 0
+        assert db.query(TargetPreference).filter(TargetPreference.candidate_id == candidate_pk).count() == 0
         assert db.query(MatchScoreRecord).count() == 0
         assert db.query(ApplicationPackageRecord).filter(
             ApplicationPackageRecord.user_id == user_a
