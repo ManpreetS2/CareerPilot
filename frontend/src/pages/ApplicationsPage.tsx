@@ -109,8 +109,9 @@ function TrackerCard({
 }) {
   return (
     <article className="paper-surface p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+      {/* Stacked, not side by side: a Kanban column is too narrow to share with the match label. */}
+      <div className="flex flex-col items-start gap-2" data-testid="tracker-card-header">
+        <div className="w-full min-w-0">
           <h2 className="wrap-anywhere font-display text-base font-semibold leading-snug">{item.title}</h2>
           <p className="wrap-anywhere text-sm text-muted-foreground">{item.company}</p>
           {isSyntheticShowcasePosting(item.job_id, item.company) ? (

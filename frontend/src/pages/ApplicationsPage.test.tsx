@@ -105,6 +105,26 @@ describe("ApplicationsPage", () => {
     expect(screen.queryByText(/62%/)).not.toBeInTheDocument();
   });
 
+  it("stacks the match label under the title so narrow Kanban columns keep the title readable", async () => {
+    vi.mocked(api.listApplications).mockResolvedValue([
+      {
+        job_id: "verified-job",
+        title: "Backend Software Engineering Intern, Platform Reliability",
+        company: "Harborline",
+        tracker_status: "saved",
+        match_score: 96.3,
+        recommendation: "apply",
+        score_kind: "verified",
+        match_tier: "strong_match",
+      },
+    ]);
+    renderTracker();
+    await screen.findByText(/96% Strong Match/);
+    const header = screen.getByTestId("tracker-card-header");
+    expect(getComputedStyle(header).flexDirection).toBe("column");
+    expect(header).toHaveTextContent(/Platform Reliability[\s\S]*96% Strong Match/);
+  });
+
   it("discloses synthetic roles in Track without labeling ordinary saved jobs", async () => {
     vi.mocked(api.listApplications).mockResolvedValue([
       { job_id: "showcase-harborline-intern", title: "Demo intern", company: "Harborline Analytics", tracker_status: "saved" },
