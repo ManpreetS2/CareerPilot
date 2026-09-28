@@ -5,7 +5,7 @@ Facts below are tied to the public **v1.0.0** release unless a sentence explicit
 **Release:** https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
 **Tagged commit:** `b73a983ed3605d498aa90070c3b5f786a73bc525`
 **Certified runtime (A8/A9/Phase 6):** `7b6c3ee100ca4fe6399ac29441bece8df71783c7`
-**Showcase screenshots:** newer mainline recapture after `7038b76`, not the tagged tree. Source is visible, not open source; running it still needs prior written permission.
+**Showcase screenshots:** later mainline synthetic captures, including the PR #114 refresh for Discover/Evidence/Track/Analytics; they are not the tagged tree and may differ slightly from current main after subsequent polish. Source is visible, not open source; running it still needs prior written permission.
 
 ## A. Portfolio description
 
@@ -21,15 +21,19 @@ CareerPilot is a local/self-hostable job-search workspace: FastAPI, React, SQLit
 
 ## C. LinkedIn project-launch post
 
-I tagged CareerPilot v1.0.0 — a local job-search workspace I built end to end.
+I’m sharing CareerPilot — a job-search workspace I built end to end with FastAPI, React/TypeScript, SQLite, and an unpacked Chrome extension.
 
-It is not an auto-apply bot. It reads a real resume, ranks jobs with explainable Fit, drafts application text from stored evidence, and stops before Submit. Greenhouse and Lever can be assisted from a Chrome side panel; demographic questions and terms stay manual.
+It starts from a real résumé, builds a grounded candidate profile, discovers roles, and calculates an explainable Fit score from stored evidence. You can inspect what matched, what is missing, and what was never verified instead of getting a black-box percentage.
 
-The hard parts were the unglamorous ones: user isolation, stale-data invalidation, truthful resume attachment, and refusing to invent skills or interview results.
+From there, CareerPilot can draft application materials, track the application funnel, surface repeated skill gaps, and assist Greenhouse/Lever forms — but it deliberately stops before Submit. EEO/demographic questions, terms, eligibility confirmation, and the final submission stay human.
 
-Source and release notes: https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
+The engineering work I’m proudest of is behind the UI: deterministic scoring, evidence provenance, stale-data invalidation, user isolation, provider-failure handling, ATS identity, and regression testing around the places where an AI product can quietly become misleading.
 
-Source-visible on GitHub, not open source. No hosted demo, no Chrome Web Store listing, no claim that it applies for you. Running or deploying it still needs prior written permission.
+I tagged v1.0.0 after the release audit, and I’ve kept hardening mainline since then — including accessibility/UI polish, clearer retryable failure states, and better Fit explanations. I’m still iterating on it after this post.
+
+GitHub / release notes: https://github.com/ManpreetS2/CareerPilot
+
+Source-visible on GitHub, not open source. No hosted demo or Chrome Web Store listing, and CareerPilot does not auto-apply.
 
 ## D. Interview talking points
 
@@ -38,7 +42,7 @@ Source-visible on GitHub, not open source. No hosted demo, no Chrome Web Store l
 3. **Human boundary.** Approval, EEO, terms, and Submit are human. Tracker `applied` is not proof that CareerPilot submitted anything.
 4. **Identity.** Greenhouse/Lever matching uses ATS posting identity, not “similar title at similar company.”
 5. **Privacy.** Private rows are owner-scoped, including analytics and saved searches. Deletion revokes sessions. Tests never touch `data/careerpilot.db`.
-6. **Release engineering.** Runtime was certified on `7b6c3ee…` (A8/A9/Phase 6). The annotated tag is `b73a983…`. Those SHAs are different on purpose: last-mile docs after certification. Later showcase screenshots are a newer recapture and do not recertify Fill.
+6. **Release engineering.** Runtime was certified on `7b6c3ee…` (A8/A9/Phase 6). The annotated tag is `b73a983…`. Those SHAs are different on purpose: last-mile docs after certification. Mainline has continued to receive post-tag hardening; those commits and later showcase screenshots do not retroactively recertify Fill.
 
 ## E. Hardest engineering problems
 
