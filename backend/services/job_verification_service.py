@@ -154,6 +154,10 @@ def check_still_open(url: str) -> tuple[bool | None, str]:
         return None, f"Posting URL blocked automated access (HTTP {response.status_code})."
     if response.status_code >= 500:
         return None, f"Posting site returned a server error (HTTP {response.status_code})."
+    if response.status_code < 200 or response.status_code >= 300:
+        # Any other non-success response (e.g. 400, 451, or a redirect
+        # without a usable destination) cannot establish that a job is live.
+        return None, f"Posting URL returned HTTP {response.status_code}; could not confirm it is open."
 
     body_lower = response.text.lower()
     for phrase in CLOSED_POSTING_PHRASES:

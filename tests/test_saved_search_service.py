@@ -79,6 +79,17 @@ class TestJobMatchesSearchFilters:
         assert not _matches(job, work_mode=["remote"])
         assert _matches(job, work_mode=["onsite", "hybrid"])
 
+    def test_city_location_filters_provider_results_after_scouting(self) -> None:
+        assert _matches(_job(location="Chicago, IL"), location="Chicago")
+        assert not _matches(_job(location="New York, NY"), location="Chicago")
+        assert not _matches(_job(location=None), location="Chicago")
+        assert not _matches(_job(location="Remote"), location="Chicago")
+        assert _matches(_job(location="New York, NY"), location=None)
+
+    def test_explicit_remote_location_only_accepts_remote_work_mode(self) -> None:
+        assert _matches(_job(location="Remote", work_mode="remote"), location="Remote")
+        assert not _matches(_job(location="Chicago, IL", work_mode="onsite"), location="Remote")
+
     def test_date_posted_window(self) -> None:
         # date_posted_raw is the raw JobRecord string (what parse_posting_time
         # expects), not the already-parsed `date` object the Job schema
@@ -191,6 +202,35 @@ class TestSchedulerTick:
         assert matches[0][1].public_id == "job-a"
         refreshed = isolated_session.get(SavedSearchRecord, search.id)
         assert refreshed.last_run_at is not None
+
+    def test_scheduled_location_must_match_returned_job_not_just_provider_request(
+        self, isolated_session, monkeypatch
+    ) -> None:
+        ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
+        search = create_saved_search(
+            isolated_session, TEST_USER_ID,
+            SavedSearchCreate(label="Chicago interns", query_text="intern", location="Chicago"),
+        )
+        outside = insert_job(isolated_session, public_id="new-york-job")
+        inside = insert_job(isolated_session, public_id="chicago-job")
+        unknown = insert_job(isolated_session, public_id="unknown-location-job")
+
+        def fake_scout_jobs(queries, location):
+            assert queries == ["intern"]
+            assert location == "Chicago"
+            return [
+                _job(id=outside.public_id, location="New York, NY"),
+                _job(id=inside.public_id, location="Chicago, IL"),
+                _job(id=unknown.public_id, location=None),
+            ]
+
+        monkeypatch.setattr("backend.services.saved_search_service.scout_jobs", fake_scout_jobs)
+        monkeypatch.setattr("backend.services.saved_search_service.SessionLocal", lambda: isolated_session)
+        monkeypatch.setattr(isolated_session, "close", lambda: None)
+        asyncio.run(run_due_saved_searches())
+        matches = list_matches(isolated_session, search.id, TEST_USER_ID)
+        assert [job.public_id for _match, job in matches] == ["chicago-job"]
 
     def test_does_not_duplicate_matches_on_a_second_run(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
