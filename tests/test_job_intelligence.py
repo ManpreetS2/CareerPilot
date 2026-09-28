@@ -184,7 +184,12 @@ def test_two_empty_structured_objects_exhaust_the_provider_without_grounding(
         response = client.post(f"/api/jobs/{job.public_id}/intelligence")
 
     assert response.status_code == 502
-    assert response.json() == {"detail": "AI service temporarily unavailable. Please try again."}
+    assert response.json() == {
+        "detail": (
+            "CareerPilot couldn't extract clear requirements from this posting. "
+            "Try again, or review the original posting."
+        )
+    }
     assert fake_client.generate.call_count == 2
     with SessionLocal() as session:
         assert session.query(JobIntelligenceRecord).count() == 0
