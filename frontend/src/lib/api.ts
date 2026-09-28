@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "./config";
+import { API_BASE_URL, unreachableApiMessage } from "./config";
 import type {
   ApplicationAnalyticsSummary,
   ApplicationListItem,
@@ -56,10 +56,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       signal: init?.signal,
     });
   } catch {
-    throw new ApiClientError(
-      0,
-      `Cannot reach backend at ${API_BASE_URL}. Start it with: uvicorn backend.main:app --reload`,
-    );
+    throw new ApiClientError(0, unreachableApiMessage(API_BASE_URL));
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -82,7 +79,7 @@ async function downloadFile(path: string, fallbackFilename: string): Promise<voi
   try {
     response = await fetch(`${API_BASE_URL}${path}`, { credentials: "include" });
   } catch {
-    throw new ApiClientError(0, `Cannot reach backend at ${API_BASE_URL}.`);
+    throw new ApiClientError(0, unreachableApiMessage(API_BASE_URL));
   }
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));

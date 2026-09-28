@@ -41,6 +41,7 @@ from backend.services.candidate_provenance import (
     package_matches_current_resume_profile,
 )
 from backend.services.llm_client import (
+    AI_UNAVAILABLE_DETAIL,
     LLMConfigurationError,
     LLMEmptyResponseError,
     LLMProviderError,
@@ -171,7 +172,7 @@ def get_or_generate_application_package(
     except ApplicationMaterialsParseError:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Application materials output was not valid structured JSON.",
+            detail="The AI service returned an unusable draft. Please try again.",
         ) from None
     except LLMConfigurationError:
         raise HTTPException(
@@ -181,7 +182,7 @@ def get_or_generate_application_package(
     except (LLMProviderError, LLMEmptyResponseError):
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="The language model request failed.",
+            detail=AI_UNAVAILABLE_DETAIL,
         ) from None
 
     record = _owned_package(db, job, user_id)

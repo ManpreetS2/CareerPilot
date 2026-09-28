@@ -21,10 +21,12 @@ export function ErrorBanner({ error, heading }: { error: unknown; heading?: stri
           : status === 401 || status === 403
             ? "Sign in required"
             : status === 0
-              ? "Backend unreachable"
-              : status && status >= 500
-                ? "Server error"
-                : null);
+              ? "Can't connect"
+              : status === 502 || status === 503 || status === 504
+                ? "Temporarily unavailable"
+                : status && status >= 500
+                  ? "Server error"
+                  : null);
 
   return (
     <div

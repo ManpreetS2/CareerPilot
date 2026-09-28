@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveApiBaseUrl } from "./config";
+import { resolveApiBaseUrl, unreachableApiMessage } from "./config";
 
 describe("resolveApiBaseUrl", () => {
   it("resolves a localhost page to a localhost local API", () => {
@@ -60,5 +60,17 @@ describe("resolveApiBaseUrl", () => {
 
   it("rewrites a bracketed IPv6 API onto 127.0.0.1 while keeping the port", () => {
     expect(resolveApiBaseUrl("http://[::1]:9000", "127.0.0.1")).toBe("http://127.0.0.1:9000");
+  });
+});
+
+describe("unreachableApiMessage", () => {
+  it("keeps the operator hint for a local API", () => {
+    expect(unreachableApiMessage("http://127.0.0.1:8000")).toContain("uvicorn");
+  });
+
+  it("never shows operator instructions to users of a hosted API", () => {
+    const message = unreachableApiMessage("https://api.careerpilot.example");
+    expect(message).toBe("Can't reach CareerPilot right now. Check your connection and try again.");
+    expect(message).not.toMatch(/uvicorn|backend/i);
   });
 });

@@ -184,7 +184,7 @@ def test_two_empty_structured_objects_exhaust_the_provider_without_grounding(
         response = client.post(f"/api/jobs/{job.public_id}/intelligence")
 
     assert response.status_code == 502
-    assert response.json() == {"detail": "Unable to extract structured job requirements."}
+    assert response.json() == {"detail": "AI service temporarily unavailable. Please try again."}
     assert fake_client.generate.call_count == 2
     with SessionLocal() as session:
         assert session.query(JobIntelligenceRecord).count() == 0
@@ -1178,7 +1178,7 @@ def test_api_statuses_are_sanitized(isolated_client) -> None:
         (
             LLMProviderError("private provider payload"),
             502,
-            "Unable to extract structured job requirements.",
+            "AI service temporarily unavailable. Please try again.",
         ),
     ],
 )
