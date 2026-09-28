@@ -729,3 +729,27 @@ def test_high_confidence_deep_fit_can_be_strong_match(isolated_session) -> None:
     assert result.confidence_level in {"medium", "high"}
     if (result.overall_score or 0) >= 85 and result.confidence_level != "low":
         assert result.match_tier == "strong_match"
+
+
+def test_zero_matched_required_skills_is_a_gap_not_a_reason(isolated_session) -> None:
+    """ "You match 0 of 3 required technical skills." used to appear under
+    Why you match. A zero count is a gap."""
+    candidate = _candidate(isolated_session)
+    job = _job(
+        isolated_session,
+        description="Requirements:\nGo\nKubernetes\nTerraform\nResponsibilities:\n- Run infrastructure",
+    )
+    _intel(isolated_session, job, required=["Go", "Kubernetes", "Terraform"], preferred=[])
+    _prefs(isolated_session, candidate)
+    result = _score(isolated_session, job.public_id)
+    assert not any("You match 0 of" in reason for reason in result.match_reasons)
+    assert any("None of the 3 required technical skills" in gap for gap in result.gap_reasons)
+
+
+def test_partially_matched_required_skills_stay_a_reason(isolated_session) -> None:
+    candidate = _candidate(isolated_session)
+    job = _job(isolated_session, description="Requirements:\nPython\nGo\n")
+    _intel(isolated_session, job, required=["Python", "Go"], preferred=[])
+    _prefs(isolated_session, candidate)
+    result = _score(isolated_session, job.public_id)
+    assert "You match 1 of 2 required technical skills." in result.match_reasons

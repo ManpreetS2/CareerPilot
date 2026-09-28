@@ -483,7 +483,10 @@ def compute_fit_v2(
     ]
     if skill_match.required_ratio is not None and required_n:
         matched_req = required_n - len(missing_required)
-        reasons.append(f"You match {matched_req} of {required_n} required technical skills.")
+        if matched_req > 0:
+            reasons.append(f"You match {matched_req} of {required_n} required technical skills.")
+        else:
+            gaps.append(f"None of the {required_n} required technical skills are present in your profile.")
         if missing_required:
             gaps.append(
                 f"This role asks for {missing_required[0]}, which is not present in your profile."
