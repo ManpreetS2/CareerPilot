@@ -32,7 +32,7 @@ from backend.services.job_intelligence_service import (
     extract_job_intelligence,
     get_stored_job_intelligence,
 )
-from backend.services.llm_client import LLMConfigurationError, LLMProviderError
+from backend.services.llm_client import AI_UNAVAILABLE_DETAIL, LLMConfigurationError, LLMProviderError
 from backend.services.job_requirement_extractor import extract_requirement_profile, load_requirement_profile
 from backend.services.scoring_orchestrator import score_job_with_intelligence
 from backend.services.verified_fit_service import score_job_verified
@@ -66,10 +66,20 @@ def _http_for_intelligence_error(exc: Exception) -> HTTPException:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Job requirement extraction is not configured.",
         )
-    if isinstance(exc, (LLMProviderError, StructuredIntelligenceError)):
+    if isinstance(exc, LLMProviderError):
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Unable to extract structured job requirements.",
+            detail=AI_UNAVAILABLE_DETAIL,
+        )
+    if isinstance(exc, StructuredIntelligenceError):
+        # The provider answered, but with no usable requirements (malformed,
+        # or every field empty, e.g. a truncated aggregator description).
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "CareerPilot couldn't extract clear requirements from this posting. "
+                "Try again, or review the original posting."
+            ),
         )
     logger.error("Unexpected job intelligence failure category=internal")
     return HTTPException(

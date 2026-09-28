@@ -84,6 +84,43 @@ def _candidate(session, *, name: str = "Jordan Avery Quill", user_id: int = TEST
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ("failure", "expected_detail"),
+    [
+        ("provider", "AI service temporarily unavailable. Please try again."),
+        ("unparseable", "The AI service returned an unusable draft. Please try again."),
+    ],
+)
+def test_provider_failure_during_generation_is_a_retryable_user_message(
+    isolated_session, failure: str, expected_detail: str
+) -> None:
+    from backend.services.application_materials_agent import ApplicationMaterialsParseError
+    from backend.services.llm_client import LLMProviderError
+
+    seed_materials_prerequisites(isolated_session)
+
+    def failing_generator(*_args, **_kwargs):
+        if failure == "provider":
+            raise LLMProviderError("gemini 503 at internal-host:443 payload=secret")
+        raise ApplicationMaterialsParseError("raw model output: secret")
+
+    with pytest.raises(HTTPException) as exc:
+        get_or_generate_application_package(
+            isolated_session, "manual-abc123", TEST_USER_ID, generator=failing_generator
+        )
+    assert exc.value.status_code == 502
+    assert exc.value.detail == expected_detail
+
+
+def test_interview_provider_failure_is_a_retryable_user_message() -> None:
+    from backend.api.routes.interview import _http_for_interview_error
+    from backend.services.llm_client import LLMProviderError
+
+    error = _http_for_interview_error(LLMProviderError("gemini 503 payload=secret"))
+    assert error.status_code == 502
+    assert error.detail == "AI service temporarily unavailable. Please try again."
+
+
 def test_generate_materials_creates_and_persists_a_package(isolated_session) -> None:
     seed_materials_prerequisites(isolated_session)
     package = get_or_generate_application_package(isolated_session, "manual-abc123", TEST_USER_ID, generator=fake_grounded_generator)

@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 ProviderName = Literal["ollama", "gemini", "anthropic", "openai"]
 
+# User-facing detail for a provider outage, overload, or unusable reply.
+AI_UNAVAILABLE_DETAIL = "AI service temporarily unavailable. Please try again."
+
 
 class LLMConfigurationError(RuntimeError):
     """Raised when a provider is requested without the required API key."""

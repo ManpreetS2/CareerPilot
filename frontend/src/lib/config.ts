@@ -57,5 +57,18 @@ export const API_BASE_URL = resolveApiBaseUrl(
   typeof window === "undefined" ? "localhost" : window.location.hostname,
 );
 
+/** Operator-facing hints (e.g. "start uvicorn") only make sense for a local API. */
+export function unreachableApiMessage(apiBaseUrl: string): string {
+  let hostname = "";
+  try {
+    hostname = new URL(apiBaseUrl).hostname;
+  } catch {
+    hostname = "";
+  }
+  return isLocalHostname(hostname)
+    ? `Cannot reach backend at ${apiBaseUrl}. Start it with: uvicorn backend.main:app --reload`
+    : "Can't reach CareerPilot right now. Check your connection and try again.";
+}
+
 export const APP_NAME = "CareerPilot";
 export const APP_TAGLINE = "Grounded job search. Human-approved applications.";
