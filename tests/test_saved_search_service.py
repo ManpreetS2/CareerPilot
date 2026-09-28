@@ -307,6 +307,45 @@ class TestSchedulerTick:
         asyncio.run(run_due_saved_searches())
         assert run_count["n"] == MAX_SEARCHES_PER_TICK
 
+    def test_failed_first_five_do_not_starve_later_searches_across_ticks(
+        self, isolated_session, monkeypatch
+    ) -> None:
+        from backend.services import saved_search_service
+
+        monkeypatch.setattr(saved_search_service, "_last_attempted_search_id", None)
+        ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
+        searches = [
+            create_saved_search(
+                isolated_session, TEST_USER_ID,
+                SavedSearchCreate(label=f"Queue {i}", query_text=f"q{i}"),
+            )
+            for i in range(MAX_SEARCHES_PER_TICK + 2)
+        ]
+        attempted: list[str] = []
+
+        def scout(queries, location):
+            attempted.append(queries[0])
+            if int(queries[0][1:]) < MAX_SEARCHES_PER_TICK:
+                raise RuntimeError("unavailable source")
+            return []
+
+        monkeypatch.setattr("backend.services.saved_search_service.scout_jobs", scout)
+        monkeypatch.setattr("backend.services.saved_search_service.SessionLocal", lambda: isolated_session)
+        monkeypatch.setattr(isolated_session, "close", lambda: None)
+
+        asyncio.run(run_due_saved_searches())
+        assert attempted == [f"q{i}" for i in range(MAX_SEARCHES_PER_TICK)]
+        assert all(search.last_run_at is None for search in searches[:MAX_SEARCHES_PER_TICK])
+
+        asyncio.run(run_due_saved_searches())
+        assert attempted[MAX_SEARCHES_PER_TICK:MAX_SEARCHES_PER_TICK + 2] == [
+            f"q{i}" for i in range(MAX_SEARCHES_PER_TICK, MAX_SEARCHES_PER_TICK + 2)
+        ]
+        assert all(search.last_run_at is not None for search in searches[MAX_SEARCHES_PER_TICK:])
+        assert all(search.last_run_at is None for search in searches[:MAX_SEARCHES_PER_TICK])
+
+
     def test_rate_limited_search_is_retried_next_tick_not_marked_run(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
         insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
