@@ -17,6 +17,7 @@
   --primary: #7c3aed;
   --primary-hover: #6d28d9;
   --primary-foreground: #faf7ff;
+  --primary-text: var(--primary);
   --accent: #8b5cf6;
   --accent-foreground: #faf7ff;
   --success: #047857;
@@ -81,6 +82,8 @@
   --primary: #8b5cf6;
   --primary-hover: #a855f7;
   --primary-foreground: #f5f7ff;
+  /* Text-only: --primary is 4.0-4.4:1 on dark cards; this clears WCAG AA 4.5:1 on every dark surface. */
+  --primary-text: #956af7;
   --accent: #c084fc;
   --accent-foreground: #f5f7ff;
   --success: #34d399;
@@ -382,7 +385,11 @@ body {
   font-weight: 650;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
+}
+
+.dark .text-primary {
+  color: var(--primary-text);
 }
 
 .wrap-anywhere {
