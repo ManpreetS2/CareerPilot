@@ -32,9 +32,9 @@ CareerPilot never calls submit. The human reviews the ATS form and presses Submi
 - **A9:** session isolation, IDOR fail-closed, account deletion, generic login errors. Isolated SQLite only.
 - **Phase 6:** adversarial QA on certified runtime SHA `7b6c3ee100ca4fe6399ac29441bece8df71783c7`.
 - **v1.0.0:** annotated tag on `b73a983ed3605d498aa90070c3b5f786a73bc525` — https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0
-- **Showcase screenshots** in this folder were recaptured from later mainline (baseline `7038b76` plus this docs/UI pass). That is not a new certified release.
+- **Showcase screenshots** in this folder come from later mainline showcase captures, including the PR #114 synthetic recapture for Discover/Evidence/Track/Analytics. Current main has additional post-capture polish (#128–#130), so small visual/error-copy differences are expected. None of that is a new certified release.
 
-Release-gate automated counts at tag time: frontend **226** tests, extension **109** tests, mapped paths **124** valid / 0 missing. That is not a grand total across pytest + npm.
+Release-gate automated counts at tag time: frontend **226** tests, extension **109** tests, mapped paths **124** valid / 0 missing. That is not a grand total across pytest + npm. Current mainline CI and Security are separate post-tag checks and do not retroactively change the certified runtime.
 
 ## Do not claim
 
