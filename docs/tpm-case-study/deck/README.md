@@ -7,10 +7,11 @@ Five-slide, 16:9 executive presentation for internship / TPM / EM interviews.
 | File | Purpose |
 | --- | --- |
 | [`CareerPilot-TPM-Executive-Deck.pptx`](./CareerPilot-TPM-Executive-Deck.pptx) | Editable PowerPoint source |
-| [`CareerPilot-TPM-Executive-Deck.pdf`](./CareerPilot-TPM-Executive-Deck.pdf) | PDF export (if generated) |
 | [`generate_deck.py`](./generate_deck.py) | Regenerates the PPTX |
 | [`speaker-notes.md`](./speaker-notes.md) | ~3–5 minute walkthrough notes |
 | [`qa-renders/`](./qa-renders/) | Optional PNG renders used for visual QA |
+
+PDF exports are **gitignored** (`*.pdf`) and must not be committed (repo invariant: no tracked PDFs). Generate locally when needed.
 
 Outline source of truth: [`../08-executive-deck-outline.md`](../08-executive-deck-outline.md).
 
@@ -23,11 +24,11 @@ From repo root (requires `python-pptx` in the active environment):
 .venv/bin/python docs/tpm-case-study/deck/generate_deck.py
 ```
 
-## Export PDF (optional)
+## Export PDF (optional, local only)
 
-A checked-in PDF mirror (`CareerPilot-TPM-Executive-Deck.pdf`) is provided for sharing. The **editable source of truth is the PPTX**.
+The editable source of truth is the **PPTX**. Do not commit PDF output.
 
-If LibreOffice is installed, you can also convert the PPTX directly:
+If LibreOffice is installed:
 
 ```bash
 soffice --headless --convert-to pdf --outdir docs/tpm-case-study/deck \
@@ -40,7 +41,7 @@ On macOS, `soffice` may be:
 /Applications/LibreOffice.app/Contents/MacOS/soffice
 ```
 
-`qa-renders/slide-0N.png` are optional visual-QA bitmaps regenerated from the PDF mirror.
+`qa-renders/slide-0N.png` are optional visual-QA bitmaps (safe to commit; not PDFs).
 
 ## Slide titles
 

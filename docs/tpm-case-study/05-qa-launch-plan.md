@@ -96,13 +96,13 @@ Practical fallback:
 
 ## Launch sequence (as executed)
 
-1. Feature freeze candidate runtime  
-2. Automated CI + audits green  
-3. A8 live ATS + A9 privacy on that SHA  
-4. Phase 6 adversarial — close or fix P0/P1  
-5. Phase 7 release-truth docs/version  
-6. Phase 8 annotated tag + GitHub Release  
-7. Phase 9+ showcase / portfolio; triage post-v1 PRs without rewriting release truth  
+1. Feature freeze candidate runtime
+2. Automated CI + audits green
+3. A8 live ATS + A9 privacy on that SHA
+4. Phase 6 adversarial — close or fix P0/P1
+5. Phase 7 release-truth docs/version
+6. Phase 8 annotated tag + GitHub Release
+7. Phase 9+ showcase / portfolio; triage post-v1 PRs without rewriting release truth
 
 ---
 
