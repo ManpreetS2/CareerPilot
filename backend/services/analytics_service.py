@@ -96,7 +96,10 @@ def _median_days(job_events: dict[int, _JobEvents], from_stage: str, to_stage: s
     for entry in job_events.values():
         start = entry.first_occurrence.get(from_stage)
         end = entry.first_occurrence.get(to_stage)
-        if start is None or end is None:
+        if start is None or end is None or end < start:
+            # A manually entered application may reach interviewing before
+            # the user later moves it back to applied. Such a backwards
+            # first-occurrence pair has no meaningful forward duration.
             continue
         deltas.append((end - start).total_seconds() / 86400)
     if not deltas:
