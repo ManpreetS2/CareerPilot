@@ -21,6 +21,7 @@ from backend.db.database import SessionLocal
 from backend.db.models import JobRecord, SavedSearchMatchRecord, SavedSearchRecord
 from backend.schemas.saved_search import SavedSearchCreate, SavedSearchUpdate
 from backend.schemas.schemas import Job
+from backend.services.job_query_service import _location_matches
 from backend.services.job_posting_time import (
     cutoff_for_date_posted_window,
     parse_posting_time,
@@ -64,9 +65,10 @@ def job_matches_search_filters(
     date_posted: str | None,
     date_posted_raw: str | None,
     now: datetime,
+    location: str | None = None,
 ) -> bool:
     """Whether a freshly-scouted job satisfies one saved search's own
-    filters. Narrowed to opportunity/employment/work-mode/date-posted:
+    filters. Narrowed to opportunity/employment/work-mode/location/date-posted:
     fields `record_to_job` already puts on the returned `Job` (or, for
     date_posted, the raw JobRecord string this function re-parses) without
     an extra `resolve_job_listing_metadata` call per job. `experience_level`
@@ -88,6 +90,15 @@ def job_matches_search_filters(
         return False
     if work_mode and job.work_mode not in work_mode:
         return False
+    if location:
+        requested = location.strip()
+        if requested.lower() == "remote":
+            if job.work_mode != "remote":
+                return False
+        elif not job.location or not _location_matches(job.location, [requested]):
+            # A provider's region parameter is a request, not a guarantee:
+            # refuse postings without an explicit matching location.
+            return False
     cutoff = cutoff_for_date_posted_window(date_posted, now)
     if cutoff:
         posting = parse_posting_time(date_posted_raw, now=now)
@@ -263,6 +274,7 @@ async def _run_one_saved_search(db: Session, search: SavedSearchRecord) -> None:
             date_posted=search.date_posted,
             date_posted_raw=record.date_posted,
             now=now,
+            location=location,
         ):
             continue
         db.add(SavedSearchMatchRecord(saved_search_id=search.id, job_id=record.id))

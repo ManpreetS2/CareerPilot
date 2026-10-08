@@ -82,6 +82,38 @@ def test_rescout_still_applies_a_real_new_salary(isolated_db) -> None:
     assert stored[0].salary == "$55,000"
 
 
+def test_distinct_query_job_ids_do_not_clobber_each_other(isolated_db) -> None:
+    url_a = "https://careers.example.com/apply?job=123&utm_source=email"
+    url_b = "https://careers.example.com/apply?job=456&utm_source=email"
+    first = _job(url=url_a, title="Software Engineer Intern", salary="$40,000")
+    second = _job(url=url_b, title="Software Engineer Intern", salary="$60,000")
+    job_scout_service.persist_jobs([first, second])
+
+    with isolated_db() as db:
+        records = db.query(JobRecord).all()
+        assert len(records) == 2
+        assert {record.url for record in records} == {url_a, url_b}
+        assert {record.salary for record in records} == {"$40,000", "$60,000"}
+
+    # A new scout run for one URL may update only that specific posting.
+    job_scout_service.persist_jobs([_job(url=url_b, title="Software Engineer Intern", salary="$70,000")])
+    with isolated_db() as db:
+        records = db.query(JobRecord).all()
+        assert len(records) == 2
+        assert {record.url: record.salary for record in records} == {
+            url_a: "$40,000",
+            url_b: "$70,000",
+        }
+
+
+def test_distinct_paths_with_same_title_company_location_do_not_merge(isolated_db) -> None:
+    first = _job(url="https://example.com/jobs/123", title="Software Engineer Intern")
+    second = _job(url="https://example.com/jobs/456", title="Software Engineer Intern")
+    job_scout_service.persist_jobs([first, second])
+    with isolated_db() as db:
+        assert db.query(JobRecord).count() == 2
+
+
 def test_rescout_same_url_upserts_one_row_not_two(isolated_db) -> None:
     job_scout_service.persist_jobs([_job(url="https://example.com/jobs/4", title="v1")])
     job_scout_service.persist_jobs([_job(url="https://example.com/jobs/4", title="v2")])
