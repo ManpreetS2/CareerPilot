@@ -33,7 +33,7 @@ Stop. Do not open Settings. Do not click Submit.
 
 ### Fallback if a provider is down
 
-Fit still works. Skip Generate Materials / Job Intelligence / interview feedback. Say: “Those steps need a configured model. Fit does not.” The committed showcase capture used a live résumé parse and illustrative seeded materials after materials generation returned 503. A fresh seed run defaults to faithful synthetic extraction and illustrative seeded materials; live provider calls require `CAREERPILOT_SHOWCASE_LIVE=1`. Do not imply a new default run made live calls. Do not call that Prepare text live-generated.
+Fit still works. Current mainline surfaces retryable AI outages as **Temporarily unavailable** rather than exposing provider/internal wording. Skip Generate Materials / Job Intelligence / interview feedback and say: “Those steps need a configured model. Fit does not.” The committed showcase capture used a live résumé parse and illustrative seeded materials after materials generation returned 503. A fresh seed run defaults to faithful synthetic extraction and illustrative seeded materials; live provider calls require `CAREERPILOT_SHOWCASE_LIVE=1`. Do not imply a new default run made live calls. Do not call that Prepare text live-generated.
 
 ### Fallback if you cannot show a live ATS
 
