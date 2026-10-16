@@ -1,8 +1,8 @@
 # CareerPilot — Final Release Readiness Report
 
-**Date:** 2026-10-16  
-**Mainline SHA audited:** `ea13536ded11a7b41b48ce8029fa5104be2625f2`  
-**v1.0.0 tag (unchanged):** `b73a983ed3605d498aa90070c3b5f786a73bc525`  
+**Date:** 2026-10-16
+**Mainline SHA audited:** `ea13536ded11a7b41b48ce8029fa5104be2625f2`
+**v1.0.0 tag (unchanged):** `b73a983ed3605d498aa90070c3b5f786a73bc525`
 **Certified runtime SHA (unchanged):** `7b6c3ee100ca4fe6399ac29441bece8df71783c7` (A8/A9/Phase 6)
 
 ## 1. Executive summary
@@ -65,7 +65,7 @@ Full human Chrome session against a real employer apply form (install unpacked e
 5. Open a tracked Greenhouse + Lever apply URL you own/authorized
 6. Preview → Fill safe fields → confirm EEO/terms untouched → confirm Submit never clicked
 7. Fail attach intentionally (deny file permission / unsupported field) → confirm manual warning + text still filled
-8. Switch tabs mid-download → confirm abort, no wrong-page fill  
+8. Switch tabs mid-download → confirm abort, no wrong-page fill
 Capture screenshots for any failure; do not submit applications.
 
 ## 5. Historical data audit findings
@@ -138,10 +138,10 @@ No high/critical production CVE was identified that requires emergency dependenc
 
 Safe to show as a **local/self-hostable portfolio product** with accurate docs once #131 merges, provided public claims stay within:
 
-- Never auto-applies; human Submit only  
-- Greenhouse/Lever assisted Fill only  
-- A8 live certification remains the historical SHA `7b6c3ee…`  
-- Current mainline hardening (#140/#141) is automated + fixture-Chromium verified, not a replacement A8 live recert  
+- Never auto-applies; human Submit only
+- Greenhouse/Lever assisted Fill only
+- A8 live certification remains the historical SHA `7b6c3ee…`
+- Current mainline hardening (#140/#141) is automated + fixture-Chromium verified, not a replacement A8 live recert
 
 **Not NO-GO:** no confirmed critical open runtime bugs; required CI/Security green; privacy isolation tests green.
 
