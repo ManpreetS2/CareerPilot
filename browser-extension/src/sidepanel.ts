@@ -566,9 +566,10 @@ function renderFillOutcome(opts: {
         .join("")}</ul>`,
     );
   }
-  const fullyReady = !opts.resumeSelected || opts.resumeVerified;
-  if (fullyReady) {
+  if (opts.resumeVerified && opts.attachedName) {
     parts.push(`<p class="mt-2 text-xs font-semibold">Ready for your review</p>`);
+  } else if (!opts.resumeSelected) {
+    parts.push(`<p class="mt-2 text-xs font-semibold">Safe fields filled — review all required fields and resume attachment.</p>`);
   } else {
     parts.push(
       `<p class="mt-2 text-xs font-semibold text-warn-600">Partial fill — resume still needs manual upload. Application is not fully ready.</p>`,
