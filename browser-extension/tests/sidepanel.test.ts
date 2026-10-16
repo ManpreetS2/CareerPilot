@@ -55,7 +55,7 @@ function panelData(overrides: Record<string, unknown> = {}) {
 }
 
 let listeners: TabChangedListener[];
-let activeTab: { id: number; url: string };
+let activeTab: { id: number; url: string; status?: string };
 let fetchMock: ReturnType<typeof vi.fn>;
 let executeScript: ReturnType<typeof vi.fn>;
 let permissionsContains: ReturnType<typeof vi.fn>;
@@ -78,6 +78,28 @@ async function flushFill() {
   await flush(8);
 }
 
+function scriptResult<T>(result: T, documentId = "doc-42") {
+  return [{ result, documentId }];
+}
+
+function namedScriptMock(
+  handlers: Record<string, (args?: unknown[]) => unknown>,
+  fallback: unknown = { filled: [{ name: "email", value: "a@b.c" }], flagged: [] },
+) {
+  return vi.fn(async ({ func, args }: { func: { name?: string }; args?: unknown[] }) => {
+    if (!func.name || func.name === "probeInjectionDocument") return scriptResult(true);
+    const handler = handlers[func.name];
+    if (handler) return scriptResult(handler(args));
+    return scriptResult(fallback);
+  });
+}
+
+function injectionNames(mock: ReturnType<typeof vi.fn>): string[] {
+  return mock.mock.calls
+    .map((call: any) => call[0].func.name as string)
+    .filter((name: string) => name && name !== "probeInjectionDocument");
+}
+
 function panelHtml() {
   return document.getElementById("app")!.innerHTML;
 }
@@ -95,8 +117,14 @@ function fireTabChanged(url: string) {
 beforeEach(() => {
   document.body.innerHTML = '<div id="app"></div>';
   listeners = [];
-  activeTab = { id: 42, url: JOB_URL };
-  executeScript = vi.fn(async () => [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }]);
+  activeTab = { id: 42, url: JOB_URL, status: "complete" };
+  executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
+    // Document-epoch probe used by captureInjectionTarget.
+    if (!func.name || func.name === "probeInjectionDocument") {
+      return [{ result: true, documentId: "doc-42" }];
+    }
+    return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] }, documentId: "doc-42" }];
+  });
   permissionsContains = vi.fn(async () => true);
   permissionsRequest = vi.fn(async () => true);
   responders = {
@@ -152,7 +180,10 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("chrome", {
     cookies: { get: vi.fn(async () => ({ value: "session-token" })) },
-    tabs: { query: vi.fn(async () => [activeTab]) },
+    tabs: {
+      query: vi.fn(async () => [activeTab]),
+      get: vi.fn(async (tabId: number) => (activeTab.id === tabId ? activeTab : undefined)),
+    },
     permissions: { contains: permissionsContains, request: permissionsRequest },
     scripting: { executeScript },
     runtime: { onMessage: { addListener: (fn: TabChangedListener) => listeners.push(fn) } },
@@ -349,15 +380,23 @@ describe("assisted apply", () => {
     expect(document.getElementById("fill-status")!.textContent).toContain("Submit was not pressed");
   });
 
+  it("does not claim full readiness when no resume version was selected", async () => {
+    await loadPanel();
+    document.getElementById("fill-btn")!.click();
+    await flush();
+    const status = document.getElementById("fill-status")!.textContent || "";
+    expect(status).toContain("review all required fields and resume attachment");
+    expect(status).not.toContain("Ready for your review");
+    expect(status).not.toContain("Resume attached");
+  });
   it("reports what was filled and what still needs the user", async () => {
-    executeScript = vi.fn(async () => [
+    executeScript = namedScriptMock(
+      {},
       {
-        result: {
-          filled: [{ name: "email", value: "a@b.c" }],
-          flagged: [{ name: "resume", reason: "attach manually" }],
-        },
+        filled: [{ name: "email", value: "a@b.c" }],
+        flagged: [{ name: "resume", reason: "attach manually" }],
       },
-    ]);
+    );
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
     document.getElementById("fill-btn")!.click();
@@ -370,9 +409,10 @@ describe("assisted apply", () => {
   });
 
   it("escapes field names taken from the visited page", async () => {
-    executeScript = vi.fn(async () => [
-      { result: { filled: [], flagged: [{ name: "<img src=x onerror=alert(1)>", reason: "x" }] } },
-    ]);
+    executeScript = namedScriptMock(
+      {},
+      { filled: [], flagged: [{ name: "<img src=x onerror=alert(1)>", reason: "x" }] },
+    );
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
     document.getElementById("fill-btn")!.click();
@@ -713,16 +753,15 @@ describe("resume documents", () => {
 
   it("attaches the selected PDF before filling and never submits", async () => {
     responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
-    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
-      if (func.name === "attachDocumentInPage") {
-        return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
-      }
-      if (func.name === "verifyResumeAttachmentInPage") {
-        // Nothing attached yet before the first attach; confirmed still
-        // there after the form fill runs.
-        return [{ result: { attached: false } }];
-      }
-      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+    executeScript = namedScriptMock({
+      attachDocumentInPage: () => ({
+        status: "attached",
+        fieldKind: "resume",
+        verifiedName: "resume-v1.pdf",
+        reason: null,
+      }),
+      // Confirmed still there after the form fill runs.
+      verifyResumeAttachmentInPage: () => ({ attached: true }),
     });
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
@@ -730,7 +769,7 @@ describe("resume documents", () => {
     document.getElementById("fill-btn")!.click();
     await flushFill();
     expect(executeScript).toHaveBeenCalled();
-    const names = executeScript.mock.calls.map((call: any) => call[0].func.name);
+    const names = injectionNames(executeScript);
     // Nothing has been attached on this page yet this session, so the
     // "already attached?" pre-check is skipped and the real attach runs
     // directly — that check only applies to a second Fill of the same
@@ -751,15 +790,12 @@ describe("resume documents", () => {
     // filename (see attachFile.test.ts for the DOM-level regression case).
     responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
     let attachCalls = 0;
-    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
-      if (func.name === "attachDocumentInPage") {
+    executeScript = namedScriptMock({
+      attachDocumentInPage: () => {
         attachCalls += 1;
-        return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
-      }
-      if (func.name === "verifyResumeAttachmentInPage") {
-        return [{ result: { attached: true } }];
-      }
-      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+        return { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null };
+      },
+      verifyResumeAttachmentInPage: () => ({ attached: true }),
     });
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
@@ -789,18 +825,15 @@ describe("resume documents", () => {
       current_job_id: "greenhouse-abc123",
     });
     let attachCalls = 0;
-    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
-      if (func.name === "attachDocumentInPage") {
+    executeScript = namedScriptMock({
+      attachDocumentInPage: () => {
         attachCalls += 1;
-        return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
-      }
-      if (func.name === "verifyResumeAttachmentInPage") {
-        // The mock backend serves the same filename for every version id in
-        // this test, standing in for two different jobs' resumes coincidentally
-        // sharing a name — the page always reports that name as present.
-        return [{ result: { attached: true } }];
-      }
-      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+        return { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null };
+      },
+      // The mock backend serves the same filename for every version id in
+      // this test, standing in for two different jobs' resumes coincidentally
+      // sharing a name — the page always reports that name as present.
+      verifyResumeAttachmentInPage: () => ({ attached: true }),
     });
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
@@ -837,17 +870,14 @@ describe("resume documents", () => {
       },
       arrayBuffer: async () => new Uint8Array([0x50, 0x4b]).buffer,
     });
-    executeScript = vi.fn(async ({ func, args }: { func: { name?: string }; args?: unknown[] }) => {
-      if (func.name === "attachDocumentInPage") {
+    executeScript = namedScriptMock({
+      attachDocumentInPage: (args) => {
         const payload = args?.[0] as { filename?: string; mimeType?: string };
         expect(payload.filename).toBe("resume-v1.docx");
         expect(payload.mimeType).toContain("wordprocessingml");
-        return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.docx", reason: null } }];
-      }
-      if (func.name === "verifyResumeAttachmentInPage") {
-        return [{ result: { attached: true } }];
-      }
-      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+        return { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.docx", reason: null };
+      },
+      verifyResumeAttachmentInPage: () => ({ attached: true }),
     });
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
@@ -874,34 +904,35 @@ describe("resume documents", () => {
     await flush();
     document.getElementById("fill-btn")!.click();
     await flushFill();
-    expect(executeScript).not.toHaveBeenCalled();
+    // Document-id probe runs before the download; auth failure must stop
+    // before attach/fill injections.
+    expect(injectionNames(executeScript)).toEqual([]);
     expect(panelHtml()).toMatch(/log in/i);
   });
 
-  it("shows manual upload and does not fill when attachment is blocked", async () => {
+  it("still fills safe fields when attachment is blocked, with a manual-upload warning", async () => {
     responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
-    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
-      if (func.name === "attachDocumentInPage") {
-        return [
-          {
-            result: {
-              status: "manual",
-              fieldKind: "resume",
-              verifiedName: null,
-              reason: "Attach manually — this site blocked programmatic file attachment.",
-            },
-          },
-        ];
-      }
-      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+    executeScript = namedScriptMock({
+      attachDocumentInPage: () => ({
+        status: "manual",
+        fieldKind: "resume",
+        verifiedName: null,
+        reason: "Attach manually — this site blocked programmatic file attachment.",
+      }),
     });
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
     await flush();
     document.getElementById("fill-btn")!.click();
     await flushFill();
-    expect(executeScript.mock.calls.map((call: any) => call[0].func.name)).toEqual(["attachDocumentInPage"]);
+    const names = injectionNames(executeScript);
+    expect(names).toContain("attachDocumentInPage");
+    expect(names).toContain("fillFormInPage");
     expect(panelHtml()).toContain("Needs manual upload");
+    expect(panelHtml()).toContain("Resume was NOT attached");
+    expect(panelHtml()).toContain("email");
+    expect(panelHtml()).toContain("Partial fill");
+    expect(panelHtml()).not.toContain("Resume attached");
     expect(panelHtml()).not.toContain("Ready for your review");
   });
 
@@ -915,15 +946,17 @@ describe("resume documents", () => {
     // disappearance is simulated — the pre-attach "already there?" check is
     // skipped on this, the first attach of the session.
     let verifyCalls = 0;
-    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
-      if (func.name === "attachDocumentInPage") {
-        return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
-      }
-      if (func.name === "verifyResumeAttachmentInPage") {
+    executeScript = namedScriptMock({
+      attachDocumentInPage: () => ({
+        status: "attached",
+        fieldKind: "resume",
+        verifiedName: "resume-v1.pdf",
+        reason: null,
+      }),
+      verifyResumeAttachmentInPage: () => {
         verifyCalls += 1;
-        return [{ result: { attached: false } }];
-      }
-      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+        return { attached: false };
+      },
     });
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
@@ -942,30 +975,25 @@ describe("resume documents", () => {
     responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
     let attachCalls = 0;
     let verifyCalls = 0;
-    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
-      if (func.name === "attachDocumentInPage") {
+    executeScript = namedScriptMock({
+      attachDocumentInPage: () => {
         attachCalls += 1;
         if (attachCalls === 1) {
-          return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
+          return { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null };
         }
-        return [
-          {
-            result: {
-              status: "unsupported_field",
-              fieldKind: null,
-              verifiedName: null,
-              reason: "No resume file field was recognized on this page.",
-            },
-          },
-        ];
-      }
-      if (func.name === "verifyResumeAttachmentInPage") {
+        return {
+          status: "unsupported_field",
+          fieldKind: null,
+          verifiedName: null,
+          reason: "No resume file field was recognized on this page.",
+        };
+      },
+      verifyResumeAttachmentInPage: () => {
         verifyCalls += 1;
         // First post-fill check misses the widget; after the failed re-attach
         // the Resume/CV display is recognized.
-        return [{ result: { attached: verifyCalls > 1 } }];
-      }
-      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+        return { attached: verifyCalls > 1 };
+      },
     });
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
@@ -982,20 +1010,15 @@ describe("resume documents", () => {
   it("does not mark ready if the resume disappears after fill and the re-attach also fails", async () => {
     responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
     let attachCalls = 0;
-    executeScript = vi.fn(async ({ func }: { func: { name?: string } }) => {
-      if (func.name === "attachDocumentInPage") {
+    executeScript = namedScriptMock({
+      attachDocumentInPage: () => {
         attachCalls += 1;
         if (attachCalls === 1) {
-          return [{ result: { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null } }];
+          return { status: "attached", fieldKind: "resume", verifiedName: "resume-v1.pdf", reason: null };
         }
-        return [
-          { result: { status: "failed", fieldKind: "resume", verifiedName: null, reason: "Attachment could not be verified." } },
-        ];
-      }
-      if (func.name === "verifyResumeAttachmentInPage") {
-        return [{ result: { attached: false } }];
-      }
-      return [{ result: { filled: [{ name: "email", value: "a@b.c" }], flagged: [] } }];
+        return { status: "failed", fieldKind: "resume", verifiedName: null, reason: "Attachment could not be verified." };
+      },
+      verifyResumeAttachmentInPage: () => ({ attached: false }),
     });
     (globalThis as any).chrome.scripting.executeScript = executeScript;
     await loadPanel();
@@ -1003,8 +1026,12 @@ describe("resume documents", () => {
     document.getElementById("fill-btn")!.click();
     await flushFill();
     expect(attachCalls).toBe(2);
-    expect(document.getElementById("fill-status")!.textContent).toContain("Attachment could not be verified.");
-    expect(document.getElementById("fill-status")!.textContent).not.toContain("Ready for your review");
+    const status = document.getElementById("fill-status")!.textContent || "";
+    expect(status).toContain("Attachment could not be verified.");
+    expect(status).toContain("email");
+    expect(status).toContain("Partial fill");
+    expect(status).toContain("Resume was NOT attached");
+    expect(status).not.toContain("Ready for your review");
   });
 
   it("loads documents on a Lever posting", async () => {
@@ -1034,7 +1061,7 @@ describe("resume documents", () => {
     expect((document.getElementById("resume-version-select") as HTMLSelectElement).value).toBe("rv-lever");
   });
 
-  it("stops before filling when the backend download fails", async () => {
+  it("still fills safe fields when the resume download fails, without claiming attachment", async () => {
     responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
     responders["resume-file"] = () => ({
       ok: false,
@@ -1047,8 +1074,119 @@ describe("resume documents", () => {
     await flush();
     document.getElementById("fill-btn")!.click();
     await flushFill();
-    expect(executeScript).not.toHaveBeenCalled();
-    expect(document.getElementById("fill-status")!.textContent).toContain("unavailable");
+    const names = injectionNames(executeScript);
+    expect(names).toContain("fillFormInPage");
+    expect(names).not.toContain("attachDocumentInPage");
+    const status = document.getElementById("fill-status")!.textContent || "";
+    expect(status).toContain("unavailable");
+    expect(status).toContain("Resume was NOT attached");
+    expect(status).toContain("email");
+    expect(status).not.toContain("Ready for your review");
+  });
+
+  it("aborts fill when the tab navigates during resume download", async () => {
+    responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
+    let releaseDownload!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseDownload = resolve;
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      const href = String(url);
+      if (href.includes("panel-data")) {
+        return { ok: true, status: 200, json: async () => panelData() } as unknown as Response;
+      }
+      if (href.includes("resume-versions") && !href.includes("/file")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" }),
+        } as unknown as Response;
+      }
+      if (href.includes("/file")) {
+        await gate;
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === "content-type"
+                ? "application/pdf"
+                : name.toLowerCase() === "content-disposition"
+                  ? 'attachment; filename="resume-v1.pdf"'
+                  : null,
+          },
+          arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer,
+        } as unknown as Response;
+      }
+      if (href.includes("autofill")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ job_id: "greenhouse-abc123", platform: "greenhouse", fields: { email: "a@b.c" } }),
+        } as unknown as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({ detail: "missing mock" }) } as unknown as Response;
+    });
+    await loadPanel();
+    await flush();
+    document.getElementById("fill-btn")!.click();
+    await flush(2);
+    activeTab = { id: 42, url: OTHER_URL, status: "complete" };
+    releaseDownload();
+    await flushFill();
+    const names = injectionNames(executeScript);
+    expect(names).not.toContain("attachDocumentInPage");
+    expect(names).not.toContain("fillFormInPage");
+    expect(document.getElementById("fill-status")!.textContent).toMatch(/navigated|switched tabs|aborted/i);
+  });
+
+  it("aborts fill when the user switches tabs before injection", async () => {
+    responders["resume-versions"] = () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" });
+    let releaseDownload!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseDownload = resolve;
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      const href = String(url);
+      if (href.includes("panel-data")) {
+        return { ok: true, status: 200, json: async () => panelData() } as unknown as Response;
+      }
+      if (href.includes("resume-versions") && !href.includes("/file")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ versions: [resumeVersion()], current_job_id: "greenhouse-abc123" }),
+        } as unknown as Response;
+      }
+      if (href.includes("/file")) {
+        await gate;
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === "content-type"
+                ? "application/pdf"
+                : name.toLowerCase() === "content-disposition"
+                  ? 'attachment; filename="resume-v1.pdf"'
+                  : null,
+          },
+          arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer,
+        } as unknown as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({ detail: "missing mock" }) } as unknown as Response;
+    });
+    await loadPanel();
+    await flush();
+    document.getElementById("fill-btn")!.click();
+    await flush(2);
+    activeTab = { id: 99, url: OTHER_URL, status: "complete" };
+    releaseDownload();
+    await flushFill();
+    const names = injectionNames(executeScript);
+    expect(names).not.toContain("attachDocumentInPage");
+    expect(names).not.toContain("fillFormInPage");
+    expect(document.getElementById("fill-status")!.textContent).toMatch(/switched tabs|navigated|aborted|gone/i);
   });
 
   it("does not show documents on an unsupported site", async () => {

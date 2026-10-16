@@ -20,6 +20,15 @@ export async function fillFormInPage(data: {
   platform: string;
   fields: Record<string, unknown>;
 }): Promise<{ filled: { name: string; value: unknown }[]; flagged: { name: string; reason: string }[] }> {
+  // jsdom (and a few older engines) lack CSS.escape; ids we generate are
+  // already react-select-safe, but escape before interpolating into selectors.
+  function cssEscape(value: string): string {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+      return CSS.escape(value);
+    }
+    return value.replace(/[^a-zA-Z0-9_-]/g, (ch) => `\\${ch}`);
+  }
+
   function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
     const proto = el.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
@@ -60,6 +69,23 @@ export async function fillFormInPage(data: {
     return false;
   }
 
+  // Pick exactly one confident option. Exact text wins; a single bidirectional
+  // substring match is allowed; zero or multiple substring hits refuse rather
+  // than guess (e.g. "Bachelor" must not pick between Bachelor's / Master's).
+  function findUniqueOptionMatch<T extends { text: string; node: Element }>(
+    candidates: T[],
+    value: string,
+  ): T | null {
+    const needle = value.trim().toLowerCase();
+    if (!needle) return null;
+    const exact = candidates.filter((c) => c.text === needle);
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1) return null;
+    const partial = candidates.filter((c) => c.text.includes(needle) || needle.includes(c.text));
+    if (partial.length === 1) return partial[0];
+    return null;
+  }
+
   // <select> counterpart to tryFillByLabel. Tries an exact option match
   // first, then a case-insensitive substring match against the select's
   // option text (a saved answer like "May 2027" won't always match a
@@ -75,18 +101,12 @@ export async function fillFormInPage(data: {
       if (label.htmlFor) select = document.getElementById(label.htmlFor) as HTMLSelectElement | null;
       if (!select) select = label.querySelector("select");
       if (!select || select.tagName !== "SELECT") continue;
-      const options = [...select.options];
-      const needle = value.trim().toLowerCase();
-      let match = options.find((o) => o.textContent!.trim().toLowerCase() === needle);
-      if (!match) {
-        // Bidirectional: a saved value can be the more specific side ("Bachelor's
-        // in Computer Science" vs. a plain option "Bachelor's") or the option can
-        // be more specific ("Yes" vs. an option worded "Yes, I will need sponsorship").
-        match = options.find((o) => {
-          const text = o.textContent!.trim().toLowerCase();
-          return text.includes(needle) || needle.includes(text);
-        });
-      }
+      const options = [...select.options].map((o) => ({
+        text: (o.textContent || "").trim().toLowerCase(),
+        node: o as Element,
+        value: o.value,
+      }));
+      const match = findUniqueOptionMatch(options, value);
       if (!match) continue;
       const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value")?.set;
       if (setter) {
@@ -124,7 +144,13 @@ export async function fillFormInPage(data: {
     // Degree) on the very same page.
     function fire(el: Element, type: string, Ctor?: typeof MouseEvent | typeof PointerEvent) {
       const EventCtor = Ctor || MouseEvent;
-      el.dispatchEvent(new EventCtor(type, { bubbles: true, cancelable: true, view: window, button: 0 }));
+      // Omit `view: window` — jsdom rejects it, and Chrome accepts these
+      // synthetic pointer/mouse events without an explicit view.
+      try {
+        el.dispatchEvent(new EventCtor(type, { bubbles: true, cancelable: true, button: 0 }));
+      } catch {
+        el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }));
+      }
     }
     function openAndClick(el: Element) {
       fire(el, "pointerdown", window.PointerEvent);
@@ -132,6 +158,38 @@ export async function fillFormInPage(data: {
       fire(el, "pointerup", window.PointerEvent);
       fire(el, "mouseup");
       fire(el, "click");
+    }
+    // react-select ids are `react-select-<instance>-input` for the combobox
+    // and `react-select-<instance>-option-<n>` for options — NOT
+    // `react-select-<full-input-id>-option-*` (that produced the broken
+    // selector react-select-react-select-2-input-option-0). Prefer the
+    // combobox's aria-controls listbox when present; fall back to stripping
+    // a trailing "-input" from the input id.
+    function optionNodesForCombobox(input: Element): Element[] {
+      const listboxId = input.getAttribute("aria-controls");
+      if (listboxId) {
+        const listbox = document.getElementById(listboxId);
+        if (listbox) {
+          const fromListbox = [...listbox.querySelectorAll('[role="option"]')];
+          if (fromListbox.length > 0) return fromListbox;
+        }
+      }
+      const inputId = input.id || "";
+      const instancePrefix = inputId.endsWith("-input") ? inputId.slice(0, -"-input".length) : inputId;
+      if (!instancePrefix) return [];
+      return [...document.querySelectorAll(`[id^="${cssEscape(instancePrefix)}-option-"]`)];
+    }
+    function reactSelectDisplays(input: Element, expected: string): boolean {
+      const needle = expected.trim().toLowerCase();
+      if (!needle) return false;
+      const root = input.closest('[class*="select"]') || input.parentElement;
+      const shown =
+        root?.querySelector('[class*="single-value"]')?.textContent ||
+        root?.querySelector('[class*="__value-container"]')?.textContent ||
+        "";
+      const text = shown.trim().toLowerCase();
+      if (!text || text === "select..." || text === "select") return false;
+      return text === needle || text.includes(needle) || needle.includes(text);
     }
     const labels = [...document.querySelectorAll("label")];
     for (const pattern of patterns) {
@@ -144,32 +202,29 @@ export async function fillFormInPage(data: {
       (input as HTMLElement).focus();
       if (control) openAndClick(control);
       await new Promise((resolve) => setTimeout(resolve, 80));
-      // Scoped to this specific combobox instance — react-select's option
-      // ids embed the input's own id ("react-select-<input-id>-option-0"),
-      // so this can't pick up a stale option from a different, still-open
-      // menu (closing a menu via a synthetic "click outside" proved
-      // unreliable, so instead of depending on that, every read is scoped
-      // to only the menu that belongs to the field being filled right now).
-      const options = [...document.querySelectorAll(`[id^="react-select-${CSS.escape(input.id)}-option-"]`)];
+      const options = optionNodesForCombobox(input).map((o) => ({
+        text: (o.textContent || "").trim().toLowerCase(),
+        node: o,
+      }));
       if (options.length === 0) {
         (input as HTMLElement).blur();
         continue;
       }
-      const needle = value.trim().toLowerCase();
-      let match = options.find((o) => o.textContent!.trim().toLowerCase() === needle);
-      if (!match) {
-        match = options.find((o) => {
-          const text = o.textContent!.trim().toLowerCase();
-          return text.includes(needle) || needle.includes(text);
-        });
-      }
+      const match = findUniqueOptionMatch(options, value);
       if (!match) {
         (input as HTMLElement).blur();
         continue;
       }
-      openAndClick(match);
+      openAndClick(match.node);
       await new Promise((resolve) => setTimeout(resolve, 30));
-      return true;
+      // Only report success when the widget actually reflects the choice —
+      // a click that missed (or hit the wrong menu) must not count as filled.
+      // Greenhouse may keep aria-selected on the option and/or paint the
+      // single-value label; either verified signal is enough.
+      if (reactSelectDisplays(input, value) || match.node.getAttribute("aria-selected") === "true") {
+        return true;
+      }
+      (input as HTMLElement).blur();
     }
     return false;
   }

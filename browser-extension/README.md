@@ -60,6 +60,12 @@ manifest points at (`side_panel.default_path`, `background.service_worker`).
 Re-run `npm run build` after any source change — nothing auto-reloads the
 loaded extension for you.
 
+**Stale builds:** Chrome keeps the previously loaded `dist/` until you
+rebuild **and** click **Reload** on the extension card at
+`chrome://extensions`. If Fill/Preview behavior disagrees with the source
+you just edited, you are almost certainly on a stale build — rebuild, then
+Reload, then reopen the side panel.
+
 `npm test` runs the panel's unit tests (Vitest, jsdom). CI runs them under
 `TZ=Asia/Kolkata` rather than the runner's UTC, because the backend sends
 naive UTC timestamps and a UTC-only run would hide local-time parsing bugs.
@@ -73,7 +79,12 @@ extension:
 2. Make sure the CareerPilot backend is running
    (`python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`).
    Put `EXTENSION_ORIGIN=chrome-extension://<id>` in the API `.env` after
-   the first load so CORS accepts the side panel.
+   the first load so CORS accepts the side panel. The value must be one
+   exact origin (`chrome-extension://` + 32-char id using `a–p` only) —
+   wildcards are rejected. Keep the API hostname aligned with the web app
+   (`127.0.0.1` vs `localhost`): session cookies do not cross that host
+   split; the extension probes both when reading the session cookie, but
+   the web app login must still match the host you browse.
 3. Open `chrome://extensions` in Chrome.
 4. Turn on **Developer mode** (top-right toggle).
 5. Click **Load unpacked** and select this `browser-extension/` folder.

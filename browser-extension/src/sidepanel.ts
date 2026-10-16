@@ -25,6 +25,12 @@ import { fillFormInPage } from "./fillForm";
 import { recognizeJobPage } from "./job-recognition";
 import { eligibilityLabel, materialsActionLabel } from "./panel-states";
 import { escapeHtml, materialsBadge, matchBadge, scoutedTimeAgo, sourceBadge, statusBadge } from "./render";
+import {
+  captureInjectionTarget,
+  executeScriptOnTarget,
+  InjectionAbortedError,
+  type InjectionTarget,
+} from "./tab-guard";
 
 const app = document.getElementById("app")!;
 // Guards against a fast tab switch firing a second load while the first
@@ -237,6 +243,7 @@ function fieldPreviewList(rows: FieldStatusRow[]): string {
       )
       .join("")}
   </ul>
+  <p class="mt-2 text-xs text-ink-500">"Ready" means CareerPilot has a stored value to try — not that this page already has that input. Missing or custom fields stay for you after Fill.</p>
   <p class="mt-2 text-xs text-ink-500">CareerPilot never presses Submit. Review the form on the page, then submit it yourself.</p>`;
 }
 
@@ -527,6 +534,51 @@ async function runPreview(url: string) {
   }
 }
 
+function renderFillOutcome(opts: {
+  statusEl: HTMLElement;
+  attachedName: string | null;
+  resumeSelected: boolean;
+  resumeVerified: boolean;
+  result: { filled: { name: string; value: unknown }[]; flagged: { name: string; reason: string }[] };
+}): void {
+  const parts: string[] = [];
+  if (opts.resumeVerified && opts.attachedName) {
+    parts.push(`<p class="mt-2 text-xs font-semibold">Resume attached</p>`);
+  } else if (opts.resumeSelected && !opts.resumeVerified) {
+    parts.push(
+      `<p class="mt-2 rounded-lg bg-amber-100 px-2.5 py-2 text-xs font-semibold text-warn-600 dark:bg-amber-950/40 dark:text-amber-200" data-manual-resume-warning="true">Resume was NOT attached — upload it manually on the page before you submit. Safe text fields below may still be filled.</p>`,
+    );
+    if (attachDetail) {
+      parts.push(`<p class="mt-1 text-xs text-ink-500">${escapeHtml(attachDetail)}</p>`);
+    }
+  }
+  if (opts.result.filled.length > 0) {
+    parts.push(
+      `<p class="mt-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Safe fields filled</p><ul class="mt-1 list-disc pl-4">${opts.result.filled
+        .map((f) => `<li>${escapeHtml(f.name)}</li>`)
+        .join("")}</ul>`,
+    );
+  }
+  if (opts.result.flagged.length > 0) {
+    parts.push(
+      `<p class="mt-2 text-xs font-semibold uppercase tracking-wide text-warn-600">Manual review required</p><ul class="mt-1 list-disc pl-4">${opts.result.flagged
+        .map((f) => `<li>${escapeHtml(f.name)} — ${escapeHtml(f.reason)}</li>`)
+        .join("")}</ul>`,
+    );
+  }
+  if (opts.resumeVerified && opts.attachedName) {
+    parts.push(`<p class="mt-2 text-xs font-semibold">Ready for your review</p>`);
+  } else if (!opts.resumeSelected) {
+    parts.push(`<p class="mt-2 text-xs font-semibold">Safe fields filled — review all required fields and resume attachment.</p>`);
+  } else {
+    parts.push(
+      `<p class="mt-2 text-xs font-semibold text-warn-600">Partial fill — resume still needs manual upload. Application is not fully ready.</p>`,
+    );
+  }
+  parts.push(`<p class="mt-2 text-xs text-ink-500">Submit was not pressed. Review the page, then submit yourself.</p>`);
+  opts.statusEl.innerHTML = parts.join("") || "Nothing on this page matched.";
+}
+
 async function runFill(url: string) {
   const button = document.getElementById("fill-btn") as HTMLButtonElement | null;
   const statusEl = document.getElementById("fill-status");
@@ -541,17 +593,22 @@ async function runFill(url: string) {
     }
 
     statusEl.textContent = "Looking up this application…";
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) throw new Error("Could not read the current tab.");
-    if (tab.url !== url) {
-      statusEl.textContent = "This tab changed — rechecking it now.";
-      void refresh();
-      return;
+    let target: InjectionTarget;
+    try {
+      target = await captureInjectionTarget(url);
+    } catch (err) {
+      if (err instanceof InjectionAbortedError) {
+        statusEl.textContent = err.message;
+        if (/rechecking/i.test(err.message)) void refresh();
+        return;
+      }
+      throw err;
     }
 
     let attachedName: string | null = null;
     let file: Awaited<ReturnType<typeof downloadResumeVersionFile>> | null = null;
     let versionKey: string | null = null;
+    const resumeSelected = Boolean(selectedVersionId);
     if (selectedVersionId) {
       attachStatus = "attaching";
       attachDetail = "";
@@ -559,74 +616,73 @@ async function runFill(url: string) {
       statusEl.textContent = "Downloading resume…";
       const downloadStarted = performance.now();
       versionKey = resumeVersionKey();
-      file = await downloadResumeVersionFile(selectedVersionId, selectedFormat);
-      console.debug(
-        `[CareerPilot] resume ${selectedFormat} fetch ${Math.round(performance.now() - downloadStarted)}ms version_id=${selectedVersionId}`,
-      );
-
-      // A prior Fill on this same page may have already attached this exact
-      // file. Some ATS pages (confirmed live on Greenhouse) remove the file
-      // input once attached and show a filename display instead, so a fresh
-      // attach attempt would find no field to inject into and report a
-      // false failure. Check first — if it is already there, there is
-      // nothing to do. Filename match alone isn't enough proof, though: two
-      // different jobs can export an identically-named first resume version,
-      // so this fast path only applies when WE ourselves last attached this
-      // exact (version, format) on this page — otherwise fall through to a
-      // real attach even if some resume of that name is already showing.
-      const already =
-        lastAttachedVersionKey === versionKey
-          ? await chrome.scripting.executeScript({
-              target: { tabId: tab.id },
-              func: verifyResumeAttachmentInPage,
-              args: [file.filename],
-            })
-          : null;
-      if (already?.[0]?.result?.attached) {
-        attachedName = file.filename;
-        attachStatus = "attached";
-        attachDetail = "";
+      try {
+        file = await downloadResumeVersionFile(selectedVersionId, selectedFormat);
+        console.debug(
+          `[CareerPilot] resume ${selectedFormat} fetch ${Math.round(performance.now() - downloadStarted)}ms version_id=${selectedVersionId}`,
+        );
+      } catch (err) {
+        if (err instanceof NotLoggedInError) throw err;
+        attachStatus = "failed";
+        attachDetail = err instanceof Error ? err.message : "Download failed.";
         refreshDocumentsCard();
-      } else {
-        statusEl.textContent = "Attaching resume…";
-        const attachStarted = performance.now();
-        const attached = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: attachDocumentInPage,
-          args: [
+        file = null;
+      }
+
+      if (file) {
+        // A prior Fill on this same page may have already attached this exact
+        // file. Some ATS pages (confirmed live on Greenhouse) remove the file
+        // input once attached and show a filename display instead, so a fresh
+        // attach attempt would find no field to inject into and report a
+        // false failure. Check first — if it is already there, there is
+        // nothing to do. Filename match alone isn't enough proof, though: two
+        // different jobs can export an identically-named first resume version,
+        // so this fast path only applies when WE ourselves last attached this
+        // exact (version, format) on this page — otherwise fall through to a
+        // real attach even if some resume of that name is already showing.
+        const already =
+          lastAttachedVersionKey === versionKey
+            ? await executeScriptOnTarget(target, verifyResumeAttachmentInPage, [file.filename])
+            : null;
+        if (already?.attached) {
+          attachedName = file.filename;
+          attachStatus = "attached";
+          attachDetail = "";
+          refreshDocumentsCard();
+        } else {
+          statusEl.textContent = "Attaching resume…";
+          const attachStarted = performance.now();
+          const attachResult = await executeScriptOnTarget(target, attachDocumentInPage, [
             {
               kind: "resume" as const,
               filename: file.filename,
               mimeType: file.mimeType,
               bytesBase64: file.bytesBase64,
             },
-          ],
-        });
-        console.debug(`[CareerPilot] resume attach ${Math.round(performance.now() - attachStarted)}ms`);
-        const attachResult = attached?.[0]?.result;
-        if (!attachResult || attachResult.status !== "attached") {
-          attachStatus = attachResult?.status === "manual" || attachResult?.status === "ambiguous" ? "manual" : "failed";
-          attachDetail = attachResult?.reason || "Attach manually.";
-          refreshDocumentsCard();
-          statusEl.textContent = attachDetail;
-          return;
+          ]);
+          console.debug(`[CareerPilot] resume attach ${Math.round(performance.now() - attachStarted)}ms`);
+          if (!attachResult || attachResult.status !== "attached") {
+            // Attachment outcome is separate from safe-field autofill: keep
+            // going so identity/contact fields still fill, with a clear
+            // manual-upload warning. Never claim the resume is attached.
+            attachStatus = attachResult?.status === "manual" || attachResult?.status === "ambiguous" ? "manual" : "failed";
+            attachDetail = attachResult?.reason || "Attach manually.";
+            attachedName = null;
+            refreshDocumentsCard();
+          } else {
+            attachedName = attachResult.verifiedName;
+            attachStatus = "attached";
+            attachDetail = "";
+            lastAttachedVersionKey = versionKey;
+            refreshDocumentsCard();
+          }
         }
-        attachedName = attachResult.verifiedName;
-        attachStatus = "attached";
-        attachDetail = "";
-        lastAttachedVersionKey = versionKey;
-        refreshDocumentsCard();
       }
     }
 
     const autofill = await getAutofillData(url);
     statusEl.textContent = "Filling the form…";
-    const injection = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: fillFormInPage,
-      args: [autofill],
-    });
-    const result = injection?.[0]?.result;
+    const result = await executeScriptOnTarget(target, fillFormInPage, [autofill]);
     if (!result) {
       statusEl.textContent = "No result returned from the page.";
       return;
@@ -634,85 +690,65 @@ async function runFill(url: string) {
     if (attachedName && file) {
       await new Promise((resolve) => window.setTimeout(resolve, 150));
       const verifyStarted = performance.now();
-      const stillThere = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: verifyResumeAttachmentInPage,
-        args: [attachedName],
-      });
+      const stillThere = await executeScriptOnTarget(target, verifyResumeAttachmentInPage, [attachedName]);
       console.debug(`[CareerPilot] resume verify ${Math.round(performance.now() - verifyStarted)}ms`);
-      if (!stillThere?.[0]?.result?.attached) {
+      if (!stillThere?.attached) {
         // Revealing the cover letter's "Enter manually" textarea (or other
         // fields filled just above) can make the ATS page re-render its own
         // file-upload widget, silently dropping the resume input's value
         // even though the attach step verified clean beforehand. The rest
         // of the form is settled now, so one re-attach here is stable —
-        // only report failure if this also doesn't stick.
+        // only drop verified status if this also doesn't stick.
         statusEl.textContent = "Resume was cleared while filling the form — re-attaching…";
-        const retried = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: attachDocumentInPage,
-          args: [
-            {
-              kind: "resume" as const,
-              filename: file.filename,
-              mimeType: file.mimeType,
-              bytesBase64: file.bytesBase64,
-            },
-          ],
-        });
-        const retryResult = retried?.[0]?.result;
+        const retryResult = await executeScriptOnTarget(target, attachDocumentInPage, [
+          {
+            kind: "resume" as const,
+            filename: file.filename,
+            mimeType: file.mimeType,
+            bytesBase64: file.bytesBase64,
+          },
+        ]);
         if (retryResult?.status === "attached") {
           attachedName = retryResult.verifiedName;
-        } else if (
-          lastAttachedVersionKey === versionKey &&
-          retryResult?.status === "unsupported_field"
-        ) {
+        } else if (lastAttachedVersionKey === versionKey && retryResult?.status === "unsupported_field") {
           // This Fill already assigned the owned file; Greenhouse then
           // removed the input. Re-check the Resume/CV widget instead of
           // treating "no file input" as a failed attach.
-          const widget = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: verifyResumeAttachmentInPage,
-            args: [attachedName],
-          });
-          if (!widget?.[0]?.result?.attached) {
+          const widget = await executeScriptOnTarget(target, verifyResumeAttachmentInPage, [attachedName]);
+          if (!widget?.attached) {
             attachStatus = "failed";
             attachDetail = retryResult?.reason || "Resume needs re-attachment.";
+            attachedName = null;
             refreshDocumentsCard();
-            statusEl.textContent = `${attachDetail} Safe fields were not marked ready.`;
-            return;
           }
         } else {
           attachStatus = retryResult?.status === "manual" || retryResult?.status === "ambiguous" ? "manual" : "failed";
           attachDetail = retryResult?.reason || "Resume needs re-attachment.";
+          attachedName = null;
           refreshDocumentsCard();
-          statusEl.textContent = `${attachDetail} Safe fields were not marked ready.`;
-          return;
         }
       }
     }
-    const parts: string[] = [];
-    if (attachedName) parts.push(`<p class="mt-2 text-xs font-semibold">Resume attached</p>`);
-    if (result.filled.length > 0) {
-      parts.push(
-        `<p class="mt-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Safe fields filled</p><ul class="mt-1 list-disc pl-4">${result.filled
-          .map((f) => `<li>${escapeHtml(f.name)}</li>`)
-          .join("")}</ul>`,
-      );
-    }
-    if (result.flagged.length > 0) {
-      parts.push(
-        `<p class="mt-2 text-xs font-semibold uppercase tracking-wide text-warn-600">Manual review required</p><ul class="mt-1 list-disc pl-4">${result.flagged
-          .map((f) => `<li>${escapeHtml(f.name)} — ${escapeHtml(f.reason)}</li>`)
-          .join("")}</ul>`,
-      );
-    }
-    parts.push(`<p class="mt-2 text-xs font-semibold">Ready for your review</p>`);
-    parts.push(`<p class="mt-2 text-xs text-ink-500">Submit was not pressed. Review the page, then submit yourself.</p>`);
-    statusEl.innerHTML = parts.join("") || "Nothing on this page matched.";
+    renderFillOutcome({
+      statusEl,
+      attachedName,
+      resumeSelected,
+      resumeVerified: Boolean(attachedName),
+      result,
+    });
   } catch (err) {
     if (err instanceof NotLoggedInError) {
       renderError(err.message, "login");
+      return;
+    }
+    if (err instanceof InjectionAbortedError) {
+      if (attachStatus === "attaching") {
+        attachStatus = "failed";
+        attachDetail = err.message;
+        refreshDocumentsCard();
+      }
+      statusEl.textContent = err.message;
+      if (/rechecking/i.test(err.message)) void refresh();
       return;
     }
     if (attachStatus === "attaching") {

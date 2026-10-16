@@ -311,18 +311,22 @@ Two employer-evidence layers exist; do not casually collapse them.
 **Supported identity shapes** Greenhouse posting/embed forms supported by source; Lever UUID posting and `/apply`.
 **Invariant** frontend recognition and backend canonical identity must agree.
 ## 19. Extension Safe Autofill
-**Files** `browser-extension/src/fillForm.ts`, `field-status.ts`, orchestration in `sidepanel.ts`.
+**Files** `browser-extension/src/fillForm.ts`, `field-status.ts`, orchestration in `sidepanel.ts`, tab guards in `tab-guard.ts`.
 **Behavior**
 - fills safe stored identity/contact/reusable fields;
+- Greenhouse react-select options use `react-select-<n>-option-*` (strip trailing `-input` from the combobox id; never prefix `react-select-` onto the full input id);
 - may reveal Greenhouse Cover Letter `Enter manually` text area;
 - flags uncertain/unmapped required fields;
-- returns filled/flagged summary.
+- returns filled/flagged summary;
+- every attach/fill/verify injection re-checks tab id, active focus, URL, and document id;
+- Preview "Ready" means CareerPilot has a stored value to try, not that the live page already exposes that input.
 **Never do**
 - `.submit()`;
 - `requestSubmit()`;
 - simulated Enter-to-submit;
 - click ATS Submit/Application Send;
-- guess unsupported custom answers.
+- guess unsupported custom answers;
+- treat a failed/unsupported resume attach as a reason to skip safe text fill.
 ## 20. Resume Attachment in Extension
 **Files** `attachFile.ts`, `sidepanel.ts`, `api.ts`
 **Flow**
@@ -334,17 +338,17 @@ owned ResumeVersion
 → File/DataTransfer attach
 → input/change events
 → verify real page attachment/display
-→ fill safe fields
-→ re-verify
+→ fill safe fields (even when attach failed / needs manual upload)
+→ re-verify when attach previously succeeded
 ```
 **Invariants**
-- blocked programmatic attach → truthful manual-upload guidance;
-- never report Attached without real page verification;
+- blocked programmatic attach → truthful manual-upload warning; safe text fill still runs;
+- never report Attached or "fully ready" without real page verification;
 - never use previous tab/job's resume version;
 - a displayed filename that merely matches is not enough; the extension only trusts attachment state it owns/verified for that resume version/session.
 - If this attempt assigned File/DataTransfer onto a Resume/CV input and the ATS then removes that input, a Resume/CV-group filename display of that exact file is confirmation — cover-letter groups and unrelated page copy are not.
 - `attachDocumentInPage` and `verifyResumeAttachmentInPage` are injected via `chrome.scripting.executeScript` and must stay self-contained; outer module helpers are not serialized into the page.
-**Tests** `browser-extension/tests/attachFile.test.ts`, `browser-extension/tests/sidepanel.test.ts`
+**Tests** `browser-extension/tests/attachFile.test.ts`, `browser-extension/tests/sidepanel.test.ts`, `browser-extension/tests/fillForm.react-select.test.ts`, `browser-extension/tests/tab-guard.test.ts`, `tests/test_extension_chromium_integration.py`
 ## 21. EEO / Manual-Only Safety
 **Files** `browser-extension/src/field-status.ts`, `fillForm.ts`, backend `form_fill_service.py`.
 **Always manual** gender, race/ethnicity, veteran status, disability status.
