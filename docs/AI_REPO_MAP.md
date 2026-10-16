@@ -41,6 +41,8 @@
 | Frontend routes | `frontend/src/App.tsx`, `AppShell.tsx` | affected page tests |
 | Frontend API/types | `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts`, `frontend/src/lib/job-meta.ts` | affected page/component tests + typecheck |
 | CORS/CSRF/security headers | `backend/main.py`, `core/csrf.py`, `core/security_headers.py`, `core/config.py` | security + CORS browser checks |
+| Preference skills polluting Fit | `backend/api/routes/candidate.py`, `scripts/audit_preference_skill_contamination.py` | `test_preference_skills_not_resume_evidence.py`, `test_audit_preference_skill_contamination.py` |
+| Release readiness report | `docs/FINAL_RELEASE_READINESS_REPORT.md` | n/a |
 | CI/release gate | `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `docs/V1_RELEASE_CHECKLIST.md`, `docs/CI_SUPPLY_CHAIN.md` | CI + Gitleaks + manual checklist |
 | Python dependency policy | `docs/PYTHON_DEPENDENCY_REPRODUCIBILITY.md` | n/a |
 | Showcase screenshots / demo seed | `docs/showcase/README.md`, `scripts/seed_showcase_demo.py`, `scripts/capture_showcase_screenshots.py` | `tests/test_seed_showcase_demo.py`, `tests/test_capture_showcase_screenshots.py` |
