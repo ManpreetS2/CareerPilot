@@ -40,5 +40,7 @@ def test_preferences_store_custom_taxonomy_values(isolated_client) -> None:
     assert profile["preferences"]["target_roles"] == ["Quant Researcher"]
     assert profile["preferences"]["field_of_study"] == "Computational Neuroscience"
     assert profile["preferences"]["industry_preferences"] == ["Climate Tech"]
-    assert "Polars" in profile["candidate"]["skills"]
+    assert profile["preferences"]["skill_preferences"] == ["Polars"]
+    # Preference-only skills must not pollute resume-grounded Candidate.skills.
+    assert "Polars" not in (profile["candidate"]["skills"] or [])
     assert profile["readiness"]["ready"] is True

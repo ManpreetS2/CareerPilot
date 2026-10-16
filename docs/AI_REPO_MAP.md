@@ -119,7 +119,8 @@ Human reviews and manually presses Submit
 - Resume text is evidence, not permission to invent fields.
 - Parser omissions remain omissions downstream.
 - Candidate changes may stale Fit/Evidence/materials.
-**Tests** `tests/test_candidate_profile.py`; `python scripts/test_candidate_profile_matrix.py --synthetic`
+- `TargetPreference.skill_preferences` are discovery/preference signals only — never merged into `Candidate.skills` (Fit/evidence treat skills as resume-grounded).
+**Tests** `tests/test_candidate_profile.py`, `tests/test_preference_skills_not_resume_evidence.py`; `python scripts/test_candidate_profile_matrix.py --synthetic`
 ## 6. Profile Readiness Gate
 **Canonical source**
 - `backend/services/profile_readiness.py`
@@ -176,6 +177,8 @@ Human reviews and manually presses Submit
 - creating a search requires canonical profile readiness;
 - matches/unseen counts are owner-scoped;
 - a failed search tick must not commit half-updated `last_run_at` for other searches;
+- fairness cursor advances on attempts (including failures/429s) so a failing prefix cannot starve later searches; `last_run_at` is set only on success;
+- `SCHEDULED_SCOUT` (6/6h per user) caps actual scouts independently of how many searches a user owns; fairness and quota are separate controls;
 - no email; in-app unseen count only.
 **Tests** `tests/test_saved_search_service.py`, `tests/test_scheduler.py`, `frontend/src/components/SavedSearchesPanel.test.tsx`
 ## 9c. Calendar follow-up export

@@ -202,21 +202,10 @@ def save_preferences(
         veteran_status=preferences.veteran_status,
         disability_status=preferences.disability_status,
     )
-    extra_skills = [
-        str(item).strip()
-        for item in (getattr(preferences, "skill_preferences", None) or [])
-        if str(item).strip()
-    ]
-    if candidate is not None and extra_skills:
-        existing = [str(item).strip() for item in (candidate.skills or []) if str(item).strip()]
-        seen = {item.lower() for item in existing}
-        merged = list(existing)
-        for skill in extra_skills:
-            key = skill.lower()
-            if key not in seen:
-                merged.append(skill)
-                seen.add(key)
-        candidate.skills = merged
+    # skill_preferences stay on TargetPreference only. Never merge them into
+    # Candidate.skills — Fit, match evidence, and materials treat skills as
+    # resume-grounded evidence, and preference-only entries would invent
+    # qualifications the resume does not support.
 
     try:
         db.add(record)

@@ -37,10 +37,19 @@ logger = logging.getLogger(__name__)
 MAX_SEARCHES_PER_TICK = 5
 MIN_CADENCE_HOURS = 3
 
-# Cursor is advanced even on failed attempts. Keeping it separate from
-# last_run_at preserves truthful retry semantics while preventing permanently
-# failing jobs from monopolizing the first five scheduler slots. In a new
-# worker, the first tick begins at the lowest ID, then resumes round-robin.
+# Fairness + quota policy (explicit, tested):
+# - Users may own an unlimited number of saved searches.
+# - Each scheduler tick attempts at most MAX_SEARCHES_PER_TICK due searches.
+# - A process-local round-robin cursor advances on every attempt, including
+#   scout failures and rate-limit skips, so a permanently failing prefix cannot
+#   monopolize the first five slots forever.
+# - last_run_at is set only after a successful scout+match persist. Failures
+#   and 429s leave the search due for retry.
+# - Actual scouts are also gated by SCHEDULED_SCOUT (6 events / 6 hours per
+#   user in backend.core.rate_limit). Fairness and quota are independent:
+#   fairness rotates who is attempted; quota caps how many can scout in a
+#   window. Remaining due searches wait for the next tick/window.
+# - In a new worker, the first tick begins at the lowest ID, then resumes.
 _last_attempted_search_id: int | None = None
 
 
