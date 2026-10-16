@@ -380,6 +380,15 @@ describe("assisted apply", () => {
     expect(document.getElementById("fill-status")!.textContent).toContain("Submit was not pressed");
   });
 
+  it("does not claim full readiness when no resume version was selected", async () => {
+    await loadPanel();
+    document.getElementById("fill-btn")!.click();
+    await flush();
+    const status = document.getElementById("fill-status")!.textContent || "";
+    expect(status).toContain("review all required fields and resume attachment");
+    expect(status).not.toContain("Ready for your review");
+    expect(status).not.toContain("Resume attached");
+  });
   it("reports what was filled and what still needs the user", async () => {
     executeScript = namedScriptMock(
       {},
