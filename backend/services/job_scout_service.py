@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 
@@ -1273,14 +1273,27 @@ def normalize_job(raw: dict, source: str) -> Job:
     raise ValueError(f"Unknown job source '{source}'")
 
 
+# Only unambiguous marketing tags are discarded. Employer URLs can encode
+# *different* job IDs in query parameters such as ?job=123 and ?job=456.
+_TRACKING_QUERY_KEYS = frozenset({
+    "utm", "fbclid", "gclid", "gbraid", "wbraid", "msclkid", "igshid",
+    "mc_cid", "mc_eid", "gh_src", "lever-origin",
+})
+
+
 def _normalize_url(url: str | None) -> str:
-    """Strip scheme/www/query/fragment/trailing-slash noise for dedup comparison."""
+    """Canonicalize the posting identity without discarding job-identifying queries."""
     if not url:
         return ""
-    parsed = urlparse(url.strip().lower())
-    netloc = parsed.netloc.removeprefix("www.")
+    parsed = urlparse(url.strip())
+    netloc = parsed.netloc.lower().removeprefix("www.")
     path = parsed.path.rstrip("/")
-    return urlunparse(("", netloc, path, "", "", ""))
+    identity_query = sorted(
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_") and key.lower() not in _TRACKING_QUERY_KEYS
+    )
+    return urlunparse(("", netloc, path, "", urlencode(identity_query), ""))
 
 
 def _fingerprint(title: str, company: str, location: str | None) -> str:
@@ -1341,9 +1354,12 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
             for key in [_lever_posting_dedupe_key(record.url)]
             if key
         }
+        # Never use title/company/location to merge postings with different
+        # URLs: distinct jobs often share a title and employer.
         by_fingerprint = {
             _fingerprint(record.title, record.company, record.location): record
             for record in existing_records
+            if not record.url
         }
 
         for job in jobs:
@@ -1355,7 +1371,7 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                 (by_greenhouse.get(greenhouse_key) if greenhouse_key else None)
                 or (by_lever.get(lever_key) if lever_key else None)
                 or (by_url.get(normalized_url) if normalized_url else None)
-                or by_fingerprint.get(key)
+                or (by_fingerprint.get(key) if not normalized_url else None)
             )
 
             if existing:
@@ -1412,7 +1428,8 @@ def persist_jobs(jobs: list[Job]) -> list[Job]:
                     by_greenhouse[greenhouse_key] = record
                 if lever_key:
                     by_lever[lever_key] = record
-                by_fingerprint[key] = record
+                if not normalized_url:
+                    by_fingerprint[key] = record
 
             db.flush()
             stored.append(record_to_job(record))

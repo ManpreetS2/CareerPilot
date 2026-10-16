@@ -120,6 +120,33 @@ def test_normalize_url_ignores_tracking_parameters() -> None:
     assert a == b
 
 
+def test_normalize_url_preserves_job_identity_query_and_value_case() -> None:
+    first = _normalize_url("https://example.com/apply?job=AbC123&utm_source=email")
+    second = _normalize_url("https://example.com/apply?job=abc123&fbclid=tracking")
+    third = _normalize_url("https://example.com/apply?job=456")
+    assert first != second
+    assert first != third
+    assert second != third
+    assert _normalize_url("https://example.com/apply?job=123&utm_medium=social") == (
+        _normalize_url("https://example.com/apply?utm_source=jobs&job=123")
+    )
+    assert _normalize_url("https://example.com/apply?job=123&ref=internal") != (
+        _normalize_url("https://example.com/apply?job=123&ref=external")
+    )
+
+
+def test_deduplicate_jobs_keeps_same_path_distinct_job_queries() -> None:
+    jobs = [
+        normalize_job(
+            {"title": "Software Engineer", "company": "Acme",
+             "url": f"https://example.com/apply?job={job_id}", "description": "Build services."},
+            "manual",
+        )
+        for job_id in ("123", "456")
+    ]
+    assert len(deduplicate_jobs(jobs)) == 2
+
+
 def test_normalize_url_ignores_fragment() -> None:
     a = _normalize_url("https://example.com/jobs/123#apply-section")
     b = _normalize_url("https://example.com/jobs/123")
