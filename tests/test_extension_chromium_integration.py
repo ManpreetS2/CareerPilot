@@ -76,7 +76,10 @@ def extension_context(extension_built: Path):
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
             user_data,
-            headless=False,
+            # Chromium's new headless mode supports unpacked extensions on
+            # GitHub Linux runners without Xvfb or a DISPLAY server.
+            channel="chromium",
+            headless=True,
             args=[
                 f"--disable-extensions-except={extension_built}",
                 f"--load-extension={extension_built}",
