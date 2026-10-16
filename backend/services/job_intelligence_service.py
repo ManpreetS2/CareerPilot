@@ -966,7 +966,9 @@ def get_stored_job_intelligence(db: Session, public_id: str) -> JobIntelligence:
         .filter(JobIntelligenceRecord.job_id == job.id)
         .first()
     )
-    if record is None:
+    if record is None or not intelligence_record_is_current(job, record):
+        # Never hand stale employer requirements to Materials or Interview.
+        # Explicit scoring/extraction can refresh them from the current posting.
         raise JobIntelligenceNotFoundError()
     return _record_to_schema(record, job.public_id)
 

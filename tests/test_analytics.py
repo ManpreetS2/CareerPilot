@@ -178,6 +178,55 @@ def test_empty_state_has_zeroed_funnel_and_no_breakdowns(isolated_session) -> No
     assert summary.rejected_count == 0
 
 
+def test_out_of_order_tracker_events_do_not_produce_negative_durations(isolated_session) -> None:
+    insert_ready_profile(isolated_session)
+    base = datetime.now(timezone.utc)
+    backwards = insert_job(isolated_session, public_id="manually-recorded-interview-first")
+    normal = insert_job(isolated_session, public_id="normal-applied-then-interview")
+
+    # The tracker permits an initial "interviewing" status and a later
+    # transition to "applied", but that does not establish a forward
+    # applied-to-interview duration.
+    _seed_event(
+        isolated_session, job=backwards, user_id=TEST_USER_ID,
+        event_type="interviewing", occurred_at=base,
+    )
+    _seed_event(
+        isolated_session, job=backwards, user_id=TEST_USER_ID,
+        event_type="applied", occurred_at=base + timedelta(days=3),
+    )
+    _seed_event(
+        isolated_session, job=normal, user_id=TEST_USER_ID,
+        event_type="applied", occurred_at=base,
+    )
+    _seed_event(
+        isolated_session, job=normal, user_id=TEST_USER_ID,
+        event_type="interviewing", occurred_at=base + timedelta(days=2),
+    )
+
+    summary = build_conversion_analytics(isolated_session, TEST_USER_ID)
+    assert summary.median_days_applied_to_interviewing == pytest.approx(2.0)
+    assert summary.funnel[3].jobs_count == 2
+    assert summary.funnel[4].jobs_count == 2
+
+
+def test_only_backwards_events_have_no_forward_median(isolated_session) -> None:
+    insert_ready_profile(isolated_session)
+    job = insert_job(isolated_session, public_id="only-backwards")
+    base = datetime.now(timezone.utc)
+    _seed_event(
+        isolated_session, job=job, user_id=TEST_USER_ID,
+        event_type="interviewing", occurred_at=base,
+    )
+    _seed_event(
+        isolated_session, job=job, user_id=TEST_USER_ID,
+        event_type="applied", occurred_at=base + timedelta(days=1),
+    )
+    assert build_conversion_analytics(
+        isolated_session, TEST_USER_ID
+    ).median_days_applied_to_interviewing is None
+
+
 def test_funnel_counts_and_conversion_rates(isolated_session) -> None:
     candidate, _prefs = insert_ready_profile(isolated_session)
     base = datetime.now(timezone.utc)

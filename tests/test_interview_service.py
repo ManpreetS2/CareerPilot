@@ -127,6 +127,43 @@ def test_interview_generation_uses_grounded_topics_only(isolated_session) -> Non
     assert isolated_session.query(InterviewPrepRecord).count() == 1
 
 
+def test_stored_interview_prep_is_hidden_after_candidate_profile_changes(isolated_session) -> None:
+    candidate = _candidate(isolated_session)
+    job = _job(isolated_session)
+    _intelligence(isolated_session, job)
+    prep = generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
+    row = isolated_session.query(InterviewPrepRecord).one()
+    assert row.candidate_fingerprint
+    assert row.requirement_fingerprint
+
+    candidate.skills = [*(candidate.skills or []), "Rust"]
+    isolated_session.commit()
+
+    assert get_interview_prep(isolated_session, job.public_id, TEST_USER_ID) is None
+    with pytest.raises(InterviewQuestionNotFoundError):
+        get_interview_answer_feedback(
+            isolated_session,
+            job.public_id,
+            TEST_USER_ID,
+            prep.likely_questions[0],
+            "My old answer.",
+            generate_fn=_fake_feedback_generator,
+        )
+
+
+def test_stored_interview_prep_is_hidden_after_posting_changes(isolated_session) -> None:
+    _candidate(isolated_session)
+    job = _job(isolated_session)
+    _intelligence(isolated_session, job)
+    prep = generate_and_store_interview_prep(isolated_session, job.public_id, TEST_USER_ID)
+    assert get_interview_prep(isolated_session, job.public_id, TEST_USER_ID) == prep
+
+    job.description = "Required: Go. Preferred: Rust."
+    isolated_session.commit()
+
+    assert get_interview_prep(isolated_session, job.public_id, TEST_USER_ID) is None
+
+
 def test_missing_skills_are_gaps_not_strengths_without_fit_score(isolated_session) -> None:
     _candidate(isolated_session)
     job = _job(isolated_session)

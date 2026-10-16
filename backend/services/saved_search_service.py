@@ -21,6 +21,7 @@ from backend.db.database import SessionLocal
 from backend.db.models import JobRecord, SavedSearchMatchRecord, SavedSearchRecord
 from backend.schemas.saved_search import SavedSearchCreate, SavedSearchUpdate
 from backend.schemas.schemas import Job
+from backend.services.job_query_service import _location_matches
 from backend.services.job_posting_time import (
     cutoff_for_date_posted_window,
     parse_posting_time,
@@ -35,6 +36,21 @@ logger = logging.getLogger(__name__)
 
 MAX_SEARCHES_PER_TICK = 5
 MIN_CADENCE_HOURS = 3
+
+# Fairness + quota policy (explicit, tested):
+# - Users may own an unlimited number of saved searches.
+# - Each scheduler tick attempts at most MAX_SEARCHES_PER_TICK due searches.
+# - A process-local round-robin cursor advances on every attempt, including
+#   scout failures and rate-limit skips, so a permanently failing prefix cannot
+#   monopolize the first five slots forever.
+# - last_run_at is set only after a successful scout+match persist. Failures
+#   and 429s leave the search due for retry.
+# - Actual scouts are also gated by SCHEDULED_SCOUT (6 events / 6 hours per
+#   user in backend.core.rate_limit). Fairness and quota are independent:
+#   fairness rotates who is attempted; quota caps how many can scout in a
+#   window. Remaining due searches wait for the next tick/window.
+# - In a new worker, the first tick begins at the lowest ID, then resumes.
+_last_attempted_search_id: int | None = None
 
 
 class SavedSearchError(Exception):
@@ -64,9 +80,10 @@ def job_matches_search_filters(
     date_posted: str | None,
     date_posted_raw: str | None,
     now: datetime,
+    location: str | None = None,
 ) -> bool:
     """Whether a freshly-scouted job satisfies one saved search's own
-    filters. Narrowed to opportunity/employment/work-mode/date-posted:
+    filters. Narrowed to opportunity/employment/work-mode/location/date-posted:
     fields `record_to_job` already puts on the returned `Job` (or, for
     date_posted, the raw JobRecord string this function re-parses) without
     an extra `resolve_job_listing_metadata` call per job. `experience_level`
@@ -88,6 +105,15 @@ def job_matches_search_filters(
         return False
     if work_mode and job.work_mode not in work_mode:
         return False
+    if location:
+        requested = location.strip()
+        if requested.lower() == "remote":
+            if job.work_mode != "remote":
+                return False
+        elif not job.location or not _location_matches(job.location, [requested]):
+            # A provider's region parameter is a request, not a guarantee:
+            # refuse postings without an explicit matching location.
+            return False
     cutoff = cutoff_for_date_posted_window(date_posted, now)
     if cutoff:
         posting = parse_posting_time(date_posted_raw, now=now)
@@ -263,6 +289,7 @@ async def _run_one_saved_search(db: Session, search: SavedSearchRecord) -> None:
             date_posted=search.date_posted,
             date_posted_raw=record.date_posted,
             now=now,
+            location=location,
         ):
             continue
         db.add(SavedSearchMatchRecord(saved_search_id=search.id, job_id=record.id))
@@ -275,11 +302,13 @@ async def _run_one_saved_search(db: Session, search: SavedSearchRecord) -> None:
 
 
 async def run_due_saved_searches() -> None:
-    """One scheduler tick. Small, per-user catalog — cadence math happens in
-    Python over the (short) list of enabled searches rather than in SQL,
-    same "hundreds of rows, not millions" philosophy job_query_service.py
-    already documents for the jobs table itself."""
+    """Run up to MAX_SEARCHES_PER_TICK due searches fairly across repeated ticks.
 
+    The cursor advances on attempted searches, including failures. A failed
+    entry stays due for retry but cannot indefinitely block later entries.
+    """
+
+    global _last_attempted_search_id
     now = datetime.now(timezone.utc)
     with SessionLocal() as db:
         enabled = db.query(SavedSearchRecord).filter(SavedSearchRecord.enabled.is_(True)).all()
@@ -289,8 +318,17 @@ async def run_due_saved_searches() -> None:
             if _as_utc(search.last_run_at) is None
             or (now - _as_utc(search.last_run_at)) >= timedelta(hours=search.cadence_hours)
         ]
-        overdue.sort(key=lambda search: (search.last_run_at is not None, _as_utc(search.last_run_at) or now))
-        for search in overdue[:MAX_SEARCHES_PER_TICK]:
+        overdue.sort(key=lambda search: search.id)
+        if not overdue:
+            return
+        start_index = next(
+            (index for index, search in enumerate(overdue)
+             if _last_attempted_search_id is None or search.id > _last_attempted_search_id),
+            0,
+        )
+        queue = overdue[start_index:] + overdue[:start_index]
+        for search in queue[:MAX_SEARCHES_PER_TICK]:
+            _last_attempted_search_id = search.id
             try:
                 await _run_one_saved_search(db, search)
             except Exception:

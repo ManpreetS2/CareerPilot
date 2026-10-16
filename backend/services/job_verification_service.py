@@ -154,6 +154,10 @@ def check_still_open(url: str) -> tuple[bool | None, str]:
         return None, f"Posting URL blocked automated access (HTTP {response.status_code})."
     if response.status_code >= 500:
         return None, f"Posting site returned a server error (HTTP {response.status_code})."
+    if response.status_code < 200 or response.status_code >= 300:
+        # Any other non-success response (e.g. 400, 451, or a redirect
+        # without a usable destination) cannot establish that a job is live.
+        return None, f"Posting URL returned HTTP {response.status_code}; could not confirm it is open."
 
     body_lower = response.text.lower()
     for phrase in CLOSED_POSTING_PHRASES:
@@ -311,7 +315,12 @@ async def revalidate_unseen_candidates(max_absence_days: int = DEFAULT_ABSENCE_S
             .filter(JobRecord.status.in_(("discovered", "verified")))
             .filter(JobRecord.source.in_(_SCOUT_MANAGED_SOURCES))
             .filter(JobRecord.date_scraped < cutoff)
-            .order_by(JobRecord.date_scraped.asc())
+            # A live posting checked recently must not occupy the same capped
+            # slot every tick just because its last scout discovery was old.
+            # Both timestamps must be beyond the absence window (or never
+            # verified) before another network recheck is due.
+            .filter((JobRecord.verified_at.is_(None)) | (JobRecord.verified_at < cutoff))
+            .order_by(JobRecord.date_scraped.asc(), JobRecord.id.asc())
             .limit(MAX_REVALIDATE_PER_TICK)
             .all()
         )

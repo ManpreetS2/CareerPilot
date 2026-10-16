@@ -79,6 +79,17 @@ class TestJobMatchesSearchFilters:
         assert not _matches(job, work_mode=["remote"])
         assert _matches(job, work_mode=["onsite", "hybrid"])
 
+    def test_city_location_filters_provider_results_after_scouting(self) -> None:
+        assert _matches(_job(location="Chicago, IL"), location="Chicago")
+        assert not _matches(_job(location="New York, NY"), location="Chicago")
+        assert not _matches(_job(location=None), location="Chicago")
+        assert not _matches(_job(location="Remote"), location="Chicago")
+        assert _matches(_job(location="New York, NY"), location=None)
+
+    def test_explicit_remote_location_only_accepts_remote_work_mode(self) -> None:
+        assert _matches(_job(location="Remote", work_mode="remote"), location="Remote")
+        assert not _matches(_job(location="Chicago, IL", work_mode="onsite"), location="Remote")
+
     def test_date_posted_window(self) -> None:
         # date_posted_raw is the raw JobRecord string (what parse_posting_time
         # expects), not the already-parsed `date` object the Job schema
@@ -191,6 +202,35 @@ class TestSchedulerTick:
         assert matches[0][1].public_id == "job-a"
         refreshed = isolated_session.get(SavedSearchRecord, search.id)
         assert refreshed.last_run_at is not None
+
+    def test_scheduled_location_must_match_returned_job_not_just_provider_request(
+        self, isolated_session, monkeypatch
+    ) -> None:
+        ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
+        search = create_saved_search(
+            isolated_session, TEST_USER_ID,
+            SavedSearchCreate(label="Chicago interns", query_text="intern", location="Chicago"),
+        )
+        outside = insert_job(isolated_session, public_id="new-york-job")
+        inside = insert_job(isolated_session, public_id="chicago-job")
+        unknown = insert_job(isolated_session, public_id="unknown-location-job")
+
+        def fake_scout_jobs(queries, location):
+            assert queries == ["intern"]
+            assert location == "Chicago"
+            return [
+                _job(id=outside.public_id, location="New York, NY"),
+                _job(id=inside.public_id, location="Chicago, IL"),
+                _job(id=unknown.public_id, location=None),
+            ]
+
+        monkeypatch.setattr("backend.services.saved_search_service.scout_jobs", fake_scout_jobs)
+        monkeypatch.setattr("backend.services.saved_search_service.SessionLocal", lambda: isolated_session)
+        monkeypatch.setattr(isolated_session, "close", lambda: None)
+        asyncio.run(run_due_saved_searches())
+        matches = list_matches(isolated_session, search.id, TEST_USER_ID)
+        assert [job.public_id for _match, job in matches] == ["chicago-job"]
 
     def test_does_not_duplicate_matches_on_a_second_run(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
@@ -306,6 +346,101 @@ class TestSchedulerTick:
 
         asyncio.run(run_due_saved_searches())
         assert run_count["n"] == MAX_SEARCHES_PER_TICK
+
+    def test_failed_first_five_do_not_starve_later_searches_across_ticks(
+        self, isolated_session, monkeypatch
+    ) -> None:
+        """Fairness is independent of SCHEDULED_SCOUT quota.
+
+        Tick 1's failing attempts still consume scheduled_scout quota. Clear
+        that bucket between ticks so this test proves round-robin rotation,
+        not the 6/6h cap (covered by
+        test_quota_limits_scouts_while_fairness_cursor_still_advances).
+        """
+        from backend.core.rate_limit import runtime_guards
+        from backend.services import saved_search_service
+
+        monkeypatch.setattr(saved_search_service, "_last_attempted_search_id", None)
+        ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
+        searches = [
+            create_saved_search(
+                isolated_session, TEST_USER_ID,
+                SavedSearchCreate(label=f"Queue {i}", query_text=f"q{i}"),
+            )
+            for i in range(MAX_SEARCHES_PER_TICK + 2)
+        ]
+        attempted: list[str] = []
+
+        def scout(queries, location):
+            attempted.append(queries[0])
+            if int(queries[0][1:]) < MAX_SEARCHES_PER_TICK:
+                raise RuntimeError("unavailable source")
+            return []
+
+        monkeypatch.setattr("backend.services.saved_search_service.scout_jobs", scout)
+        monkeypatch.setattr("backend.services.saved_search_service.SessionLocal", lambda: isolated_session)
+        monkeypatch.setattr(isolated_session, "close", lambda: None)
+
+        asyncio.run(run_due_saved_searches())
+        assert attempted == [f"q{i}" for i in range(MAX_SEARCHES_PER_TICK)]
+        assert all(search.last_run_at is None for search in searches[:MAX_SEARCHES_PER_TICK])
+
+        runtime_guards.clear(category="scheduled_scout", identity=str(TEST_USER_ID))
+        asyncio.run(run_due_saved_searches())
+        assert attempted[MAX_SEARCHES_PER_TICK:MAX_SEARCHES_PER_TICK + 2] == [
+            f"q{i}" for i in range(MAX_SEARCHES_PER_TICK, MAX_SEARCHES_PER_TICK + 2)
+        ]
+        assert all(search.last_run_at is not None for search in searches[MAX_SEARCHES_PER_TICK:])
+        assert all(search.last_run_at is None for search in searches[:MAX_SEARCHES_PER_TICK])
+
+    def test_quota_limits_scouts_while_fairness_cursor_still_advances(
+        self, isolated_session, monkeypatch
+    ) -> None:
+        """Unlimited saved searches + 6/6h SCHEDULED_SCOUT: explicit policy.
+
+        After MAX_SEARCHES_PER_TICK failing scouts burn five quota slots, the
+        next tick still rotates to later searches. One more scout may succeed
+        (6th event); further attempts in the same window are 429'd without
+        calling scout, leave last_run_at unset, and still advance the cursor.
+        """
+        from backend.services import saved_search_service
+
+        monkeypatch.setattr(saved_search_service, "_last_attempted_search_id", None)
+        ensure_user(isolated_session, TEST_USER_ID)
+        insert_ready_profile(isolated_session, user_id=TEST_USER_ID)
+        searches = [
+            create_saved_search(
+                isolated_session, TEST_USER_ID,
+                SavedSearchCreate(label=f"Queue {i}", query_text=f"q{i}"),
+            )
+            for i in range(MAX_SEARCHES_PER_TICK + 2)
+        ]
+        attempted: list[str] = []
+
+        def scout(queries, location):
+            attempted.append(queries[0])
+            if int(queries[0][1:]) < MAX_SEARCHES_PER_TICK:
+                raise RuntimeError("unavailable source")
+            return []
+
+        monkeypatch.setattr("backend.services.saved_search_service.scout_jobs", scout)
+        monkeypatch.setattr("backend.services.saved_search_service.SessionLocal", lambda: isolated_session)
+        monkeypatch.setattr(isolated_session, "close", lambda: None)
+
+        asyncio.run(run_due_saved_searches())
+        assert attempted == [f"q{i}" for i in range(MAX_SEARCHES_PER_TICK)]
+
+        asyncio.run(run_due_saved_searches())
+        # Only one scout slot remains in the 6/6h window; q6+ are attempted
+        # but rate-limited before scout_jobs runs (still count toward the
+        # per-tick batch and advance the fairness cursor).
+        assert attempted[MAX_SEARCHES_PER_TICK:] == [f"q{MAX_SEARCHES_PER_TICK}"]
+        assert searches[MAX_SEARCHES_PER_TICK].last_run_at is not None
+        assert searches[MAX_SEARCHES_PER_TICK + 1].last_run_at is None
+        assert all(search.last_run_at is None for search in searches[:MAX_SEARCHES_PER_TICK])
+        # Tick 2's batch is q5,q6,q0,q1,q2 — cursor lands on the last attempt.
+        assert saved_search_service._last_attempted_search_id == searches[2].id
 
     def test_rate_limited_search_is_retried_next_tick_not_marked_run(self, isolated_session, monkeypatch) -> None:
         ensure_user(isolated_session, TEST_USER_ID)
