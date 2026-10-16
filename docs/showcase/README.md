@@ -27,7 +27,7 @@ These files support a **portfolio showcase of later mainline development**. The 
 | Tagged release | `v1.0.0` at `b73a983ed3605d498aa90070c3b5f786a73bc525` |
 | Certified runtime (A8 / A9 / Phase 6) | `7b6c3ee100ca4fe6399ac29441bece8df71783c7` — that revision only |
 | Latest refreshed screenshot set | PR #114 lineage: Discover, Evidence, Track, and Analytics were recaptured against a brand-new isolated synthetic DB after the PR #113 fixes; other images retain earlier capture revisions. |
-| Mainline at this docs refresh | `a9cdfd0` — includes later public-facing polish (#128), retryable error messaging (#129), and corrected zero-match Fit explanation (#130). Screenshots may differ slightly from those later polish commits. |
+| Mainline at this docs refresh | `ea13536` — includes polish (#128–#130), backend remediation (#140), and extension reliability (#141). Screenshots may differ slightly from those later polish commits. |
 | Release | https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0 |
 
 The tagged **v1.0.0** GitHub Release and its A8/A9/Phase 6 certification stay historical. Screenshots and copy in this folder are a **newer showcase revision** of later mainline UI. They do not move the `v1.0.0` tag and they do not inherit certification from `7b6c3ee`.

@@ -29,7 +29,7 @@ From there, CareerPilot can draft application materials, track the application f
 
 The engineering work I’m proudest of is behind the UI: deterministic scoring, evidence provenance, stale-data invalidation, user isolation, provider-failure handling, ATS identity, and regression testing around the places where an AI product can quietly become misleading.
 
-I tagged v1.0.0 after the release audit, and I’ve kept hardening mainline since then — including accessibility/UI polish, clearer retryable failure states, and better Fit explanations. I’m still iterating on it after this post.
+I tagged v1.0.0 after the release audit, and I’ve kept hardening mainline since then — including accessibility/UI polish, clearer retryable failure states, better Fit explanations, preference-skill evidence integrity, and Chrome extension reliability for Greenhouse/Lever Fill. I’m still iterating on it after this post.
 
 GitHub / release notes: https://github.com/ManpreetS2/CareerPilot
 
@@ -64,7 +64,7 @@ v1.0.0 **release-gate** automated counts (not a summed “all tests in the repo�
 - Extension: 109 tests
 - Mapped paths: 124 valid / 0 missing
 
-Do not publish a combined pytest+frontend+extension total unless you re-count every suite on the SHA you are citing and say exactly what was counted.
+Post-tag mainline counts move; re-count on the SHA you cite (for example extension tests on `ea13536` exceed the v1.0.0 gate count after #141). Do not publish a combined pytest+frontend+extension total unless you re-count every suite on that SHA and say exactly what was counted.
 
 ## Never say
 

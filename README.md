@@ -12,7 +12,7 @@ CareerPilot is a local/self-hostable workspace that turns a real resume into a g
 
 **Release:** [v1.0.0](https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0) · tagged `b73a983ed3605d498aa90070c3b5f786a73bc525` · certified runtime `7b6c3ee100ca4fe6399ac29441bece8df71783c7`
 
-**Current mainline:** active post-v1 hardening continues after the tag. The latest merged pass adds public-sharing polish and dark-mode accessibility (#128), clearer retryable AI/network failure states (#129), and Fit explanations that treat zero matched required skills as a gap rather than a positive match reason (#130). Those updates do **not** move the v1.0.0 tag or inherit the historical A8/A9/Phase 6 certification.
+**Current mainline:** active post-v1 hardening continues after the tag (latest showcased SHA `ea13536`). Merged since the tag: public-sharing polish and dark-mode accessibility (#128), clearer retryable AI/network failure states (#129), Fit explanations that treat zero matched required skills as a gap (#130), backend URL-identity / scheduler fairness / preference-skill evidence fix (#140), and Chrome extension reliability for react-select, tab races, and resume-attach partial fill (#141). Those updates do **not** move the v1.0.0 tag or inherit the historical A8/A9/Phase 6 certification.
 
 There is no hosted demo and no Chrome Web Store listing. This repository is **source-visible** for inspection; it is not open source. The screenshots below are a synthetic showcase capture from later mainline development; they are representative of the workflow but may differ slightly from the newest UI after subsequent polish. They are not the tagged v1.0.0 tree and they do not recertify A8/A9/Phase 6. LICENSE does not grant permission to run, copy, or deploy CareerPilot without prior written permission from the applicable copyright holder(s). See [License and source use](#license-and-source-use).
 
@@ -25,9 +25,10 @@ There is no hosted demo and no Chrome Web Store listing. This repository is **so
 - **Human-approved materials** — generated bullets remain drafts until you confirm eligibility.
 - **Provenance / staleness** — fingerprint changes invalidate Fit, Match Evidence, and reviewed packages instead of reusing them.
 - **User-scoped private data** — scores, tracker, analytics, saved searches, and resume versions do not leak across accounts.
-- **Safe Greenhouse/Lever Fill** — unpacked Chrome side panel, ATS posting identity, truthful resume attachment.
+- **Safe Greenhouse/Lever Fill** — unpacked Chrome side panel, ATS posting identity, truthful resume attachment; failed attach still fills safe text fields with a manual-upload warning.
 - **Never auto-submits** — EEO, terms, and Submit stay human. Tracker `applied` is recorded by you.
 - **Honest failure states** — provider outages and lost connections surface retryable user-facing messages instead of pretending a generation step succeeded.
+- **Preference ≠ resume evidence** — skill preferences stay on preferences; they do not inflate Fit matched skills.
 
 ## Product workflow
 
@@ -147,6 +148,8 @@ CareerPilot v1 is an authenticated **local/self-hostable** product. It is not a 
 - Public-sharing polish: favicon + social preview metadata, dark-mode text contrast fixes, and a cleaner Track card layout
 - Retryable AI/network errors use user-facing recovery messages; internal/provider details are not exposed
 - Fit explanation copy keeps zero required-skill matches under gaps, not under “Why you match”
+- Preference-only skills stay off `Candidate.skills` so Fit cannot treat them as resume evidence (#140)
+- Extension Fill: Greenhouse react-select option IDs, tab/document injection guards, and resume-attach failure continues safe text fill (#141)
 
 Ordinary page loads for Overview, Discover, Job Detail, Prepare, Track, Analytics, Profile, Resume, Settings, and Career Growth do not score a job, extract requirements, generate materials, approve, scout, or create a resume version by themselves. Career Growth and Analytics only read stored evidence. Find Jobs persists a deterministic fit score (`score_job`) for each scoreable listing and does not call an LLM. Calculate Fit, Generate Materials, Prepare Interview, Approve, Save Resume Version, and extension Fill stay explicit. Approval still requires the grounded/current-owner gate and eligibility confirmation.
 

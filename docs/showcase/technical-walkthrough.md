@@ -22,9 +22,11 @@ Generated text is grounded in stored evidence, or it is marked as an explicit `g
 
 ## Extension
 
-The unpacked Chrome side panel talks to the local API. Greenhouse and Lever identity uses ATS posting IDs, not fuzzy title/company matching. Fill assists mapped fields only. EEO/demographic and terms/privacy stay manual. Resume attachment is verified from the live Resume/CV input or widget after **this** attempt; a matching filename, a Cover Letter field, or an unrelated same-named file is not proof. If the page blocks programmatic attach, the panel says to upload the file yourself.
+The unpacked Chrome side panel talks to the local API. Greenhouse and Lever identity uses ATS posting IDs, not fuzzy title/company matching. Fill assists mapped fields only, including Greenhouse react-select widgets with correct option-id scoping. EEO/demographic and terms/privacy stay manual. Resume attachment is verified from the live Resume/CV input or widget after **this** attempt; a matching filename, a Cover Letter field, or an unrelated same-named file is not proof. If the page blocks programmatic attach, the panel warns clearly and still fills safe text fields. Injections re-check tab id, URL, and document identity so a mid-fill navigation cannot write into the wrong page.
 
 CareerPilot never calls submit. The human reviews the ATS form and presses Submit.
+
+Skill preferences stay on preferences only. They must not be merged into `Candidate.skills`, or Fit would treat preference-only entries as resume evidence.
 
 ## What v1 actually certified
 
