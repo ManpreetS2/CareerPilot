@@ -2,6 +2,8 @@
 
 CareerPilot is **one local/self-hostable application**. The boxes below are process layers, not separately deployed services and not a hosted SaaS.
 
+Presentation export: [`architecture/careerpilot-architecture.svg`](./architecture/careerpilot-architecture.svg) · editable source: [`architecture/careerpilot-architecture.mmd`](./architecture/careerpilot-architecture.mmd)
+
 ```mermaid
 flowchart TB
   browser["Browser"]

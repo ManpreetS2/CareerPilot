@@ -211,6 +211,10 @@ def main() -> int:
         if page.locator(f"[title='{SHOWCASE_EMAIL}']").count() == 0:
             raise SystemExit("Showcase capture refused: UI session is not the synthetic showcase account.")
 
+        page.goto(f"{base}/dashboard", wait_until="networkidle")
+        page.wait_for_timeout(400)
+        page.screenshot(path=str(out / "00-dashboard.png"), full_page=False)
+
         page.goto(f"{base}/profile", wait_until="networkidle")
         page.wait_for_timeout(300)
         page.screenshot(path=str(out / "02-profile-readiness.png"), full_page=False)
@@ -224,6 +228,9 @@ def main() -> int:
         page.screenshot(path=str(out / "03-discover.png"), full_page=False)
 
         page.goto(f"{base}/jobs/{job_id}", wait_until="networkidle")
+        page.wait_for_timeout(400)
+        page.screenshot(path=str(out / "03b-job-detail.png"), full_page=False)
+
         page.get_by_role("tab", name="Evidence").click()
         page.get_by_test_id("match-evidence").wait_for()
         # Show the *actual supporting résumé text*, not merely the "Satisfied"
@@ -287,8 +294,39 @@ def main() -> int:
         page.screenshot(path=str(out / MOCK_SCREENSHOT), full_page=False)
 
         browser.close()
+
+    _export_portfolio_webps(out)
     print(f"Wrote screenshots to {out}")
     return 0
+
+
+def _export_portfolio_webps(out: Path) -> None:
+    """Write the eight recruiter-facing WebP names from capture PNGs."""
+    try:
+        from PIL import Image
+    except ImportError:
+        print("Pillow unavailable; skipped WebP portfolio export", flush=True)
+        return
+
+    mapping = {
+        "01-overview.webp": "00-dashboard.png",
+        "02-discover.webp": "03-discover.png",
+        "03-job-detail.webp": "03b-job-detail.png",
+        "04-match-evidence.webp": "04-match-evidence.png",
+        "05-prepare.webp": "05-prepare.png",
+        "06-tracker.webp": "06-track.png",
+        "07-analytics.webp": "06b-analytics.png",
+        "08-extension.webp": MOCK_SCREENSHOT,
+    }
+    for webp_name, png_name in mapping.items():
+        src = out / png_name
+        if not src.is_file():
+            raise SystemExit(f"Missing capture PNG required for {webp_name}: {png_name}")
+        image = Image.open(src).convert("RGB")
+        image.save(out / webp_name, "WEBP", quality=82, method=6)
+        twin = out / webp_name.replace(".webp", ".png")
+        if twin.resolve() != src.resolve():
+            image.save(twin, "PNG", optimize=True)
 
 
 if __name__ == "__main__":

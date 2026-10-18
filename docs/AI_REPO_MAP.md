@@ -45,7 +45,7 @@
 | Release readiness report | `docs/FINAL_RELEASE_READINESS_REPORT.md` | n/a |
 | CI/release gate | `.github/workflows/ci.yml`, `.github/workflows/security.yml`, `docs/V1_RELEASE_CHECKLIST.md`, `docs/CI_SUPPLY_CHAIN.md` | CI + Gitleaks + manual checklist |
 | Python dependency policy | `docs/PYTHON_DEPENDENCY_REPRODUCIBILITY.md` | n/a |
-| Showcase screenshots / demo seed | `docs/showcase/README.md`, `scripts/seed_showcase_demo.py`, `scripts/capture_showcase_screenshots.py` | `tests/test_seed_showcase_demo.py`, `tests/test_capture_showcase_screenshots.py` |
+| Showcase screenshots / demo seed / demo video | `docs/showcase/README.md`, `docs/showcase/portfolio-summary.md`, `docs/showcase/architecture/`, `scripts/seed_showcase_demo.py`, `scripts/capture_showcase_screenshots.py`, `scripts/produce_showcase_demo.py` | `tests/test_seed_showcase_demo.py`, `tests/test_capture_showcase_screenshots.py` |
 ## 2. Top-Level Architecture
 
 ```text

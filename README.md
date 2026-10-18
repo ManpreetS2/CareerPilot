@@ -2,7 +2,7 @@
 
 Grounded job search. Human-approved applications.
 
-CareerPilot is a local/self-hostable workspace that turns a real resume into a grounded profile, ranks jobs with explainable Fit, and drafts application materials that stay drafts until you approve them. An unpacked Chrome extension can assist Greenhouse and Lever forms. CareerPilot never submits an application. You review the ATS form and press Submit.
+CareerPilot is a local/self-hostable engineering project: FastAPI + React/TypeScript + SQLite + an unpacked Chromium extension. It turns a résumé into a grounded candidate profile, ranks jobs with deterministic explainable Fit, drafts application materials that stay drafts until you approve them, and can assist Greenhouse/Lever forms — without ever submitting an application.
 
 [![v1.0.0](https://img.shields.io/github/v/release/ManpreetS2/CareerPilot)](https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0)
 [![CI](https://github.com/ManpreetS2/CareerPilot/actions/workflows/ci.yml/badge.svg)](https://github.com/ManpreetS2/CareerPilot/actions/workflows/ci.yml)
@@ -12,11 +12,13 @@ CareerPilot is a local/self-hostable workspace that turns a real resume into a g
 
 **Release:** [v1.0.0](https://github.com/ManpreetS2/CareerPilot/releases/tag/v1.0.0) · tagged `b73a983ed3605d498aa90070c3b5f786a73bc525` · certified runtime `7b6c3ee100ca4fe6399ac29441bece8df71783c7`
 
-**Current mainline:** active post-v1 hardening continues after the tag (latest showcased SHA `ea13536`). Merged since the tag: public-sharing polish and dark-mode accessibility (#128), clearer retryable AI/network failure states (#129), Fit explanations that treat zero matched required skills as a gap (#130), backend URL-identity / scheduler fairness / preference-skill evidence fix (#140), and Chrome extension reliability for react-select, tab races, and resume-attach partial fill (#141). Those updates do **not** move the v1.0.0 tag or inherit the historical A8/A9/Phase 6 certification.
+**Portfolio showcase:** [~85s demo video](docs/showcase/video/careerpilot-demo.mp4) · [architecture diagram](docs/showcase/architecture/careerpilot-architecture.svg) · [portfolio summary](docs/showcase/portfolio-summary.md) · [screenshot package](docs/showcase/README.md)
 
-There is no hosted demo and no Chrome Web Store listing. This repository is **source-visible** for inspection; it is not open source. The screenshots below are a synthetic showcase capture from later mainline development; they are representative of the workflow but may differ slightly from the newest UI after subsequent polish. They are not the tagged v1.0.0 tree and they do not recertify A8/A9/Phase 6. LICENSE does not grant permission to run, copy, or deploy CareerPilot without prior written permission from the applicable copyright holder(s). See [License and source use](#license-and-source-use).
+**Current mainline:** post-v1 hardening continues after the tag (showcase baseline `9318c27`, including #140–#143). Those updates do **not** move the v1.0.0 tag or inherit the historical A8/A9/Phase 6 certification.
 
-![Discover workspace showing two fictional internships with distinct verified Fit scores](docs/showcase/screenshots/03-discover.png)
+There is no hosted demo and no Chrome Web Store listing. This repository is **source-visible** for inspection; it is not open source. Screenshots and the demo video use isolated synthetic data (`demo.candidate@example.com`, fictional employers). They are not the tagged v1.0.0 tree and they do not recertify A8/A9/Phase 6. LICENSE does not grant permission to run, copy, or deploy CareerPilot without prior written permission from the applicable copyright holder(s). See [License and source use](#license-and-source-use).
+
+![Discover workspace showing two fictional internships with distinct verified Fit scores](docs/showcase/screenshots/02-discover.webp)
 
 ## Why CareerPilot is different
 
@@ -36,17 +38,15 @@ There is no hosted demo and no Chrome Web Store listing. This repository is **so
 Profile → Discover → Analyze → Prepare → Track
 ```
 
-![Profile readiness with identity, grounded evidence, and target role marked Ready](docs/showcase/screenshots/02-profile-readiness.png)
+![Overview dashboard with synthetic Jordan Avery matches and profile readiness](docs/showcase/screenshots/01-overview.webp)
 
-![Synthetic Harborline Evidence drawer citing Python from the fictional résumé](docs/showcase/screenshots/04-match-evidence.png)
+![Synthetic Harborline Evidence drawer citing Python from the fictional résumé](docs/showcase/screenshots/04-match-evidence.webp)
 
-![Synthetic Harborline requirements: Python, SQL and FastAPI supported; preferred Docker has insufficient candidate evidence](docs/showcase/screenshots/04b-match-gap.png)
+![Prepare page with illustrative seeded Harborline materials and human approval](docs/showcase/screenshots/05-prepare.webp)
 
-![Prepare page with illustrative seeded Harborline materials and human approval on the same page](docs/showcase/screenshots/05-prepare.png)
+![Illustrative Fill boundary mock — not a live employer ATS. EEO left manual; Submit not clicked. Live Greenhouse/Lever Fill was certified separately on Chrome 152.](docs/showcase/screenshots/08-extension.webp)
 
-![Illustrative compatibility mock — not the extension runtime. Assisted fields filled, EEO left manual, Submit not clicked. Live Greenhouse/Lever Fill was separately certified on Chrome 152.](docs/showcase/screenshots/08-assisted-fill-boundary-mock.png)
-
-More screenshots, demo scripts, and architecture: [`docs/showcase/README.md`](docs/showcase/README.md).
+Full set (Overview → Extension), demo video, and capture notes: [`docs/showcase/README.md`](docs/showcase/README.md).
 
 ## Product destinations
 
@@ -85,6 +85,8 @@ Resume
 
 These are layers inside **one local application**, not separately deployed microservices.
 
+![CareerPilot architecture: React frontend and Chromium side panel talk to a local FastAPI backend backed by SQLite; Fit is deterministic; AI providers are optional for extract/materials](docs/showcase/architecture/careerpilot-architecture.svg)
+
 ```mermaid
 flowchart LR
   browser[Browser] --> ui[React / Vite]
@@ -96,7 +98,7 @@ flowchart LR
   ats --> human[Human reviews and presses Submit]
 ```
 
-Shared job catalog vs user-scoped private records, deterministic Fit vs provider-backed extract/materials, and job sources: [`docs/showcase/architecture.md`](docs/showcase/architecture.md).
+Editable Mermaid source, shared vs private data, and deterministic vs provider-backed paths: [`docs/showcase/architecture/`](docs/showcase/architecture/) and [`docs/showcase/architecture.md`](docs/showcase/architecture.md).
 
 | Layer | Stack |
 | --- | --- |
