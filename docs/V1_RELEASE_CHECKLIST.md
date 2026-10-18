@@ -34,6 +34,8 @@ Phase 8 tagging is done. Do not recreate or move `v1.0.0`.
 
 Post-tag work is documentation/showcase and separately triaged maintenance (`docs/showcase/post-v1-maintenance-triage.md`). Do not claim a hosted SaaS. Do not claim every ATS is supported.
 
+**Portfolio/mainline refresh (2026-10-16):** main at `ea13536` includes post-tag public-facing polish (#128), retryable AI/network failure messaging (#129), corrected Fit explanation text for zero required-skill matches (#130), backend URL-identity / fairness / preference-skill evidence remediation (#140), and Chrome extension reliability (#141). CI and Security passed on the #140/#141 merge commits. These commits make the portfolio/demo experience stronger; they do **not** move the v1.0.0 tag or inherit A8/A9/Phase 6 certification.
+
 Dependabot dependency-floor/group updates opened after the release candidate are **post-v1** unless they fix a current high/critical issue on the shipped tree.
 
 ## Release invariants
