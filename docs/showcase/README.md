@@ -52,7 +52,15 @@ PNG originals remain alongside for archival capture. See [screenshot-inventory.m
 
 ## Demo video
 
-[`video/careerpilot-demo.mp4`](./video/careerpilot-demo.mp4) — Playwright-captured real UI + FFmpeg edit (title cards, captions, soft fades). Sequence: profile → discover → evidence → prepare → track → analytics → illustrative Fill boundary → stack/GitHub close. Does **not** claim applications were submitted or that the Fill scene is a live employer page.
+[`video/careerpilot-demo.mp4`](./video/careerpilot-demo.mp4) — ~72s, 1920×1080, 30 fps, dark-theme product demo.
+
+Production notes (v2 redesign):
+
+- Capture at 2560×1440 from the real app (synthetic showcase DB only)
+- Continuous authenticated session (login never shown); guest landing recorded separately
+- Scripted mouse moves/clicks/scrolls; cursor burned from a motion log (Playwright video has no OS cursor)
+- Soft push-ins, brief Inter callouts, dimmed closing plate — not permanent caption bars
+- Extension beat uses the labeled illustrative fixture, not a live employer ATS
 
 Recreate:
 
