@@ -6,14 +6,18 @@ strings into Candidate.skills. Fit treats Candidate.skills as resume-grounded
 evidence, so preference-only entries could inflate matched skills.
 
 This script never opens data/careerpilot.db unless you pass that path
-explicitly. Default mode is dry-run JSON report. --apply removes only
-high-confidence preference-only skills (present in skill_preferences, present
-in Candidate.skills, and absent from other candidate evidence text). Ambiguous
-overlaps require human review and are never deleted automatically.
+explicitly. Default mode is a dry-run JSON report. Intersections between
+preferred and candidate skills are SUSPECTS, not proof that a skill is invalid:
+resume skills may be listed in Candidate.skills without being repeated in
+experience or projects. Never remove skills based only on that heuristic.
+--apply requires --confirm AND an explicit per-candidate skill approval file,
+and never removes unapproved or ambiguous skills. Work on an isolated copy.
 
 Usage:
   python scripts/audit_preference_skill_contamination.py --database /tmp/qa.sqlite
-  python scripts/audit_preference_skill_contamination.py --database /tmp/qa.sqlite --apply --confirm
+  # After manual resume verification, write /tmp/approved.json containing:
+  # [{"candidate_id": 123, "skill": "Kubernetes"}]
+  python scripts/audit_preference_skill_contamination.py --database /tmp/qa.sqlite --apply --confirm --approved-removals /tmp/approved.json
 """
 
 from __future__ import annotations
@@ -121,7 +125,17 @@ def _preferences_for_candidate(db: Session, candidate: Candidate) -> list[str]:
     return prefs
 
 
-def audit_database(db: Session, *, apply: bool = False) -> AuditReport:
+def audit_database(
+    db: Session,
+    *,
+    apply: bool = False,
+    approved_removals: set[tuple[int, str]] | None = None,
+) -> AuditReport:
+    # No bulk-apply heuristic. Candidate.skills can be grounded in a resume
+    # even when experience/projects do not repeat it.
+    if apply and not approved_removals:
+        raise ValueError("Apply requires an explicit nonempty candidate/skill approval set.")
+    approvals = {(int(candidate_id), _normalize(skill)) for candidate_id, skill in (approved_removals or set())}
     suspects: list[SkillFinding] = []
     ambiguous: list[SkillFinding] = []
     removed: list[SkillFinding] = []
@@ -155,7 +169,7 @@ def audit_database(db: Session, *, apply: bool = False) -> AuditReport:
                 keep.append(skill)
                 continue
             suspects.append(finding)
-            if apply:
+            if apply and (candidate.id, key) in approvals:
                 changed = True
                 removed.append(
                     SkillFinding(
@@ -176,6 +190,14 @@ def audit_database(db: Session, *, apply: bool = False) -> AuditReport:
                 # Evidence rows become stale on the next score path automatically.
                 fingerprint_for_candidate(db, candidate, candidate.user_id)
     if apply:
+        removed_keys = {(row.candidate_id, _normalize(row.skill)) for row in removed}
+        missing = approvals - removed_keys
+        if missing:
+            db.rollback()
+            raise ValueError(
+                "Approved removal entries did not match eligible suspect skills; no changes committed: "
+                + repr(sorted(missing))
+            )
         db.commit()
 
     return AuditReport(
@@ -187,7 +209,9 @@ def audit_database(db: Session, *, apply: bool = False) -> AuditReport:
         removed=removed,
         users_with_removals=sorted(set(users_with_removals)),
         note=(
-            "Ambiguous overlaps are never deleted automatically. "
+            "Every overlap requires review against the original resume; missing "
+            "profile-text evidence alone cannot prove a skill is invalid. "
+            "Only explicitly approved suspect skills are removable. "
             "After --apply, Fit/Evidence recompute via candidate fingerprint mismatch "
             "on the next score path; no MatchScore rows are force-deleted."
         ),
@@ -214,7 +238,12 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="SQLite path to audit. Use an isolated copy for writes.",
     )
-    parser.add_argument("--apply", action="store_true", help="Remove high-confidence preference-only skills.")
+    parser.add_argument("--apply", action="store_true", help="Remove only explicitly approved candidate/skill entries.")
+    parser.add_argument(
+        "--approved-removals",
+        type=Path,
+        help='JSON list of reviewed removals: [{"candidate_id": 123, "skill": "Kubernetes"}]. Required with --apply.',
+    )
     parser.add_argument(
         "--confirm",
         action="store_true",
@@ -225,11 +254,42 @@ def main(argv: list[str] | None = None) -> int:
     db_path = _refuse_production_apply(args.database, apply=args.apply, confirm=args.confirm)
     if not db_path.is_file():
         raise SystemExit(f"Database not found: {db_path}")
+    if args.apply and args.approved_removals is None:
+        raise SystemExit("--apply requires --approved-removals after manually verifying original resume evidence.")
+    if args.approved_removals is not None and not args.apply:
+        raise SystemExit("--approved-removals is only used together with --apply --confirm.")
+
+    approvals: set[tuple[int, str]] | None = None
+    if args.approved_removals is not None:
+        try:
+            payload = json.loads(args.approved_removals.read_text(encoding="utf-8"))
+            if not isinstance(payload, list) or not payload:
+                raise ValueError("Expected a nonempty JSON array.")
+            approvals = set()
+            for entry in payload:
+                if (
+                    not isinstance(entry, dict)
+                    or set(entry) != {"candidate_id", "skill"}
+                    or type(entry["candidate_id"]) is not int
+                    or entry["candidate_id"] <= 0
+                    or not isinstance(entry["skill"], str)
+                    or not _normalize(entry["skill"])
+                ):
+                    raise ValueError('Entries must be {"candidate_id": positive integer, "skill": nonempty string}.')
+                key = (entry["candidate_id"], _normalize(entry["skill"]))
+                if key in approvals:
+                    raise ValueError("Duplicate approved removal entry.")
+                approvals.add(key)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            raise SystemExit(f"Invalid --approved-removals file: {exc}") from exc
 
     engine = create_engine(f"sqlite:///{db_path.as_posix()}")
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with SessionLocal() as db:
-        report = audit_database(db, apply=args.apply)
+        try:
+            report = audit_database(db, apply=args.apply, approved_removals=approvals)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
     engine.dispose()
 
     payload = asdict(report)
