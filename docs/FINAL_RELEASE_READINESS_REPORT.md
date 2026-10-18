@@ -13,7 +13,7 @@ Post-merge main at `ea13536` includes backend remediation (#140) and Chrome exte
 
 1. Showcase docs PR #131 should land (rebased, mergeable) so GitHub README/LinkedIn copy match `ea13536`.
 2. Do **not** claim a fresh live A8 ATS recertification — interactive Greenhouse/Lever Fill on employer pages was not fully re-run in a human Chrome session this sprint (fixture Chromium + GET-only live probe only).
-3. Operators with a pre-#140 personal DB should dry-run the preference-skill audit (#142) before trusting historical Fit numbers.
+3. Operators with a pre-#140 personal DB should dry-run the preference-skill audit (#142) on a copy before trusting historical Fit numbers. Profile-text absence is a *suspect*, not proof of invented skills; removals require manually checking the original resume and supplying an exact per-candidate approved-removals JSON file.
 4. Leave broad Dependabot groups (#138/#139) for a separate maintenance window.
 
 ## 2. Confirmed bugs discovered (this sprint)
@@ -36,7 +36,7 @@ Pre-existing issues already fixed on main before this report:
 | Concern | PR | Contents |
 | --- | --- | --- |
 | Extension Chromium coverage | [QA branch / pending PR](https://github.com/ManpreetS2/CareerPilot/compare/main...cursor/release-readiness-qa-e27c) | Expanded `tests/test_extension_chromium_integration.py` (permission ungated start, attach failure vs safe text, Lever no-submit/EEO, live GET probe notes) |
-| Historical Fit integrity | [#142](https://github.com/ManpreetS2/CareerPilot/pull/142) | `scripts/audit_preference_skill_contamination.py` dry-run / opt-in `--apply --confirm` |
+| Historical Fit integrity | [#142](https://github.com/ManpreetS2/CareerPilot/pull/142) | `scripts/audit_preference_skill_contamination.py` dry-run / opt-in `--apply --confirm --approved-removals reviewed.json`; only explicitly reviewed candidates/skills can be removed |
 | Showcase docs | [#131](https://github.com/ManpreetS2/CareerPilot/pull/131) | Rebased onto `ea13536`; LinkedIn/README provenance for #140/#141 |
 
 No production `data/careerpilot.db` mutations. No `v1.0.0` tag moves. No paid LLM calls.
@@ -72,10 +72,10 @@ Capture screenshots for any failure; do not submit applications.
 
 - Root cause (pre-#140): preference save merged `skill_preferences` into `Candidate.skills`.
 - Current code path: merge removed; regression in `tests/test_preference_skills_not_resume_evidence.py`.
-- Recovery tool (#142): classifies intersection skills as `preference_only_suspect` (no other profile evidence) vs `ambiguous_overlap` (also in experience/projects/etc.).
-- Ambiguous overlaps are **never** auto-deleted.
-- `--apply --confirm` only removes high-confidence preference-only skills; Fit restales via candidate fingerprint.
-- Production DB was **not** opened. Operators should copy with `scripts/make_temp_qa_db.py` (or an authorized copy path that is not silently assumed contaminated) before auditing.
+- Recovery tool (#142): classifies intersection skills as `preference_only_suspect` (no other profile evidence) vs `ambiguous_overlap` (also in experience/projects/etc.). **Neither classification proves the original resume omitted the skill**; absence from project/experience text is not sufficient evidence.
+- Dry-run never deletes data. Apply requires `--apply --confirm --approved-removals reviewed.json`, where the JSON lists *manually verified* candidate IDs and skills after comparing the original resume. Unlisted skills and ambiguous overlaps are preserved, and unmatched approvals abort the transaction.
+- Fit restales via candidate fingerprint after explicit edits; no scores are force-deleted.
+- Production DB was **not** opened. Operators should copy with `scripts/make_temp_qa_db.py` (or an authorized copy path that is not silently assumed contaminated) before auditing. Never automatically apply to the original database.
 
 ## 6. Privacy and security verification
 
@@ -126,7 +126,7 @@ No high/critical production CVE was identified that requires emergency dependenc
 ## 9. Remaining limitations / blocked checks
 
 - Interactive live Greenhouse/Lever Fill in a human Chrome profile: **unverified this sprint** (GET-only reachability ≠ Fill certification).
-- Personal/historical `data/careerpilot.db` contamination: **unknown until operator dry-run** of #142.
+- Personal/historical `data/careerpilot.db` contamination: **unknown until operator dry-run** of #142 on a copy and comparison against source resumes; findings are not proof of contamination.
 - Showcase screenshots are synthetic / may lag newest UI polish.
 - Not a hosted SaaS; no Chrome Web Store listing; Assisted Fill is Greenhouse/Lever only.
 - Broad Dependabot groups deferred.
