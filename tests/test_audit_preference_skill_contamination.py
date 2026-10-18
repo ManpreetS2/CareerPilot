@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+
+import pytest
 import sys
 from pathlib import Path
 
@@ -66,7 +68,15 @@ def test_apply_removes_only_preference_only_and_deflates_fit(isolated_client) ->
         before = score_job(db, "contam-job", client.test_user_id)
         assert "Kubernetes" in before.matched_skills
 
-        report = audit_database(db, apply=True)
+        # No heuristic cleanup without a human-verified allowlist.
+        with pytest.raises(ValueError, match="approval"):
+            audit_database(db, apply=True)
+
+        report = audit_database(
+            db,
+            apply=True,
+            approved_removals={(candidate.id, "Kubernetes")},
+        )
         assert {row.skill for row in report.removed} == {"Kubernetes"}
         assert report.users_with_removals == [client.test_user_id]
 
@@ -109,3 +119,67 @@ def test_cli_refuses_apply_without_confirm(tmp_path: Path) -> None:
     payload = json.loads(dry.stdout)
     assert payload["mode"] == "dry-run"
     assert payload["candidates_scanned"] == 0
+
+def test_overlap_without_profile_text_is_only_a_suspect_until_reviewed(isolated_client) -> None:
+    client, SessionLocal = isolated_client
+    with SessionLocal() as db:
+        candidate = insert_candidate(db, user_id=client.test_user_id)
+        # A real resume can list skills without repeating them in project bullets.
+        candidate.skills = ["Kubernetes", "Python"]
+        candidate.experience = [{"company": "Acme", "bullets": ["Built internal systems"]}]
+        db.add(
+            TargetPreference(
+                user_id=client.test_user_id,
+                candidate_id=candidate.id,
+                target_roles=["Software Engineer"],
+                skill_preferences=["Kubernetes"],
+            )
+        )
+        db.commit()
+
+        report = audit_database(db, apply=False)
+        assert {row.skill for row in report.preference_only_suspects} == {"Kubernetes"}
+
+        with pytest.raises(ValueError, match="approval"):
+            audit_database(db, apply=True)
+
+        with pytest.raises(ValueError, match="did not match eligible"):
+            audit_database(db, apply=True, approved_removals={(candidate.id, "Python")})
+
+        db.refresh(candidate)
+        assert candidate.skills == ["Kubernetes", "Python"]
+
+
+def test_cli_requires_reviewed_removals_file_even_with_confirm(tmp_path: Path) -> None:
+    from sqlalchemy import create_engine
+
+    from backend.db import models as _models  # noqa: F401
+    from backend.db.database import Base
+
+    db_path = tmp_path / "audit.sqlite"
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    missing_allowlist = subprocess.run(
+        [sys.executable, str(SCRIPT), "--database", str(db_path), "--apply", "--confirm"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert missing_allowlist.returncode != 0
+    assert "--approved-removals" in (missing_allowlist.stdout + missing_allowlist.stderr)
+
+    approvals = tmp_path / "reviewed.json"
+    approvals.write_text('[{"candidate_id": 999, "skill": "Kubernetes"}]', encoding="utf-8")
+    invalid_targets = subprocess.run(
+        [
+            sys.executable, str(SCRIPT), "--database", str(db_path),
+            "--apply", "--confirm", "--approved-removals", str(approvals),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert invalid_targets.returncode != 0
+    assert "no changes committed" in (invalid_targets.stdout + invalid_targets.stderr)
