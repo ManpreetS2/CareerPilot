@@ -1,0 +1,64 @@
+%% CareerPilot architecture — one local/self-hostable application
+%% Not microservices. Not hosted SaaS. Not auto-submit.
+flowchart TB
+  subgraph client["Client"]
+    browser["Browser"]
+    ui["React / TypeScript / Vite frontend"]
+    ext["Unpacked Chromium side panel"]
+  end
+
+  subgraph server["Local CareerPilot process"]
+    api["FastAPI backend"]
+    parse["Résumé parse + candidate profile"]
+    ingest["Job ingestion + job intelligence"]
+    fit["Deterministic Fit scoring"]
+    materials["Application materials + approval"]
+    track["Tracker + analytics"]
+  end
+
+  db[("SQLite via SQLAlchemy")]
+
+  subgraph catalog["Shared catalog"]
+    jobs["JobRecord postings"]
+  end
+
+  subgraph private["User-scoped private records"]
+    profile["Candidate, preferences, scores"]
+    pkgs["Materials, approval, resume versions"]
+    rows["Tracker, analytics, saved searches"]
+  end
+
+  subgraph sources["Job sources"]
+    gh["Greenhouse"]
+    lever["Lever"]
+    others["Remotive · Adzuna · RemoteOK · Jobicy · Himalayas"]
+    manual["Approved manual URL ingestion"]
+  end
+
+  subgraph llm["AI providers — not Fit"]
+    ollama["Ollama"]
+    gemini["Gemini"]
+    anthropic["Anthropic"]
+    openai["OpenAI"]
+  end
+
+  ats["Greenhouse / Lever form assistance"]
+  human["Human reviews form and presses Submit"]
+
+  browser --> ui
+  ui -->|"HTTP + session cookie"| api
+  api --> parse
+  api --> ingest
+  api --> fit
+  api --> materials
+  api --> track
+  api --> db
+  db --> catalog
+  db --> private
+  sources --> ingest
+  api -.->|"extract / intelligence / materials / interview feedback"| llm
+  ext -->|"local FastAPI + session header"| api
+  api --> ext
+  ext --> ats
+  ats --> human
+  fit -->|"qualification + preference alignment from stored evidence"| private
