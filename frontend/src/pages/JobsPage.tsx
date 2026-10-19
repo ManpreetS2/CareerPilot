@@ -731,4 +731,3 @@ export function JobsPage() {
     </div>
   );
 }
-
