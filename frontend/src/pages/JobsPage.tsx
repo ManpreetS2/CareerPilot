@@ -425,46 +425,22 @@ export function JobsPage() {
   }
 
   return (
-    <div className="relative space-y-6">
+    <div className="relative space-y-4">
       <DashboardAtmosphere showGlobe={false} />
-      <div className="relative z-[1]">
+      <div className="relative z-[1] space-y-4">
       <PageHeader
-        title="Jobs"
-        description="Discover what's available, then open Matches for your personal ranking. Verified Fit appears only after CareerPilot reads the complete posting."
+        title="Discover"
+        description="Search and shortlist roles. Open Matches for ranking. Verified Fit appears only after the full posting is read."
         actions={
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="btn-primary btn-stable"
-              onClick={() => submitSearch()}
-              disabled={scouting || scoutBlocked}
-              aria-busy={scouting}
-              data-testid="find-jobs-button"
-            >
-              <RefreshCw className={`h-4 w-4 ${scouting ? "animate-pulse" : ""}`} aria-hidden />
-              {scouting ? "Searching…" : "Find Jobs"}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
-                if (manualUrl.trim()) ingestMutation.mutate(manualUrl.trim());
-              }}
-              disabled={ingestMutation.isPending}
-            >
-              <Link2 className={`h-4 w-4 ${ingestMutation.isPending ? "animate-pulse" : ""}`} aria-hidden />
-              {ingestMutation.isPending ? "Adding…" : "Add Job URL"}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setSavedSearchesOpen(true)}
-              data-testid="saved-searches-button"
-            >
-              <Bell className="h-4 w-4" aria-hidden />
-              Saved Searches
-            </button>
-          </div>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setSavedSearchesOpen(true)}
+            data-testid="saved-searches-button"
+          >
+            <Bell className="h-4 w-4" aria-hidden />
+            Saved Searches
+          </button>
         }
       />
 
@@ -524,46 +500,76 @@ export function JobsPage() {
       ) : null}
 
       {!showMobileDetail ? (
-        <Glass variant="atmosphere" className="space-y-4 rounded-[var(--radius-lg)] p-4">
-          <NaturalSearchBar
-            value={draftSearch}
-            onChange={setDraftSearch}
-            onSubmit={submitSearch}
-            chips={chips}
-            disabled={scoutBlocked}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              className="input max-w-md"
-              placeholder="https://company.com/jobs/…"
-              value={manualUrl}
-              onChange={(event) => setManualUrl(event.target.value)}
-              aria-label="Manual job URL"
-            />
-            <button type="button" className="btn-secondary" onClick={() => setFiltersOpen(true)}>
-              <SlidersHorizontal className="h-4 w-4" aria-hidden />
-              Filters
+        <Glass variant="atmosphere" className="space-y-3 rounded-[var(--radius-lg)] p-3 sm:p-3.5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+            <div className="min-w-0 flex-1">
+              <NaturalSearchBar
+                value={draftSearch}
+                onChange={setDraftSearch}
+                onSubmit={submitSearch}
+                chips={chips}
+                disabled={scoutBlocked}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn-primary btn-stable shrink-0 sm:mt-0"
+              onClick={() => submitSearch()}
+              disabled={scouting || scoutBlocked}
+              aria-busy={scouting}
+              data-testid="find-jobs-button"
+            >
+              <RefreshCw className={`h-4 w-4 ${scouting ? "animate-pulse" : ""}`} aria-hidden />
+              {scouting ? "Searching…" : "Find Jobs"}
             </button>
-            <label className="min-w-0">
-              <span className="sr-only">Sort</span>
-              <select
-                className="input"
-                value={state.sort ?? "best_match"}
-                onChange={(event) => patch({ sort: event.target.value as JobsWorkspaceState["sort"], page: 1 })}
-                data-testid="jobs-sort"
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <input
+                className="input h-10 min-h-10 max-w-md flex-1 py-2"
+                placeholder="Paste job URL…"
+                value={manualUrl}
+                onChange={(event) => setManualUrl(event.target.value)}
+                aria-label="Manual job URL"
+              />
+              <button
+                type="button"
+                className="btn-secondary h-10 min-h-10"
+                onClick={() => {
+                  if (manualUrl.trim()) ingestMutation.mutate(manualUrl.trim());
+                }}
+                disabled={ingestMutation.isPending || !manualUrl.trim()}
               >
-                <option value="best_match">Best Match</option>
-                <option value="newest">Newest</option>
-                <option value="qualification">Highest Qualification Fit</option>
-                <option value="preference">Highest Preference Fit</option>
-              </select>
-            </label>
+                <Link2 className={`h-4 w-4 ${ingestMutation.isPending ? "animate-pulse" : ""}`} aria-hidden />
+                {ingestMutation.isPending ? "Adding…" : "Add URL"}
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="btn-secondary h-10 min-h-10" onClick={() => setFiltersOpen(true)}>
+                <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                Filters
+              </button>
+              <label className="min-w-0">
+                <span className="sr-only">Sort</span>
+                <select
+                  className="input h-10 min-h-10 py-2"
+                  value={state.sort ?? "best_match"}
+                  onChange={(event) => patch({ sort: event.target.value as JobsWorkspaceState["sort"], page: 1 })}
+                  data-testid="jobs-sort"
+                >
+                  <option value="best_match">Best Match</option>
+                  <option value="newest">Newest</option>
+                  <option value="qualification">Highest Qualification Fit</option>
+                  <option value="preference">Highest Preference Fit</option>
+                </select>
+              </label>
+            </div>
           </div>
         </Glass>
       ) : null}
 
       <div
-        className="inline-flex flex-wrap gap-1 rounded-2xl border border-border/80 bg-foreground/[0.03] p-1 backdrop-blur-md"
+        className="inline-flex flex-wrap gap-0.5 rounded-xl border border-border/80 bg-foreground/[0.03] p-0.5 backdrop-blur-md"
         role="tablist"
         aria-label="Jobs workspace"
       >
@@ -574,9 +580,9 @@ export function JobsPage() {
             role="tab"
             aria-selected={state.tab === tab.id}
             className={cn(
-              "rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors",
+              "rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors",
               state.tab === tab.id
-                ? "bg-gradient-to-r from-primary to-accent text-primary-foreground shadow-md shadow-primary/25"
+                ? "bg-gradient-to-r from-primary to-accent text-primary-foreground shadow-sm shadow-primary/20"
                 : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
             )}
             onClick={() => patch({ tab: tab.id, page: 1, selected: isDesktop ? state.selected : null })}
@@ -609,7 +615,7 @@ export function JobsPage() {
           action={
             state.tab === "saved" ? (
               <button type="button" className="btn-secondary" onClick={() => patch({ tab: "discover" })}>
-                Browse Discover
+                Browse roles
               </button>
             ) : chips.length > 0 ? (
               <button
@@ -642,8 +648,8 @@ export function JobsPage() {
           }
         />
       ) : listed.length === 0 && scouting ? null : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
-          <ul className="max-h-[70vh] space-y-2 overflow-y-auto pr-1" aria-label="Job results">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
+          <ul className="max-h-[70vh] space-y-1.5 overflow-y-auto pr-1" aria-label="Job results">
             {state.tab === "matches" && verifiedCount === 0 && potentialCount > 0 ? (
               <li className="rounded-[var(--radius-md)] border border-border/70 bg-surface/80 p-3 text-sm text-muted-foreground">
                 We haven&apos;t verified enough matches yet. Potential Matches are listed below.

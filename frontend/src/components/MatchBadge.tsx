@@ -47,7 +47,10 @@ export function MatchBadge({
   const verified = scoreKind === "verified";
   if (!verified) {
     return (
-      <span className="status-pill border border-border/70 bg-muted/80 text-muted-foreground">
+      <span
+        className="status-pill border border-border/70 bg-muted/80 text-muted-foreground"
+        title="Preliminary discovery rank — not Verified Fit"
+      >
         Potential Match
         {!compact && apply ? ` · ${apply}` : ""}
       </span>
@@ -63,12 +66,31 @@ export function MatchBadge({
 
   const tier = matchTier ? TIER_LABEL[matchTier] : null;
   const confidence = confidenceLevel ? CONFIDENCE_LABEL[confidenceLevel] : null;
+  const pct = Math.round(score);
+
+  if (compact) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <span className={`status-pill ${tone}`} title="Verified Fit — overall match percentage">
+          {pct}%{tier ? ` ${tier}` : " Verified Fit"}
+        </span>
+        {confidence ? (
+          <span
+            className="status-pill border border-border/70 bg-muted/60 text-muted-foreground"
+            title="How complete the posting evidence is for this score"
+          >
+            Conf. {confidence}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
 
   return (
-    <span className={`status-pill ${tone}`}>
-      {Math.round(score)}%{tier ? ` ${tier}` : " Verified Fit"}
-      {!compact && apply ? ` · ${apply}` : ""}
-      {!compact && confidence ? ` · ${confidence} confidence` : ""}
+    <span className={`status-pill ${tone}`} title="Verified Fit with recommendation and confidence">
+      {pct}%{tier ? ` ${tier}` : " Verified Fit"}
+      {apply ? ` · ${apply}` : ""}
+      {confidence ? ` · ${confidence} confidence` : ""}
     </span>
   );
 }

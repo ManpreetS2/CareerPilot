@@ -496,7 +496,7 @@ def run_browser_workflow() -> dict[str, int]:
                 before_materials_posts = len(materials_posts)
                 before_resume_posts = len(resume_posts)
                 page.goto(f"{base}/jobs")
-                expect(page.get_by_role("heading", name="Jobs", exact=True)).to_be_visible()
+                expect(page.get_by_role("heading", name="Discover", exact=True)).to_be_visible()
                 expect(page.get_by_test_id("jobs-profile-gate")).to_have_count(0)
                 expect(page.get_by_test_id("find-jobs-button")).to_be_enabled()
                 expect(page.get_by_role("button", name=JOB_TITLE)).to_be_visible()
