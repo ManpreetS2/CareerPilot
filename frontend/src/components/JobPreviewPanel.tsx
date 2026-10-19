@@ -72,7 +72,7 @@ export function JobPreviewPanel({
         {verified && match ? (
           <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-muted-foreground">Verified Match</dt>
+              <dt className="text-muted-foreground">Verified Fit</dt>
               <dd className="font-semibold">{Math.round(match.overall_score)}%</dd>
             </div>
             <div>

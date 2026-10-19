@@ -91,9 +91,9 @@ function isNavActive(item: NavItem, pathname: string): boolean {
 
 function navClass(isActive: boolean) {
   return cn(
-    "relative flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-all",
+    "relative flex min-h-10 items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors",
     isActive
-      ? "bg-primary/15 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--primary)_35%,transparent)]"
+      ? "bg-primary/12 text-foreground shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--primary)_40%,transparent)]"
       : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
   );
 }
@@ -137,10 +137,10 @@ function NavGroup({
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <nav aria-label="Primary" className="flex flex-col gap-4">
+    <nav aria-label="Primary" className="flex flex-col gap-3">
       <NavGroup items={WORKFLOW_NAV} onNavigate={onNavigate} />
       <div>
-        <p className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="mb-1.5 px-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           Account
         </p>
         <NavGroup items={SUPPORTING_NAV} onNavigate={onNavigate} />
@@ -256,9 +256,9 @@ export function AppShell() {
       </a>
       <CommandPalette />
 
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 p-3 lg:flex" data-testid="app-sidebar">
-        <Glass variant="atmosphere" className="flex h-full w-full flex-col rounded-[1.25rem] p-3">
-          <Link to="/dashboard" className="mb-5 flex items-center gap-2 px-1.5">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 p-2.5 lg:flex" data-testid="app-sidebar">
+        <Glass variant="atmosphere" className="flex h-full w-full flex-col rounded-[1.15rem] p-2.5">
+          <Link to="/dashboard" className="mb-4 flex items-center gap-2 px-1.5">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-primary to-accent text-[11px] font-semibold text-primary-foreground">
               CP
             </span>

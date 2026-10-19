@@ -95,17 +95,29 @@ export function ScoreAssembly({
     <div className="space-y-4" data-testid="score-assembly">
       <div className="flex flex-wrap items-end justify-between gap-3">
         {verified ? (
-          <motion.p
-            className="score-fluid font-display font-semibold tabular leading-none"
-            initial={skip ? false : { opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: motionDuration.emphasis, ease: motionEase.expressive, delay: skip ? 0 : 0.42 }}
-          >
-            {Math.round(match.overall_score)}
-            <span className="ml-1 text-lg text-muted-foreground">%</span>
-          </motion.p>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Verified Fit
+            </p>
+            <motion.p
+              className="score-fluid font-display font-semibold tabular leading-none"
+              initial={skip ? false : { opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: motionDuration.emphasis, ease: motionEase.expressive, delay: skip ? 0 : 0.42 }}
+              aria-label={`Verified Fit ${Math.round(match.overall_score)} percent`}
+            >
+              {Math.round(match.overall_score)}
+              <span className="ml-1 text-lg text-muted-foreground">%</span>
+            </motion.p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Overall match percentage · separate from Confidence below
+            </p>
+          </div>
         ) : (
-          <p className="font-display text-2xl font-semibold">Potential Match</p>
+          <div>
+            <p className="font-display text-2xl font-semibold">Potential Match</p>
+            <p className="mt-1 text-xs text-muted-foreground">Discovery rank only — not Verified Fit</p>
+          </div>
         )}
         <motion.div
           initial={skip ? false : { opacity: 0 }}

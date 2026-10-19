@@ -11,7 +11,8 @@
   --surface-secondary: #f1eef8;
   --surface-elevated: #ffffff;
   --muted: #ebe7f4;
-  --muted-foreground: #5a5568;
+  /* Darkened for WCAG AA body/secondary text on --background / cards */
+  --muted-foreground: #4a4558;
   --border: rgba(92, 72, 120, 0.14);
   --border-strong: rgba(92, 72, 120, 0.22);
   --primary: #7c3aed;
@@ -76,7 +77,8 @@
   --surface-secondary: #17112e;
   --surface-elevated: #1a1530;
   --muted: #1d1835;
-  --muted-foreground: #bbb7d3;
+  /* Brighter secondary text for AA contrast on dark surfaces */
+  --muted-foreground: #c9c4e0;
   --border: rgba(255, 255, 255, 0.12);
   --border-strong: rgba(255, 255, 255, 0.18);
   --primary: #8b5cf6;

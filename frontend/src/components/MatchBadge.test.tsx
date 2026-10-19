@@ -35,6 +35,7 @@ describe("MatchBadge", () => {
     expect(screen.getByText(/88% Strong Match/)).toBeInTheDocument();
     expect(screen.queryByText(/Strong Apply/)).not.toBeInTheDocument();
     expect(screen.queryByText(/High confidence/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Conf\. High/)).toBeInTheDocument();
   });
 
   it("shows apply recommendation and confidence in the detailed verified badge", () => {

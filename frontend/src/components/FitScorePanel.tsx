@@ -47,10 +47,11 @@ export function FitScorePanel({
           <h2 id="fit-score-heading" className="font-display text-2xl font-semibold">
             Fit score
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Scoring uses the stored candidate profile and a complete requirement profile when one
-            exists. Discover ranks with a fast preliminary score. Calculate Fit produces Verified
-            Fit after the full posting is read.
+          <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">Verified Fit %</span> is the overall match
+            after the full posting is read.{" "}
+            <span className="font-medium text-foreground">Confidence</span> reflects how complete
+            that evidence is. Discover may show a preliminary Potential Match before verification.
           </p>
         </div>
         <button
