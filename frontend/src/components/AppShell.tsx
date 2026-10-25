@@ -250,11 +250,12 @@ export function AppShell() {
   }
 
   return (
-    <div className="app-canvas min-h-screen bg-background" data-testid="app-shell">
+    <>
       <a href="#main" className="skip-link" data-testid="skip-to-content" onClick={focusMain}>
         Skip to content
       </a>
-      <CommandPalette />
+      <div className="app-canvas min-h-screen bg-background" data-testid="app-shell">
+        <CommandPalette />
 
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 p-2.5 lg:flex" data-testid="app-sidebar">
         <Glass variant="atmosphere" className="flex h-full w-full flex-col rounded-[1.15rem] p-2.5">
@@ -325,5 +326,6 @@ export function AppShell() {
         </div>
       </main>
     </div>
+    </>
   );
 }

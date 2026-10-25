@@ -13,10 +13,11 @@ export function AuthFrame({
   children: ReactNode;
 }) {
   return (
-    <div className="cp-atmosphere public-shell relative min-h-[100dvh] overflow-x-clip bg-background">
+    <>
       <a href="#auth-main" className="skip-link">
         Skip to form
       </a>
+      <div className="cp-atmosphere public-shell relative min-h-[100dvh] overflow-x-clip bg-background">
       <HeroAtmosphere />
       <div className="relative mx-auto grid min-h-[100dvh] w-full max-w-6xl lg:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
         <div className="relative hidden items-center px-8 py-12 lg:flex">
@@ -45,5 +46,6 @@ export function AuthFrame({
         </div>
       </div>
     </div>
+    </>
   );
 }
