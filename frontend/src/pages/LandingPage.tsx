@@ -35,10 +35,11 @@ export function LandingPage() {
   const { reducedMotion: reduce } = useTheme();
 
   return (
-    <div className="cp-atmosphere public-shell relative min-h-screen overflow-x-clip bg-background">
+    <>
       <a href="#main" className="skip-link">
         Skip to content
       </a>
+      <div className="cp-atmosphere public-shell relative min-h-screen overflow-x-clip bg-background">
       <section className="relative overflow-x-clip">
         <header className="safe-pad relative z-20 mx-auto flex max-w-7xl items-center justify-between gap-2 py-5 sm:px-6 md:gap-4 lg:px-8">
           <div className="flex min-w-0 items-center gap-2">
@@ -228,5 +229,6 @@ export function LandingPage() {
         </div>
       </footer>
     </div>
+    </>
   );
 }
